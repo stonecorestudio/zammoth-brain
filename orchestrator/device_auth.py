@@ -308,6 +308,11 @@ class MemoryKeychain:
         self._secret = None
 
 
+def _keychain_for(account: str) -> Keychain:
+    """The login keychain's item for one account of the sign-in's service (a seam for tests)."""
+    return Keychain(account=account)
+
+
 @dataclass(frozen=True)
 class PendingLogin:
     user_code: str
@@ -323,18 +328,28 @@ class DeviceLogin:
                  now=_utcnow) -> None:
         self.cloud_url = normalize_cloud_url(cloud_url)
         self._keychain = (keychain if keychain is not None
-                          else Keychain(account=_keychain_account(self.cloud_url)))
+                          else _keychain_for(_keychain_account(self.cloud_url)))
         # Per-origin accounts landed 2026-07-21 with no fallback, which silently
         # signed out every machine linked BEFORE it: the refresh token sat in the
         # keychain under the bare legacy account while every lookup used the new
         # hashed one, and "not signed in" told the user to link again for no
         # reason (2026-08-08). Migrate the legacy entry forward once, on first
-        # touch; the legacy copy is left in place (harmless, and deleting it from
-        # a constructor would be a surprising side effect).
-        if keychain is None and self._keychain.get() is None:
-            legacy = Keychain(account=KEYCHAIN_ACCOUNT).get()
-            if legacy is not None:
-                self._keychain.set(legacy)
+        # touch. An unsigned brain leaves the legacy copy in place; a SIGNED one
+        # removes it once the per-origin item holds the sign-in (2026-10-23): it
+        # was made by /usr/bin/security, so any process of the user can read it,
+        # and nothing else would ever remove it (docs/14 section 6).
+        if keychain is None:
+            held = self._keychain.get()
+            if held is None:
+                legacy = _keychain_for(KEYCHAIN_ACCOUNT).get()
+                if legacy is not None:
+                    self._keychain.set(legacy)
+                    held = legacy
+            if held is not None and self._keychain._signed_store() is not None:
+                try:
+                    _keychain_for(KEYCHAIN_ACCOUNT).delete()
+                except DeviceAuthError:
+                    pass                 # the keychain did not answer: tried again next start
         self._http = http if http is not None else httpx.Client(timeout=20.0)
         self._now = now
         self._device_code: str | None = None

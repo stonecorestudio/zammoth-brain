@@ -181,6 +181,41 @@ def test_a_write_goes_to_the_bound_item_and_clears_an_old_copy(scratch):
     assert keychain.get() is None
 
 
+CLOUD = "https://zammoth-api.fly.dev"
+
+
+def _signed_login(monkeypatch, kc: int, path: str) -> device_auth.DeviceLogin:
+    monkeypatch.setattr(device_auth, "_keychain_for", lambda account: _keychain(kc, path, account))
+    return device_auth.DeviceLogin(CLOUD, http=object())
+
+
+def test_a_signed_brain_forgets_the_bare_item_once_the_per_origin_one_holds_the_sign_in(
+        scratch, monkeypatch):
+    # The build Mac on 2026-10-23: a per-origin item (from after 2026-07-21) AND the bare one
+    # from before it, both made by /usr/bin/security - readable by any process of the user.
+    kc, path = scratch
+    acct = device_auth._keychain_account(CLOUD)
+    _legacy_add(path, "com.zammoth.cloud", device_auth.KEYCHAIN_ACCOUNT, TOKEN)
+    _legacy_add(path, "com.zammoth.cloud", acct, TOKEN2)
+    _signed_login(monkeypatch, kc, path)
+    assert FrameworkStore("com.zammoth.cloud.v2", acct, keychain=kc).get() == TOKEN2.encode()
+    assert _legacy_find(path, "com.zammoth.cloud", acct) == 44
+    assert _legacy_find(path, "com.zammoth.cloud", device_auth.KEYCHAIN_ACCOUNT) == 44
+    assert FrameworkStore("com.zammoth.cloud.v2", device_auth.KEYCHAIN_ACCOUNT,
+                          keychain=kc).get() is None
+
+
+def test_a_signed_brain_moves_a_bare_only_sign_in_to_the_per_origin_item(scratch, monkeypatch):
+    kc, path = scratch
+    acct = device_auth._keychain_account(CLOUD)
+    _legacy_add(path, "com.zammoth.cloud", device_auth.KEYCHAIN_ACCOUNT, TOKEN)
+    _signed_login(monkeypatch, kc, path)
+    assert FrameworkStore("com.zammoth.cloud.v2", acct, keychain=kc).get() == TOKEN.encode()
+    assert _legacy_find(path, "com.zammoth.cloud", device_auth.KEYCHAIN_ACCOUNT) == 44
+    assert FrameworkStore("com.zammoth.cloud.v2", device_auth.KEYCHAIN_ACCOUNT,
+                          keychain=kc).get() is None
+
+
 def test_a_malformed_secret_never_reaches_the_keychain(scratch):
     kc, path = scratch
     with pytest.raises(device_auth.DeviceAuthError):
