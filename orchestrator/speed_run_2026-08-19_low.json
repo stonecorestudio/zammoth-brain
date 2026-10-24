@@ -1,0 +1,445 @@
+{
+  "backend": "subscription",
+  "model": "claude-opus-5",
+  "max_passes": 3,
+  "summary": {
+    "runs": 13,
+    "errored": 0,
+    "wall_s_median": 102.9,
+    "wall_s_p95": 129.5,
+    "wall_s_total": 1319.4,
+    "cost_usd_median": 2.2491,
+    "cost_usd_p95": 2.4907,
+    "cost_usd_total": 23.9512,
+    "tokens_in_total": 160679,
+    "tokens_out_total": 74763
+  },
+  "runs": [
+    {
+      "key": "parallel_comp_drums",
+      "project": "technique_demo",
+      "brief": "add parallel compression to the drums to thicken them up, but keep the punch",
+      "backend": "subscription",
+      "wall_s": 104.7,
+      "passes": 3,
+      "stop_reason": "nothing to propose",
+      "applied": 1,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 28.6,
+          "apply": 0.4,
+          "render": 0.4,
+          "at_s": 34.58
+        },
+        {
+          "pass_number": 2,
+          "agent": 10.0,
+          "apply": 0.0,
+          "at_s": 45.07
+        },
+        {
+          "pass_number": 3,
+          "agent": 15.6,
+          "apply": 0.0,
+          "at_s": 98.56
+        }
+      ],
+      "input_tokens": 15827,
+      "output_tokens": 5701,
+      "cache_read_tokens": 701504,
+      "cache_write_tokens": 306928,
+      "cost_usd": 2.4907,
+      "error": null
+    },
+    {
+      "key": "duck_pads_under_lead",
+      "project": "technique_demo",
+      "brief": "duck the pads under the lead so the lead always stays on top",
+      "backend": "subscription",
+      "wall_s": 102.9,
+      "passes": 3,
+      "stop_reason": "nothing to propose",
+      "applied": 1,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 24.7,
+          "apply": 0.5,
+          "render": 0.6,
+          "at_s": 31.22
+        },
+        {
+          "pass_number": 2,
+          "agent": 12.5,
+          "apply": 0.0,
+          "at_s": 44.41
+        },
+        {
+          "pass_number": 3,
+          "agent": 20.1,
+          "apply": 0.0,
+          "at_s": 96.11
+        }
+      ],
+      "input_tokens": 15827,
+      "output_tokens": 5500,
+      "cache_read_tokens": 743047,
+      "cache_write_tokens": 265272,
+      "cost_usd": 2.2462,
+      "error": null
+    },
+    {
+      "key": "deess_lead",
+      "project": "technique_demo",
+      "brief": "the lead has piercing sibilance - de-ess it without dulling the melody",
+      "backend": "subscription",
+      "wall_s": 119.7,
+      "passes": 3,
+      "stop_reason": "regressed \u2014 the critic's corrective pass made it worse; reverted",
+      "applied": 1,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 22.6,
+          "apply": 0.4,
+          "render": 0.5,
+          "at_s": 28.71
+        },
+        {
+          "pass_number": 2,
+          "agent": 13.0,
+          "apply": 0.0,
+          "at_s": 42.29
+        },
+        {
+          "pass_number": 3,
+          "agent": 29.8,
+          "apply": 0.5,
+          "render": 0.5,
+          "at_s": 113.09
+        }
+      ],
+      "input_tokens": 15827,
+      "output_tokens": 7338,
+      "cache_read_tokens": 764955,
+      "cache_write_tokens": 256641,
+      "cost_usd": 2.2491,
+      "error": null
+    },
+    {
+      "key": "tame_boom_bassline",
+      "project": "technique_demo",
+      "brief": "the bassline gets boomy when it swells - tame the boom without losing the steady low end or dulling its top",
+      "backend": "subscription",
+      "wall_s": 115.1,
+      "passes": 3,
+      "stop_reason": "nothing to propose",
+      "applied": 1,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 32.0,
+          "apply": 0.4,
+          "render": 0.5,
+          "at_s": 38.51
+        },
+        {
+          "pass_number": 2,
+          "agent": 15.5,
+          "apply": 0.0,
+          "at_s": 54.64
+        },
+        {
+          "pass_number": 3,
+          "agent": 15.9,
+          "apply": 0.0,
+          "at_s": 107.89
+        }
+      ],
+      "input_tokens": 15825,
+      "output_tokens": 6579,
+      "cache_read_tokens": 678494,
+      "cache_write_tokens": 266607,
+      "cost_usd": 2.2493,
+      "error": null
+    },
+    {
+      "key": "master_streaming",
+      "project": "technique_demo",
+      "brief": "master this for streaming: around -14 LUFS, true peak at -1, keep it clean and dynamic",
+      "backend": "subscription",
+      "wall_s": 56.2,
+      "passes": 2,
+      "stop_reason": "targets met",
+      "applied": 1,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 19.3,
+          "apply": 0.3,
+          "render": 0.6,
+          "at_s": 20.96
+        }
+      ],
+      "input_tokens": 7776,
+      "output_tokens": 2960,
+      "cache_read_tokens": 233715,
+      "cache_write_tokens": 93703,
+      "cost_usd": 0.8153,
+      "error": null
+    },
+    {
+      "key": "widen_pads_mono_lows",
+      "project": "technique_demo",
+      "brief": "make the pads wider and more spacious, but keep the low end mono and club-safe",
+      "backend": "subscription",
+      "wall_s": 193.3,
+      "passes": 4,
+      "stop_reason": "diminishing returns",
+      "applied": 5,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 38.1,
+          "apply": 0.8,
+          "render": 0.6,
+          "at_s": 40.34
+        },
+        {
+          "pass_number": 2,
+          "agent": 32.5,
+          "apply": 0.4,
+          "render": 0.4,
+          "at_s": 74.16
+        },
+        {
+          "pass_number": 4,
+          "agent": 70.0,
+          "apply": 1.0,
+          "render": 1.0,
+          "at_s": 184.18
+        }
+      ],
+      "input_tokens": 13346,
+      "output_tokens": 11508,
+      "cache_read_tokens": 1497286,
+      "cache_write_tokens": 273923,
+      "cost_usd": 2.8152,
+      "error": null
+    },
+    {
+      "key": "vocal_space_send",
+      "project": "technique_demo",
+      "brief": "give the lead a sense of space with a short room reverb, but keep it upfront - not washed out",
+      "backend": "subscription",
+      "wall_s": 129.5,
+      "passes": 3,
+      "stop_reason": "nothing to propose",
+      "applied": 2,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 28.6,
+          "apply": 0.4,
+          "render": 0.4,
+          "at_s": 35.27
+        },
+        {
+          "pass_number": 2,
+          "agent": 17.5,
+          "apply": 0.0,
+          "at_s": 53.27
+        },
+        {
+          "pass_number": 3,
+          "agent": 33.1,
+          "apply": 0.4,
+          "render": 0.4,
+          "at_s": 122.58
+        }
+      ],
+      "input_tokens": 15835,
+      "output_tokens": 7420,
+      "cache_read_tokens": 1048029,
+      "cache_write_tokens": 270483,
+      "cost_usd": 2.4792,
+      "error": null
+    },
+    {
+      "key": "glue_rhythm_section",
+      "project": "technique_demo",
+      "brief": "group the drums and bassline into a rhythm bus and glue them with gentle bus compression",
+      "backend": "subscription",
+      "wall_s": 92.3,
+      "passes": 3,
+      "stop_reason": "nothing to propose",
+      "applied": 1,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 23.6,
+          "apply": 0.3,
+          "render": 0.3,
+          "at_s": 30.72
+        },
+        {
+          "pass_number": 2,
+          "agent": 14.2,
+          "apply": 0.0,
+          "at_s": 45.51
+        },
+        {
+          "pass_number": 3,
+          "agent": 14.2,
+          "apply": 0.0,
+          "at_s": 86.28
+        }
+      ],
+      "input_tokens": 15827,
+      "output_tokens": 4723,
+      "cache_read_tokens": 752704,
+      "cache_write_tokens": 270882,
+      "cost_usd": 2.2667,
+      "error": null
+    },
+    {
+      "key": "dynamic_harsh_lead",
+      "project": "technique_demo",
+      "brief": "the lead turns harsh when it gets loud - tame that harshness without dulling the quiet phrases",
+      "backend": "subscription",
+      "wall_s": 93.2,
+      "passes": 2,
+      "stop_reason": "targets met",
+      "applied": 1,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 54.7,
+          "apply": 0.4,
+          "render": 0.5,
+          "at_s": 56.2
+        }
+      ],
+      "input_tokens": 7917,
+      "output_tokens": 5777,
+      "cache_read_tokens": 680800,
+      "cache_write_tokens": 99651,
+      "cost_usd": 1.1473,
+      "error": null
+    },
+    {
+      "key": "warm_saturation_bassline",
+      "project": "technique_demo",
+      "brief": "add some tape-style warmth to the bassline - harmonic richness, but don't push its peak level",
+      "backend": "subscription",
+      "wall_s": 129.0,
+      "passes": 3,
+      "stop_reason": "nothing to propose",
+      "applied": 2,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 32.1,
+          "apply": 0.4,
+          "render": 0.4,
+          "at_s": 33.62
+        },
+        {
+          "pass_number": 2,
+          "agent": 15.0,
+          "apply": 0.0,
+          "at_s": 48.78
+        },
+        {
+          "pass_number": 3,
+          "agent": 45.0,
+          "apply": 0.4,
+          "render": 0.4,
+          "at_s": 123.48
+        }
+      ],
+      "input_tokens": 13336,
+      "output_tokens": 7729,
+      "cache_read_tokens": 1113075,
+      "cache_write_tokens": 261622,
+      "cost_usd": 2.4516,
+      "error": null
+    },
+    {
+      "key": "wild_tiny_two_30s",
+      "project": "tiny_two_30s",
+      "brief": "master for streaming",
+      "backend": "subscription",
+      "wall_s": 62.1,
+      "passes": 2,
+      "stop_reason": "targets met",
+      "applied": 1,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 23.3,
+          "apply": 0.6,
+          "render": 1.0,
+          "at_s": 26.16
+        }
+      ],
+      "input_tokens": 7778,
+      "output_tokens": 3617,
+      "cache_read_tokens": 305345,
+      "cache_write_tokens": 99675,
+      "cost_usd": 0.9049,
+      "error": null
+    },
+    {
+      "key": "wild_hires_96k_f32",
+      "project": "hires_96k_f32",
+      "brief": "master for streaming",
+      "backend": "subscription",
+      "wall_s": 66.5,
+      "passes": 2,
+      "stop_reason": "targets met",
+      "applied": 1,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 20.9,
+          "apply": 1.6,
+          "render": 3.0,
+          "at_s": 28.94
+        }
+      ],
+      "input_tokens": 7778,
+      "output_tokens": 2847,
+      "cache_read_tokens": 305403,
+      "cache_write_tokens": 99645,
+      "cost_usd": 0.8855,
+      "error": null
+    },
+    {
+      "key": "wild_many_stems_30",
+      "project": "many_stems_30",
+      "brief": "master for streaming",
+      "backend": "subscription",
+      "wall_s": 54.9,
+      "passes": 2,
+      "stop_reason": "targets met",
+      "applied": 1,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 24.8,
+          "apply": 0.2,
+          "render": 0.3,
+          "at_s": 25.83
+        }
+      ],
+      "input_tokens": 7780,
+      "output_tokens": 3064,
+      "cache_read_tokens": 383085,
+      "cache_write_tokens": 102898,
+      "cost_usd": 0.9502,
+      "error": null
+    }
+  ]
+}

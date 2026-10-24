@@ -1,0 +1,98 @@
+{
+  "model": "claude-opus-5",
+  "backend": "subscription",
+  "cases": [
+    {
+      "key": "deess_lead",
+      "technique": "de-essing",
+      "brief": "the lead has piercing sibilance - de-ess it without dulling the melody",
+      "passed": 2,
+      "repeats": 3,
+      "stable_failure": false,
+      "unmeasured": false,
+      "runs": [
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 1,
+          "stop_reason": "targets met",
+          "passes_run": 2,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 1,
+          "stop_reason": "nothing to propose",
+          "passes_run": 3,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [
+            "sibilance bursts only came down 2.9 dB (want >= 3)"
+          ],
+          "passed": false,
+          "applied_actions": 3,
+          "stop_reason": "nothing to propose",
+          "passes_run": 3,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "vocal_space_send",
+      "technique": "send/return ambience",
+      "brief": "give the lead a sense of space with a short room reverb, but keep it upfront - not washed out",
+      "passed": 0,
+      "repeats": 3,
+      "stable_failure": true,
+      "unmeasured": false,
+      "runs": [
+        {
+          "plan_failures": [],
+          "outcome_failures": [
+            "post-phrase tail only rose +0.7 dB (want >= 1: no audible space was added)"
+          ],
+          "passed": false,
+          "applied_actions": 2,
+          "stop_reason": "targets met",
+          "passes_run": 2,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [
+            "post-phrase tail only rose +0.3 dB (want >= 1: no audible space was added)"
+          ],
+          "passed": false,
+          "applied_actions": 2,
+          "stop_reason": "targets met",
+          "passes_run": 2,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [
+            "post-phrase tail only rose +0.3 dB (want >= 1: no audible space was added)"
+          ],
+          "passed": false,
+          "applied_actions": 2,
+          "stop_reason": "nothing to propose",
+          "passes_run": 3,
+          "error": null
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "cases": 2,
+    "runs": 6,
+    "not_measured": 0,
+    "stable_failures": 1,
+    "flaky": 1,
+    "clean_passes": 0
+  }
+}

@@ -1,0 +1,324 @@
+{
+  "agent": "RuleAgent",
+  "cases": [
+    {
+      "project": "two_stem_demo",
+      "brief": "stem_a clarity",
+      "stop_reason": "targets met",
+      "passes_run": 4,
+      "targets_met": true,
+      "mean_closure": 1.0,
+      "mean_abs_prediction_error": 0.0,
+      "proposals": {
+        "total": 3,
+        "applied": 3,
+        "rejected": 0
+      },
+      "per_target": [
+        {
+          "metric": "masking(stem_a,masker).worst_band_excess_db",
+          "initial_distance": 4.1,
+          "final_distance": 0.0,
+          "closure": 1.0
+        },
+        {
+          "metric": "masking(stem_a,stem_b).worst_band_excess_db",
+          "initial_distance": 0.0,
+          "final_distance": 0.0
+        }
+      ]
+    },
+    {
+      "project": "two_stem_demo",
+      "brief": "master for streaming",
+      "stop_reason": "targets met",
+      "passes_run": 2,
+      "targets_met": true,
+      "mean_closure": 1.0,
+      "mean_abs_prediction_error": 0.0,
+      "proposals": {
+        "total": 1,
+        "applied": 1,
+        "rejected": 0
+      },
+      "per_target": [
+        {
+          "metric": "lufs_i",
+          "initial_distance": 1.3,
+          "final_distance": 0.0,
+          "closure": 1.0
+        },
+        {
+          "metric": "true_peak_dbtp",
+          "initial_distance": 0.0,
+          "final_distance": 0.0
+        },
+        {
+          "metric": "plr_db",
+          "initial_distance": 0.0,
+          "final_distance": 0.0
+        }
+      ]
+    },
+    {
+      "project": "two_stem_demo",
+      "brief": "match refs/reference.wav",
+      "stop_reason": "targets met",
+      "passes_run": 2,
+      "targets_met": true,
+      "mean_closure": 1.0,
+      "mean_abs_prediction_error": 0.175,
+      "proposals": {
+        "total": 2,
+        "applied": 2,
+        "rejected": 0
+      },
+      "per_target": [
+        {
+          "metric": "lufs_i",
+          "initial_distance": 1.6,
+          "final_distance": 0.0,
+          "closure": 1.0
+        },
+        {
+          "metric": "true_peak_dbtp",
+          "initial_distance": 0.0,
+          "final_distance": 0.0
+        },
+        {
+          "metric": "plr_db",
+          "initial_distance": 0.0,
+          "final_distance": 0.0
+        },
+        {
+          "metric": "band_energy.sub",
+          "initial_distance": 0.0,
+          "final_distance": 0.0
+        },
+        {
+          "metric": "band_energy.bass",
+          "initial_distance": 0.0,
+          "final_distance": 0.0
+        },
+        {
+          "metric": "band_energy.low_mid",
+          "initial_distance": 0.0,
+          "final_distance": 0.0
+        },
+        {
+          "metric": "band_energy.mid",
+          "initial_distance": 0.0,
+          "final_distance": 0.0
+        },
+        {
+          "metric": "band_energy.high_mid",
+          "initial_distance": 0.0,
+          "final_distance": 0.0
+        },
+        {
+          "metric": "band_energy.presence",
+          "initial_distance": 3.4,
+          "final_distance": 0.0,
+          "closure": 1.0
+        },
+        {
+          "metric": "band_energy.brilliance",
+          "initial_distance": 5.0,
+          "final_distance": 0.0,
+          "closure": 1.0
+        },
+        {
+          "metric": "band_energy.air",
+          "initial_distance": 5.3,
+          "final_distance": 0.0,
+          "closure": 1.0
+        }
+      ]
+    },
+    {
+      "project": "three_section_demo",
+      "brief": "master to -16 LUFS",
+      "stop_reason": "targets met",
+      "passes_run": 2,
+      "targets_met": true,
+      "mean_closure": 1.0,
+      "mean_abs_prediction_error": 0.0,
+      "proposals": {
+        "total": 1,
+        "applied": 1,
+        "rejected": 0
+      },
+      "per_target": [
+        {
+          "metric": "lufs_i",
+          "initial_distance": 5.2,
+          "final_distance": 0.0,
+          "closure": 1.0
+        },
+        {
+          "metric": "true_peak_dbtp",
+          "initial_distance": 0.0,
+          "final_distance": 0.0
+        },
+        {
+          "metric": "plr_db",
+          "initial_distance": 0.0,
+          "final_distance": 0.0
+        }
+      ]
+    },
+    {
+      "project": "two_stem_demo",
+      "brief": "less muddy",
+      "stop_reason": "targets met (critic pass)",
+      "passes_run": 6,
+      "targets_met": true,
+      "mean_closure": 1.0,
+      "mean_abs_prediction_error": 0.633,
+      "proposals": {
+        "total": 6,
+        "applied": 6,
+        "rejected": 0
+      },
+      "per_target": [
+        {
+          "metric": "mud_db",
+          "initial_distance": 2.0,
+          "final_distance": 0.0,
+          "closure": 1.0
+        }
+      ]
+    },
+    {
+      "project": "two_stem_demo",
+      "brief": "less harsh",
+      "stop_reason": "targets met",
+      "passes_run": 4,
+      "targets_met": true,
+      "mean_closure": 1.0,
+      "mean_abs_prediction_error": 0.267,
+      "proposals": {
+        "total": 3,
+        "applied": 3,
+        "rejected": 0
+      },
+      "per_target": [
+        {
+          "metric": "harshness_db",
+          "initial_distance": 2.0,
+          "final_distance": 0.0,
+          "closure": 1.0
+        }
+      ]
+    },
+    {
+      "project": "two_stem_demo",
+      "brief": "pop master",
+      "stop_reason": "EQ rail reached",
+      "passes_run": 5,
+      "targets_met": false,
+      "mean_closure": 0.693,
+      "mean_abs_prediction_error": 2.921,
+      "proposals": {
+        "total": 5,
+        "applied": 5,
+        "rejected": 0
+      },
+      "per_target": [
+        {
+          "metric": "lufs_i",
+          "initial_distance": 5.3,
+          "final_distance": 0.0,
+          "closure": 1.0
+        },
+        {
+          "metric": "true_peak_dbtp",
+          "initial_distance": 0.0,
+          "final_distance": 0.0
+        },
+        {
+          "metric": "plr_db",
+          "initial_distance": 0.0,
+          "final_distance": 0.0
+        },
+        {
+          "metric": "band_energy.sub",
+          "initial_distance": 11.3,
+          "final_distance": 0.4,
+          "closure": 0.965
+        },
+        {
+          "metric": "band_energy.bass",
+          "initial_distance": 12.7,
+          "final_distance": 1.8,
+          "closure": 0.858
+        },
+        {
+          "metric": "band_energy.low_mid",
+          "initial_distance": 8.5,
+          "final_distance": 0.0,
+          "closure": 1.0
+        },
+        {
+          "metric": "band_energy.mid",
+          "initial_distance": 6.3,
+          "final_distance": 4.5,
+          "closure": 0.286
+        },
+        {
+          "metric": "band_energy.high_mid",
+          "initial_distance": 16.4,
+          "final_distance": 9.0,
+          "closure": 0.451
+        },
+        {
+          "metric": "band_energy.presence",
+          "initial_distance": 20.2,
+          "final_distance": 9.2,
+          "closure": 0.545
+        },
+        {
+          "metric": "band_energy.brilliance",
+          "initial_distance": 19.9,
+          "final_distance": 9.0,
+          "closure": 0.548
+        },
+        {
+          "metric": "band_energy.air",
+          "initial_distance": 18.6,
+          "final_distance": 7.7,
+          "closure": 0.586
+        }
+      ]
+    },
+    {
+      "project": "two_stem_demo",
+      "brief": "the piano is muddy",
+      "stop_reason": "targets met",
+      "passes_run": 2,
+      "targets_met": true,
+      "mean_closure": 1.0,
+      "mean_abs_prediction_error": 0.3,
+      "proposals": {
+        "total": 1,
+        "applied": 1,
+        "rejected": 0
+      },
+      "per_target": [
+        {
+          "metric": "stem(piano).band_energy.low_mid",
+          "initial_distance": 2.0,
+          "final_distance": 0.0,
+          "closure": 1.0
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "cases": 8,
+    "targets_met_rate": 0.875,
+    "mean_closure": 0.962,
+    "mean_abs_prediction_error": 0.537,
+    "rejection_rate": 0.0
+  }
+}

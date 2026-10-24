@@ -1,0 +1,3 @@
+# Separation models (Phase 29) are large + separately provenanced — never commit
+# them; the build/export step places them (see README.md).
+*.onnx

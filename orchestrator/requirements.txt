@@ -1,0 +1,13 @@
+# Orchestrator deps. The engine deps live in server/requirements.txt;
+# in dev both install into the same venv (server/.venv).
+# <1: the 1.x SDK has breaking changes (httpx2, awaited async raw responses, removed params);
+# unpinned, a fresh install (CI, a new dev machine, a brain re-freeze) pulled 1.x untested
+# (2026-09-22 audit). Tested on 0.109.1; move deliberately.
+anthropic>=0.109.1,<1
+mcp>=1.27,<2   # same pin as server/requirements.txt (2.x broke the in-memory client the tests use)
+pydantic>=2
+anyio
+fastapi        # websocket gateway (Phase 3)
+uvicorn
+websockets     # uvicorn's websocket protocol impl (plain uvicorn ships none)
+soundfile      # sample-rate probe for the UI snapshot

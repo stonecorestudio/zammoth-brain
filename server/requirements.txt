@@ -1,0 +1,19 @@
+pedalboard>=0.9.23,<0.10  # the offline compressor runs its ballistics INSIDE Pedalboard's level follower (dsp._gr_ballistics_db); test_comp_native_law.py pins that - a new minor is a deliberate bump
+pyloudnorm
+soundfile
+# numpy, scipy and onnxruntime set the app's minimum macOS: their arm64 wheels are built for
+# macOS 14.0, the highest minimum in the bundle, and that is the floor the app states
+# (daw/CMakeLists.txt, LSMinimumSystemVersion; reader S7.R8). Bounded to the minor each was
+# frozen and tested on (2.4.6 / 1.17.1 / 1.26.0) so a re-freeze cannot pick up a wheel built for
+# a later system unnoticed - and if one ever does, daw/scripts/check_macos_floor.py stops the
+# package. Moving a bound is a deliberate bump: re-freeze, run that check, read what it prints.
+numpy>=2.4,<2.5
+scipy>=1.17,<1.18
+onnxruntime>=1.26,<1.27  # Phase 29 stem separation; imported lazily in separation.py
+demucs-onnx  # htdemucs v4 separation (MIT, numpy+onnxruntime, no torch); lazy import, weights download on first use
+pydantic>=2
+cryptography>=42  # verifies the licence service's Ed25519 signature (orchestrator/license_state.py); was only here through mcp -> PyJWT[crypto]
+mcp>=1.27,<2  # 2.x dropped mcp.shared.memory.create_connected_server_and_client_session (CI 2026-09-11)
+pytest
+pytest-xdist>=3.6,<4  # optional: `pytest -n auto` runs the whole suite on several cores (server/pytest.ini); nothing needs it
+httpx  # starlette TestClient, used by the gateway acceptance test

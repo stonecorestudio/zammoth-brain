@@ -1,0 +1,21 @@
+{
+  "about": "One table of track names for both ends (full audit 2026-10-02, reader S4.R10). `reserved` = no stem may carry it: server/mix_engine/session.py reserved_stem_name and daw/Source/DawSession.h isReservedTrackName must agree on every row. Read by server/tests/test_stem_name_parity.py and by the console leg MixAgentDAW --stem-names. A name another stem, group or return already uses is a different rule (taken, not reserved) and is not in this table.",
+  "names": [
+    { "name": "Lead Vox",        "reserved": false },
+    { "name": "vocals 2",        "reserved": false },
+    { "name": "Kick - Snare",    "reserved": false },
+    { "name": "bus1",            "reserved": false },
+    { "name": "masters",         "reserved": false },
+    { "name": "mastering bus",   "reserved": false },
+    { "name": "Vox: lead",       "reserved": true },
+    { "name": "a:b",             "reserved": true },
+    { "name": ":",               "reserved": true },
+    { "name": "bus:drums",       "reserved": true },
+    { "name": "return:verb",     "reserved": true },
+    { "name": "sink:null",       "reserved": true },
+    { "name": "rack:1",          "reserved": true },
+    { "name": "master",          "reserved": true },
+    { "name": "Master",          "reserved": true },
+    { "name": "MASTER",          "reserved": true }
+  ]
+}

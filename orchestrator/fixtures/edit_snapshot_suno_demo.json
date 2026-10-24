@@ -1,0 +1,2372 @@
+{
+  "tracks": [
+    {
+      "index": 0,
+      "name": "vocals",
+      "kind": "stem",
+      "muted": false,
+      "solo": false,
+      "automation_mode": "read",
+      "track_kind": "audio",
+      "output": "master",
+      "clips": [
+        {
+          "index": 0,
+          "name": "vocals",
+          "start_s": 0.0,
+          "length_s": 8.0,
+          "offset_s": 0.0,
+          "source": "vocals.wav",
+          "fade_in_s": 0.0,
+          "fade_out_s": 0.0,
+          "gain_db": 0.0
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "name": "drums",
+      "kind": "stem",
+      "muted": false,
+      "solo": false,
+      "automation_mode": "read",
+      "track_kind": "audio",
+      "output": "master",
+      "clips": [
+        {
+          "index": 0,
+          "name": "drums",
+          "start_s": 0.0,
+          "length_s": 8.0,
+          "offset_s": 0.0,
+          "source": "drums.wav",
+          "fade_in_s": 0.0,
+          "fade_out_s": 0.0,
+          "gain_db": 0.0
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "name": "bass",
+      "kind": "stem",
+      "muted": false,
+      "solo": false,
+      "automation_mode": "read",
+      "track_kind": "audio",
+      "output": "master",
+      "clips": [
+        {
+          "index": 0,
+          "name": "bass",
+          "start_s": 0.0,
+          "length_s": 8.0,
+          "offset_s": 0.0,
+          "source": "bass.wav",
+          "fade_in_s": 0.0,
+          "fade_out_s": 0.0,
+          "gain_db": 0.0
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "name": "other",
+      "kind": "stem",
+      "muted": false,
+      "solo": false,
+      "automation_mode": "read",
+      "track_kind": "audio",
+      "output": "master",
+      "clips": [
+        {
+          "index": 0,
+          "name": "other",
+          "start_s": 0.0,
+          "length_s": 8.0,
+          "offset_s": 0.0,
+          "source": "other.wav",
+          "fade_in_s": 0.0,
+          "fade_out_s": 0.0,
+          "gain_db": 0.0
+        }
+      ]
+    }
+  ],
+  "tempo": {
+    "bpm": 120.0,
+    "numerator": 4,
+    "denominator": 4,
+    "tempos": [
+      {
+        "beat": 0.0,
+        "bpm": 120.0,
+        "curve": 1.0
+      }
+    ],
+    "time_sigs": [
+      {
+        "beat": 0.0,
+        "numerator": 4,
+        "denominator": 4
+      }
+    ]
+  },
+  "transport": {
+    "position_s": 0.0,
+    "playing": false,
+    "recording": false,
+    "metronome": false,
+    "count_in_beats": 4,
+    "metronome_record_only": false,
+    "loop_on": false,
+    "loop_start_s": 0.0,
+    "loop_end_s": 0.0,
+    "punch": false,
+    "retrospective_s": 30,
+    "automation_write": false
+  },
+  "spectrogram_picture": "tape",
+  "spectrogram_under": "bands",
+  "meter_style": "phosphor",
+  "undo": {
+    "can_undo": true,
+    "can_redo": false,
+    "next_undo": "",
+    "depth": 1,
+    "history": [
+      ""
+    ]
+  },
+  "key_changes": [
+    {
+      "tonic": "C",
+      "scale": "Major",
+      "start_beat": 0.0
+    }
+  ],
+  "markers": [],
+  "available_plugins": [
+    {
+      "name": "AUBandpass",
+      "format": "AudioUnit",
+      "manufacturer": "Apple"
+    },
+    {
+      "name": "AUDynamicsProcessor",
+      "format": "AudioUnit",
+      "manufacturer": "Apple"
+    }
+  ],
+  "plugin_guard": {
+    "quarantined": [],
+    "suspects": [],
+    "last_exit_clean": true
+  },
+  "midi_inputs": [],
+  "midi_outputs": [],
+  "midi_sync": [],
+  "control_surfaces": [
+    {
+      "name": "Mackie Control Universal",
+      "enabled": false,
+      "midi_in": "",
+      "midi_out": "",
+      "connected": false
+    },
+    {
+      "name": "Icon Pro G2",
+      "enabled": false,
+      "midi_in": "",
+      "midi_out": "",
+      "connected": false
+    },
+    {
+      "name": "Frontier Design Group Tranzport",
+      "enabled": false,
+      "midi_in": "",
+      "midi_out": "",
+      "connected": false
+    },
+    {
+      "name": "Frontier Design Group AlphaTrack",
+      "enabled": false,
+      "midi_in": "",
+      "midi_out": "",
+      "connected": false
+    },
+    {
+      "name": "Novation ReMOTE SL",
+      "enabled": false,
+      "midi_in": "",
+      "midi_out": "",
+      "connected": false
+    }
+  ],
+  "osc": {
+    "enabled": false,
+    "port": 9000
+  },
+  "audio_inputs": [],
+  "midi_mappings": [],
+  "audio_device": {
+    "name": "",
+    "type": "",
+    "sample_rate_hz": 44100,
+    "buffer_size": 256,
+    "buffer_ms": 5.8,
+    "input_latency_ms": 0.0,
+    "output_latency_ms": 0.0,
+    "roundtrip_latency_ms": 0.0
+  },
+  "commands": [
+    {
+      "key": "transport.play_pause",
+      "name": "Play / Pause",
+      "category": "Transport",
+      "wants_args": false
+    },
+    {
+      "key": "transport.stop",
+      "name": "Stop",
+      "category": "Transport",
+      "wants_args": false
+    },
+    {
+      "key": "transport.return_to_start",
+      "name": "Return to Start",
+      "category": "Transport",
+      "wants_args": false
+    },
+    {
+      "key": "transport.seek",
+      "name": "Seek",
+      "category": "Transport",
+      "wants_args": true,
+      "args": "{ position_s }"
+    },
+    {
+      "key": "agent.run",
+      "name": "Run Agent",
+      "category": "Agent",
+      "wants_args": false
+    },
+    {
+      "key": "agent.cancel",
+      "name": "Cancel Run",
+      "category": "Agent",
+      "wants_args": false
+    },
+    {
+      "key": "agent.undo",
+      "name": "Undo Agent Move",
+      "category": "Agent",
+      "wants_args": false
+    },
+    {
+      "key": "agent.auto_mix",
+      "name": "Auto Mix",
+      "category": "Agent",
+      "wants_args": true,
+      "args": "{ brief?: \"master for streaming\"|\"master to -16 LUFS\"|\"master for club\" â the loudness target; omit for ceiling-only (no refinement pass) }"
+    },
+    {
+      "key": "agent.advise",
+      "name": "Ask (advice only)",
+      "category": "Agent",
+      "wants_args": true,
+      "args": "{ brief }"
+    },
+    {
+      "key": "agent.transpose",
+      "name": "Transpose to Key",
+      "category": "Agent",
+      "wants_args": true,
+      "args": "{ tonic }"
+    },
+    {
+      "key": "agent.reference",
+      "name": "Load Reference",
+      "category": "Agent",
+      "wants_args": true,
+      "args": "{ path }"
+    },
+    {
+      "key": "session.save",
+      "name": "Save",
+      "category": "Session",
+      "wants_args": false
+    },
+    {
+      "key": "session.export",
+      "name": "Export",
+      "category": "Session",
+      "wants_args": true,
+      "args": "{ format: wav|aiff|flac|mp3, stems?: bool, file?: path, bit_depth?: 16|24|32, sample_rate?: 0|44100|48000|88200|96000 (0 = session rate), dither?: bool, normalize_db?: -24..0 (present = peak-normalise the master), trim_silence?: bool, range?: all|loop } â omit every arg you don't need; defaults are the user's last-used Export-window settings"
+    },
+    {
+      "key": "track.add",
+      "name": "Add Track",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ path } - import an audio file as a new AUDIO track"
+    },
+    {
+      "key": "track.add_blank",
+      "name": "Add Empty Track",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ name? } - an empty AUDIO track (track_kind \"audio\": takes audio clips + audio effects, never an instrument, MIDI FX or MIDI clip - those want track.add_midi)"
+    },
+    {
+      "key": "track.duplicate",
+      "name": "Duplicate Track",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track? }"
+    },
+    {
+      "key": "track.delete",
+      "name": "Delete Track",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track }"
+    },
+    {
+      "key": "track.rename",
+      "name": "Rename Track",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track?, name } - track defaults to the SELECTED one"
+    },
+    {
+      "key": "track.solo",
+      "name": "Solo Track",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track?, on?:bool } - track defaults to the SELECTED one, on defaults to a TOGGLE; you do NOT need track.select first"
+    },
+    {
+      "key": "track.mute_toggle",
+      "name": "Mute Track",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track?, on?:bool } - track defaults to the SELECTED one, on defaults to a TOGGLE; you do NOT need track.select first"
+    },
+    {
+      "key": "track.set_colour",
+      "name": "Set Track Colour",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track, colour: \"#rrggbb\" }"
+    },
+    {
+      "key": "track.select",
+      "name": "Select Track",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track }"
+    },
+    {
+      "key": "track.select_all",
+      "name": "Select All Tracks",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ }"
+    },
+    {
+      "key": "track.fold_height",
+      "name": "Fold / Unfold Track Height",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track? }"
+    },
+    {
+      "key": "track.set_gain",
+      "name": "Set Track Gain",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track, gain_db }"
+    },
+    {
+      "key": "track.set_pan",
+      "name": "Set Track Pan",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track, pan }"
+    },
+    {
+      "key": "track.set_width",
+      "name": "Set Track Width",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track, width } - stereo width (mid/side): 0 = mono, 1 = unchanged, 2 = 2x. A track or \"bus:<id>\". NOT the master and NOT a return - neither has a channel width the mix engine can persist, and both are refused by name; for those, put a Width device on the chain instead"
+    },
+    {
+      "key": "track.set_mute",
+      "name": "Set Track Mute",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track, muted }"
+    },
+    {
+      "key": "track.freeze",
+      "name": "Freeze Track",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track, on? }"
+    },
+    {
+      "key": "track.set_delay",
+      "name": "Set Track Delay",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track?, delay_ms } - track delay in ms, -200..+200, track defaults to the SELECTED one. NEGATIVE pulls the channel EARLY (everything else is delayed to make room). \"master\", \"bus:<id>\" and \"return:<id>\" are valid targets"
+    },
+    {
+      "key": "track.keep_latency",
+      "name": "Keep Latency",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track?, on?:bool } - on defaults to a TOGGLE. ON (the default state) = keep this channel's full plug-in latency while armed; OFF = bypass its latency-inducing plug-ins while armed so the player monitors in time"
+    },
+    {
+      "key": "edit.undo",
+      "name": "Undo",
+      "category": "Edit",
+      "wants_args": true,
+      "args": "{ expect_agent?:bool }"
+    },
+    {
+      "key": "edit.redo",
+      "name": "Redo",
+      "category": "Edit",
+      "wants_args": false
+    },
+    {
+      "key": "clip.delete",
+      "name": "Delete Clip",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip }"
+    },
+    {
+      "key": "clip.duplicate",
+      "name": "Duplicate",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip } - no args = the user's âD: a time selection duplicates its span to its END on the selected lanes, else the selected clip, else the focused track"
+    },
+    {
+      "key": "clip.split",
+      "name": "Split Clip",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, at_s }"
+    },
+    {
+      "key": "clip.copy",
+      "name": "Copy",
+      "category": "Clip",
+      "wants_args": false
+    },
+    {
+      "key": "clip.cut",
+      "name": "Cut",
+      "category": "Clip",
+      "wants_args": false
+    },
+    {
+      "key": "clip.paste",
+      "name": "Paste",
+      "category": "Clip",
+      "wants_args": false
+    },
+    {
+      "key": "clip.move",
+      "name": "Move Clip",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, start_s }"
+    },
+    {
+      "key": "clip.trim",
+      "name": "Trim Clip",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, start_s?, end_s? }"
+    },
+    {
+      "key": "clip.fade",
+      "name": "Fade Clip",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, fade_in_s?, fade_out_s? }"
+    },
+    {
+      "key": "clip.gain",
+      "name": "Clip Gain",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip | scene, gain_db } - scene trims a Loop Deck slot clip"
+    },
+    {
+      "key": "clip.reverse",
+      "name": "Reverse Clip",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, reversed? }"
+    },
+    {
+      "key": "clip.normalize",
+      "name": "Normalize Clip",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, target_db? }"
+    },
+    {
+      "key": "clip.warp_marker",
+      "name": "Add Warp Marker",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, source_s, warp_s }  (source-anchored seconds, not timeline)"
+    },
+    {
+      "key": "clip.warp_move",
+      "name": "Move Warp Marker",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, index, warp_s }"
+    },
+    {
+      "key": "clip.warp_remove",
+      "name": "Remove Warp Marker",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, index? }"
+    },
+    {
+      "key": "clip.pitch",
+      "name": "Pitch-Shift Clip",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip | scene, semitones } - scene tunes a Loop Deck slot clip (audio pitch-shifts; MIDI note-shifts by whole semitones; both absolute)"
+    },
+    {
+      "key": "clip.warp",
+      "name": "Warp Clip to Tempo",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, on? }"
+    },
+    {
+      "key": "clip.warp_all",
+      "name": "Warp All Clips to Tempo",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ on? }"
+    },
+    {
+      "key": "clip.add_effect",
+      "name": "Add Clip Effect",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, type:\"filter\"|\"step_volume\"|\"invert\"|\"make_mono\"|\"tape_stop\", freq_hz? (filter only), highpass?:bool (filter only) }"
+    },
+    {
+      "key": "clip.remove_effect",
+      "name": "Remove Clip Effect",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, index }"
+    },
+    {
+      "key": "take.select",
+      "name": "Select Take",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, take }"
+    },
+    {
+      "key": "take.show",
+      "name": "Show Takes",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, on? }"
+    },
+    {
+      "key": "comp.set_segment",
+      "name": "Comp Segment",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, start_s, end_s, take }"
+    },
+    {
+      "key": "comp.flatten",
+      "name": "Flatten Comp",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip }"
+    },
+    {
+      "key": "take.delete_unused",
+      "name": "Delete Unused Takes",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip }"
+    },
+    {
+      "key": "grid.narrower",
+      "name": "Narrower Grid",
+      "category": "Grid",
+      "wants_args": false
+    },
+    {
+      "key": "grid.wider",
+      "name": "Wider Grid",
+      "category": "Grid",
+      "wants_args": false
+    },
+    {
+      "key": "grid.toggle_triplet",
+      "name": "Triplet Grid",
+      "category": "Grid",
+      "wants_args": false
+    },
+    {
+      "key": "grid.toggle_snap",
+      "name": "Snap to Grid",
+      "category": "Grid",
+      "wants_args": false
+    },
+    {
+      "key": "grid.toggle_mode",
+      "name": "Fixed / Adaptive Grid",
+      "category": "Grid",
+      "wants_args": false
+    },
+    {
+      "key": "arrange.loop_selection",
+      "name": "Loop Selection",
+      "category": "Arrange",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "arrange.zoom_selection",
+      "name": "Zoom to Selection",
+      "category": "Arrange",
+      "wants_args": false
+    },
+    {
+      "key": "arrange.zoom_back",
+      "name": "Zoom Back",
+      "category": "Arrange",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "arrange.zoom_in",
+      "name": "Zoom In",
+      "category": "Arrange",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "arrange.zoom_out",
+      "name": "Zoom Out",
+      "category": "Arrange",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "arrange.fit_width",
+      "name": "Optimize Width",
+      "category": "Arrange",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "arrange.fit_height",
+      "name": "Optimize Height",
+      "category": "Arrange",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "arrange.toggle_follow",
+      "name": "Follow",
+      "category": "Arrange",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "arrange.select_loop",
+      "name": "Select Loop Material",
+      "category": "Arrange",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "arrange.playhead_left",
+      "name": "Playhead Left",
+      "category": "Arrange",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "arrange.playhead_right",
+      "name": "Playhead Right",
+      "category": "Arrange",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "arrange.playhead_bar_left",
+      "name": "Playhead Left (Bar)",
+      "category": "Arrange",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "arrange.playhead_bar_right",
+      "name": "Playhead Right (Bar)",
+      "category": "Arrange",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "marker.add",
+      "name": "Add Marker",
+      "category": "Markers",
+      "wants_args": true,
+      "args": "{ position_s?, name? }"
+    },
+    {
+      "key": "marker.remove",
+      "name": "Remove Marker",
+      "category": "Markers",
+      "wants_args": true,
+      "args": "{ index }"
+    },
+    {
+      "key": "transport.go_to_marker",
+      "name": "Go to Marker",
+      "category": "Markers",
+      "wants_args": true,
+      "args": "{ index }"
+    },
+    {
+      "key": "section.add",
+      "name": "Add Section",
+      "category": "Markers",
+      "wants_args": true,
+      "args": "{ name, start_s, end_s }"
+    },
+    {
+      "key": "section.remove",
+      "name": "Remove Section",
+      "category": "Markers",
+      "wants_args": true,
+      "args": "{ index }"
+    },
+    {
+      "key": "arrangement.build",
+      "name": "Build Song Arrangement",
+      "category": "Arrange",
+      "wants_args": true,
+      "args": "{ replace?, sections:[{name,length_s,source_start_s,tracks:[...] }"
+    },
+    {
+      "key": "scene.add",
+      "name": "Add Scene",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ name? }"
+    },
+    {
+      "key": "slot.set_clip",
+      "name": "Set Slot Clip",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ track, scene, source?: \"midi\"|<audio path>, length_beats? }"
+    },
+    {
+      "key": "slot.clear",
+      "name": "Clear Slot",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ track, scene }"
+    },
+    {
+      "key": "slot.launch",
+      "name": "Launch Slot",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ track, scene }"
+    },
+    {
+      "key": "slot.stop",
+      "name": "Stop Slot",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ track, scene }"
+    },
+    {
+      "key": "scene.launch",
+      "name": "Launch Scene",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ scene }"
+    },
+    {
+      "key": "transport.stop_clips",
+      "name": "Stop All Clips",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ }"
+    },
+    {
+      "key": "transport.play_clips",
+      "name": "Play All Clips",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ }"
+    },
+    {
+      "key": "slot.set_follow_action",
+      "name": "Set Follow Action",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ track, scene, action, after_loops? }"
+    },
+    {
+      "key": "transport.back_to_arrangement",
+      "name": "Back to Arrangement",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ track? }"
+    },
+    {
+      "key": "return.add",
+      "name": "Add FX Return",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ kind?: \"blank\"|\"reverb\"|\"delay\"|\"convolution\" }"
+    },
+    {
+      "key": "return.remove",
+      "name": "Remove FX Return",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ id }"
+    },
+    {
+      "key": "send.set",
+      "name": "Set Send Level",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ source, return, gain_db }"
+    },
+    {
+      "key": "return.set_prefader",
+      "name": "Return Pre/Post",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ id, pre_fader }"
+    },
+    {
+      "key": "return.set_level",
+      "name": "Return Level",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ id, gain_db }"
+    },
+    {
+      "key": "route.stem",
+      "name": "Route to Bus",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ stem, bus?: <id>|\"new\"|\"master\" }"
+    },
+    {
+      "key": "group.create",
+      "name": "Create Bus",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ stems:[ids] }"
+    },
+    {
+      "key": "bus.remove",
+      "name": "Remove Group Bus",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ id }"
+    },
+    {
+      "key": "bus.route",
+      "name": "Route Bus Output",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ bus, target?: <bus_id>|\"master\" }"
+    },
+    {
+      "key": "duck.set_key",
+      "name": "Sidechain Key",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ stem, key?: <stem>|\"none\" }"
+    },
+    {
+      "key": "vca.create",
+      "name": "Create VCA Group",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ name? (omit = \"VCA n\"), members:[track names] }"
+    },
+    {
+      "key": "vca.set",
+      "name": "Set VCA Level",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ name, gain_db }"
+    },
+    {
+      "key": "vca.assign",
+      "name": "Assign to VCA",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ name, track }"
+    },
+    {
+      "key": "vca.unassign",
+      "name": "Unassign from VCA",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ track }"
+    },
+    {
+      "key": "vca.remove",
+      "name": "Remove VCA Group",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ name }"
+    },
+    {
+      "key": "library.add",
+      "name": "Add to Library",
+      "category": "Library",
+      "wants_args": true,
+      "args": "{ path, name?, description? }"
+    },
+    {
+      "key": "library.search",
+      "name": "Search Library",
+      "category": "Library",
+      "wants_args": true,
+      "args": "{ query }"
+    },
+    {
+      "key": "library.import",
+      "name": "Import from Library",
+      "category": "Library",
+      "wants_args": true,
+      "args": "{ id, track?, scene?, length_beats? }"
+    },
+    {
+      "key": "library.remove",
+      "name": "Remove from Library",
+      "category": "Library",
+      "wants_args": true,
+      "args": "{ id }",
+      "needs_confirm": true
+    },
+    {
+      "key": "edit.new",
+      "name": "New Edit",
+      "category": "Library",
+      "wants_args": true,
+      "args": "{ name? }"
+    },
+    {
+      "key": "edit.open",
+      "name": "Open Edit",
+      "category": "Library",
+      "wants_args": true,
+      "args": "{ id }",
+      "needs_confirm": true
+    },
+    {
+      "key": "edit.rename",
+      "name": "Rename Edit",
+      "category": "Library",
+      "wants_args": true,
+      "args": "{ id, name }"
+    },
+    {
+      "key": "edit.delete",
+      "name": "Delete Edit",
+      "category": "Library",
+      "wants_args": true,
+      "args": "{ id }",
+      "needs_confirm": true
+    },
+    {
+      "key": "edit.duplicate",
+      "name": "Duplicate Edit",
+      "category": "Library",
+      "wants_args": true,
+      "args": "{ id, name? }"
+    },
+    {
+      "key": "project.peek",
+      "name": "Browse Another Project",
+      "category": "Library",
+      "wants_args": true,
+      "args": "{ dir }"
+    },
+    {
+      "key": "project.import_track",
+      "name": "Import Track from Project",
+      "category": "Library",
+      "wants_args": true,
+      "args": "{ dir, track }",
+      "needs_confirm": true
+    },
+    {
+      "key": "project.switch",
+      "name": "Switch Project",
+      "category": "Library",
+      "wants_args": true,
+      "args": "{ dir }",
+      "needs_confirm": true
+    },
+    {
+      "key": "project.import_chain",
+      "name": "Import Device Chain from Project",
+      "category": "Library",
+      "wants_args": true,
+      "args": "{ dir, track, onto }",
+      "needs_confirm": true
+    },
+    {
+      "key": "project.import_dawproject",
+      "name": "Import DAWproject",
+      "category": "Library",
+      "wants_args": true,
+      "args": "{ path (a .dawproject file), into?: <folder for the new project> } â reads the open interchange format Bitwig/Studio One/Cubase write: its tracks, clips, tempo map, markers and automation become a NEW project (audio unpacked into <project>/Imported/) which then opens. ASK first â it creates a folder and leaves the current project. There is no export counterpart: our devices have no plug-in identity another DAW could load",
+      "needs_confirm": true
+    },
+    {
+      "key": "tempo.set",
+      "name": "Set Tempo",
+      "category": "Tempo",
+      "wants_args": true,
+      "args": "{ bpm }"
+    },
+    {
+      "key": "tempo.add",
+      "name": "Add Tempo Change",
+      "category": "Tempo",
+      "wants_args": true,
+      "args": "{ at_s, bpm, curve? }"
+    },
+    {
+      "key": "tempo.move",
+      "name": "Move Tempo Change",
+      "category": "Tempo",
+      "wants_args": true,
+      "args": "{ index (from the snapshot's tempo map; 0 = the base, whose TIME is fixed), at_s?, bpm? } - the agent's twin of the tempo lane's 2D drag: reposition a tempo point in time (clamped between its neighbours) and/or change its bpm (20-300)"
+    },
+    {
+      "key": "tempo.remove",
+      "name": "Remove Tempo Change",
+      "category": "Tempo",
+      "wants_args": true,
+      "args": "{ index (>0 - the base tempo at 0 cannot be removed) } - the lane's double-click delete"
+    },
+    {
+      "key": "tempo.set_time_sig",
+      "name": "Set Time Signature",
+      "category": "Tempo",
+      "wants_args": true,
+      "args": "{ numerator, denominator, at_s? }"
+    },
+    {
+      "key": "automation.write",
+      "name": "Write Automation",
+      "category": "Automation",
+      "wants_args": true,
+      "args": "{ track, points: [{t_s, value, curve?: -1..1}], replace?: bool, target?, param?: volume|pan } â param also takes \"macro:<rack>#<i>\" (a rack macro, 0..1); curve bends the segment from that point to the next (0 straight, + hold-then-move, â move-then-settle)"
+    },
+    {
+      "key": "automation.clear",
+      "name": "Clear Automation",
+      "category": "Automation",
+      "wants_args": true,
+      "args": "{ track, param | target }"
+    },
+    {
+      "key": "modifier.add",
+      "name": "Add Modifier",
+      "category": "Automation",
+      "wants_args": true,
+      "args": "{ track, target, type?: lfo|env|random|step, shape?: sine|triangle|saw|square, sync?: bool, rate_hz?, rate_beats?, depth?, center?, phase?, attack_ms?, release_ms?, seed?: int, smooth?: bool, steps?: [0..1] }"
+    },
+    {
+      "key": "modifier.clear",
+      "name": "Clear Modifier",
+      "category": "Automation",
+      "wants_args": true,
+      "args": "{ track, target }"
+    },
+    {
+      "key": "automation.edit_toggle",
+      "name": "Automation Edit Mode",
+      "category": "Automation",
+      "wants_args": true,
+      "args": "{ }"
+    },
+    {
+      "key": "automation.record",
+      "name": "Automation Arm",
+      "category": "Automation",
+      "wants_args": true,
+      "args": "{ armed?: bool, track?, mode?: read|touch|latch|write } â armed without a mode uses the Preferences default (latch); touch writes only while the fader is held and glides back, latch writes from the first touch until the transport stops, write lays the fader's value from play start until release; read tracks[].automation_mode"
+    },
+    {
+      "key": "automation.set_curve",
+      "name": "Bend Automation",
+      "category": "Automation",
+      "wants_args": true,
+      "args": "{ track, index, curve: -1..1, param?: volume|pan | target? } â bend ONE segment of an existing lane (point index â the next); read tracks[].automation[].points[].curve"
+    },
+    {
+      "key": "record.arm",
+      "name": "Record-Arm Track",
+      "category": "Recording",
+      "wants_args": true,
+      "args": "{ track, on? }"
+    },
+    {
+      "key": "track.set_input",
+      "name": "Set Track Input",
+      "category": "Recording",
+      "wants_args": true,
+      "args": "{ track, input }"
+    },
+    {
+      "key": "transport.record",
+      "name": "Record",
+      "category": "Recording",
+      "wants_args": false
+    },
+    {
+      "key": "metronome.set",
+      "name": "Metronome",
+      "category": "Recording",
+      "wants_args": true,
+      "args": "{ on? }"
+    },
+    {
+      "key": "metronome.set_rhythm",
+      "name": "Metronome Rhythm",
+      "category": "Recording",
+      "wants_args": true,
+      "args": "{ rhythm: auto|bar|1/2|1/2T|1/4|1/4T|1/8|1/8T|1/16|1/16T }"
+    },
+    {
+      "key": "metronome.set_sound",
+      "name": "Metronome Sound",
+      "category": "Recording",
+      "wants_args": true,
+      "args": "{ sound: classic|click|wood }"
+    },
+    {
+      "key": "metronome.set_record_only",
+      "name": "Click Only While Recording",
+      "category": "Recording",
+      "wants_args": true,
+      "args": "{ on? }"
+    },
+    {
+      "key": "record.count_in",
+      "name": "Count-In",
+      "category": "Recording",
+      "wants_args": true,
+      "args": "{ bars: 0|1|2 }"
+    },
+    {
+      "key": "record.punch",
+      "name": "Punch In/Out",
+      "category": "Recording",
+      "wants_args": true,
+      "args": "{ on? }"
+    },
+    {
+      "key": "record.retrospective",
+      "name": "Capture Last Take (Retrospective)",
+      "category": "Recording",
+      "wants_args": true,
+      "args": "{ armed_only?: bool } â turn the last N seconds the inputs heard (armed or not) into clips on their tracks, N = Preferences â¸ Recording â¸ Retrospective buffer (read transport.retrospective_s; 0 = off). Needs an input routed to a track; fails with the reason otherwise"
+    },
+    {
+      "key": "plugin.add",
+      "name": "Add Plugin",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ track, name } - name from available_plugins. An INSTRUMENT plug-in (available_plugins[].instrument true) goes on a MIDI track only (tracks[].track_kind \"midi\"; track.add_midi makes one) - it takes the instrument slot and REPLACES the instrument there (the reply says `replaced`); an audio track refuses it. Effects go on either kind"
+    },
+    {
+      "key": "plugin.remove",
+      "name": "Remove Plugin",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ track, plugin (index) }"
+    },
+    {
+      "key": "plugin.enable",
+      "name": "Plugin On/Off",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ track, plugin (index), on?:bool (absent = toggle; off = bypass, settings kept) }"
+    },
+    {
+      "key": "plugin.set_param",
+      "name": "Set Plugin Param",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ track, plugin: int, param: int, value: 0..1 }"
+    },
+    {
+      "key": "plugin.set_program",
+      "name": "Plugin Preset",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ track, plugin: int, program?: int, name?: string } â pick one of the hosted plug-in's FACTORY presets by index or name (read tracks[].plugins[].programs + program; a plug-in with none refuses)",
+      "needs_confirm": true
+    },
+    {
+      "key": "plugin.set_sidechain",
+      "name": "Plugin Sidechain",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ track, plugin: int, source: <track name> | none } â key the hosted plug-in's sidechain input off another track (only when tracks[].plugins[].can_sidechain is true â otherwise the plug-in has no such bus and the native duck device is the tool); read tracks[].plugins[].sidechain_key"
+    },
+    {
+      "key": "rack.create",
+      "name": "Create Plugin Rack",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ track, plugins:[names from available_plugins], parallel?:bool=true, name? }"
+    },
+    {
+      "key": "rack.wrap",
+      "name": "Wrap FX in Rack",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ track, parallel?:bool=true }"
+    },
+    {
+      "key": "plugin.trust",
+      "name": "Trust Plugin",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ name }",
+      "needs_confirm": true
+    },
+    {
+      "key": "plugin.quarantine",
+      "name": "Quarantine Plugin",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ name }",
+      "needs_confirm": true
+    },
+    {
+      "key": "track.add_midi",
+      "name": "Add MIDI Track",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ name? } - a new MIDI track (track_kind \"midi\") with a 4OSC synth; the home of MIDI clips, MIDI FX and instruments (built-in or hosted)"
+    },
+    {
+      "key": "midi.add_clip",
+      "name": "Add MIDI Clip",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, start_s?, length_s? } - MIDI tracks only (track_kind \"midi\") and the track must have an instrument (or a MIDI output); an audio track refuses"
+    },
+    {
+      "key": "midi.add_note",
+      "name": "Add MIDI Note",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, clip, pitch, start_beat, length_beats, velocity? }"
+    },
+    {
+      "key": "midi.add_notes",
+      "name": "Add MIDI Notes",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, clip, notes:[{pitch,start_beat,length_beats,velocity? }"
+    },
+    {
+      "key": "midi.add_cc",
+      "name": "Add CC / Pitch-bend",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, clip, controller (0-127|\"pitch_bend\"), points:[{beat,value }"
+    },
+    {
+      "key": "midi.remove_note",
+      "name": "Remove MIDI Note",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, clip, note (index) }"
+    },
+    {
+      "key": "midi.quantize",
+      "name": "Quantize MIDI",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, clip, grid (e.g. \"1/16\",\"1/8\",\"1/8T\"), strength?:0..1, swing?:0..1 }"
+    },
+    {
+      "key": "midi.set_velocity",
+      "name": "Set MIDI Velocity",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, clip, value?:1-127, scale?:0..8, add?:-127..127, humanize?:0..1 (deterministic jitter, +/-32 at 1 - ONE call varies every note in the clip, so 'make them breathe' is one humanize call, not a per-note sweep), pitch?:0-127 (only that note), start_beat?, end_beat?, seed?:int }"
+    },
+    {
+      "key": "clip.set_groove",
+      "name": "Set Clip Groove",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, template?:<name from groove.list>|\"\" to remove, strength?:0..1 (Live's Amount) } - works on MIDI *and* AUDIO clips, NON-DESTRUCTIVELY. MIDI: notes keep their raw start_beat and the engine shifts them at playback (the snapshot's play_beat is a READOUT of where each note sounds - never write it back). AUDIO: the groove rides the clip's warp map, so the clip must have Warp on; hand-editing a warp marker detaches the groove"
+    },
+    {
+      "key": "groove.list",
+      "name": "List Grooves",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{}  -> [{name, notes_per_beat, num_notes, latenesses, parameterized}]"
+    },
+    {
+      "key": "groove.create",
+      "name": "Create Groove",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ name, notes_per_beat:1-8, latenesses:[-1..1 per grid cell, + = late / - = early], parameterized?:bool=true } - the shift is HALF the value x the cell, so ~0.66 on 1/8 cells is a triplet swing"
+    },
+    {
+      "key": "clip.pitch_correct",
+      "name": "Tune Notes",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, strength?:0..1=1 (how much of each error to remove), min_cents?:>=5=15 (leave smaller deviations alone) } - fix the OFF NOTES of a monophonic audio clip in place: the brain names every note beyond min_cents, then the clip is split at those note boundaries, each segment pitched by its own error, seams faded - ONE undo. Refuses polyphony (chords have no single pitch to correct), warped/reversed/grooved clips, and takes with more than 48 off notes (that is a re-take). Answers a moment later (async, like Extract Groove)"
+    },
+    {
+      "key": "clip.extract_groove",
+      "name": "Extract Groove",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, name?, apply?:bool=true } - measure THIS clip's feel into a pool template. MIDI is immediate; an AUDIO clip is analysed by the brain and lands a moment later. Refuses with a reason when the part is quantized (nothing to take) or too dense for a straight grid"
+    },
+    {
+      "key": "groove.export",
+      "name": "Export Groove",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ name, path? (default: the Zammoth Grooves folder) } -> { file }",
+      "needs_confirm": true
+    },
+    {
+      "key": "groove.import",
+      "name": "Import Groove",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ path: a .trkgroove file OR a folder of them } -> { names:[...] }"
+    },
+    {
+      "key": "groove.set_amount",
+      "name": "Groove Amount",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ amount: 0..1 } - scales EVERY grooved clip at once, on top of each clip's own strength (1 = each clip as set)"
+    },
+    {
+      "key": "track.set_instrument",
+      "name": "Set Instrument",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, instrument: \"synth\"|\"drums\"|\"sampler\", kit?: \"gm\"|\"empty\"=empty (drums only: seed the GM kit, or blank pads) } - MIDI tracks only (track_kind \"midi\"); an audio track refuses"
+    },
+    {
+      "key": "track.add_drum_kit",
+      "name": "Add Drum Kit",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ name?, kit?: \"gm\"|\"empty\"=gm } - gm = the 14-piece synthesised GM kit on the pads (a composed beat sounds); empty = a blank 16-pad kit like the user's browser Drum Kit"
+    },
+    {
+      "key": "sampler.add_sound",
+      "name": "Load Sample",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, path, note, name? } - refuses an occupied note (use sampler.replace_sound to swap)"
+    },
+    {
+      "key": "sampler.set_sound",
+      "name": "Balance Kit Sound",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, index|note, gain_db?, pan?, open_ended?:bool, choke?:0-16 (0=off; same group = one cuts the other, hats ship in 1), tune?:semitones -48..48 }"
+    },
+    {
+      "key": "sampler.replace_sound",
+      "name": "Swap Pad Sample",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, index|note, path, name? }"
+    },
+    {
+      "key": "sampler.remove_sound",
+      "name": "Remove Pad",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, index|note }"
+    },
+    {
+      "key": "drum_rack.promote",
+      "name": "Promote Drum Kit",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track? } - kit becomes per-pad chains (KeyFilter->Simpler->FX); idempotent, one undo"
+    },
+    {
+      "key": "pad.device_add",
+      "name": "Add Device to Pad",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track?, note, device: <native type e.g. comp|eq|saturation> OR name: <scanned plugin name> } - auto-promotes, then adds the device to that ONE pad's chain (one undo step)"
+    },
+    {
+      "key": "instrument.set_param",
+      "name": "Set Instrument Param",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, param, value }"
+    },
+    {
+      "key": "instrument.set_modulation",
+      "name": "Set Synth Modulation",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, source, target, depth?:-1..1=0.5, clear?:bool } - one ROUTE of a WOOLLY (4OSC) synth's mod matrix (the track's mod_matrix / mod_targets in the snapshot). source: lfo1|lfo2|env1|env2 (the mod envelopes)|midiVelocity|midiNote|mpePressure|mpeTimbre|cc<n> (cc1 mod wheel, cc11 expression, cc74 cutoff). target: a VOICE param id (filterFreq, filterResonance, level1..4, fineTune1..4, pan1..4, pulseWidth1..4, lfoDepth1..2, lfoRate1..2, ampAttack, filterAttack, modAttack1..2, ...) - never masterLevel or the FX. depth: the modulation as a fraction of the target's range, ADDED to the knob (+0.3 = up to 30 % above it; negative pulls down). clear:true removes the route. A knob's own value is instrument.set_param, not this"
+    },
+    {
+      "key": "instrument.load_sample",
+      "name": "Load Sample Instrument",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, path, root_note?:int=60 }"
+    },
+    {
+      "key": "sampler.set",
+      "name": "Set Sampler Param",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, param, value, note? } - note = a DRUM PAD's own Simpler on that track (the kit is promoted to per-pad Simplers on first use), so every sampler param is per-pad: \"tighten the kick's decay\" = sampler.set {track, note:36, param:\"decay_ms\", value:120}"
+    },
+    {
+      "key": "sampler.slice",
+      "name": "Slice Sample",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, sensitivity?: 0..1 = 0.5, at?: [fractions 0..1] }"
+    },
+    {
+      "key": "sampler.slice_to_midi",
+      "name": "Slices to MIDI",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track }"
+    },
+    {
+      "key": "view.sampler_editor",
+      "name": "Sampler Editor",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ track? (default: the selected track), note? (a drum pad: opens that pad's Simpler, promoting the kit on first use) }"
+    },
+    {
+      "key": "view.drum_rack",
+      "name": "Drum Rack",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ track? (default: the selected track) } - toggle the kit's Drum Rack editor"
+    },
+    {
+      "key": "view.audio_clip_editor",
+      "name": "Audio Clip View",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ track?, clip? }"
+    },
+    {
+      "key": "clip.match_key",
+      "name": "Match Clip to Key",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip | scene } - scene matches a Loop Deck slot clip to the song key"
+    },
+    {
+      "key": "clip.auto_pitch",
+      "name": "Follow Song Key",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, on?: bool (absent = toggle), root_note?: 0-11 or a tonic name (\"C\", \"F#\", \"Bb\") } â FOLLOW THE SONG KEY: the clip re-pitches itself whenever the key track changes, by the nearest interval from its own key to the song's. root_note is what key the CLIP is in and is required the first time (without it the engine has nothing to move it from and the switch does nothing). Composes with a fixed clip.pitch rather than replacing it. Read tracks[].clips[].follows_key + root_note. Use clip.match_key instead for a ONE-OFF re-pitch that then stays put"
+    },
+    {
+      "key": "clip.stretch_mode",
+      "name": "Stretch Quality",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip, mode } â which algorithm warps and pitches this clip. mode is \"Off\", one of the engine's own names (read tracks[].clips[].stretch_mode; this build ships SoundTouch Normal + Better), or the aliases \"normal\" / \"better\" / \"default\". Better costs more CPU and keeps transients cleaner; Normal is the cheap one. An unknown name is refused NAMING what is available"
+    },
+    {
+      "key": "midi_input.arm",
+      "name": "Arm MIDI Input",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, on? }"
+    },
+    {
+      "key": "midi_input.set",
+      "name": "MIDI Input Settings",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ device (a midi_inputs[].name), enabled?: bool, channels?: \"all\" | [1..16], force_channel?: 0 (keep) | 1..16, note_low?: 0..127, note_high?: 0..127, velocity_override?: bool (every note at full velocity), adjust_ms?: Â±500 (timing trim), min_length_ms?, record_mode?: merge (overdub into the clip) | replace (the recorded span replaces what was there) | new (a new clip / take), input_quantize?: off | one of midi_inputs[].quantize_choices } â per-device settings, persisted by the engine; read them back on midi_inputs[]"
+    },
+    {
+      "key": "midi_output.set",
+      "name": "Set MIDI Output",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, device?: <port name>|\"default\"|\"none\" }"
+    },
+    {
+      "key": "midi.set_mpe",
+      "name": "Set MIDI MPE",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, clip, on? }"
+    },
+    {
+      "key": "chord.set",
+      "name": "Set Chord Progression",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ chords:[names: \"I\"|\"vi\"|\"Cmaj\"|\"Am7\"...], beats_per_chord?:double=4 }"
+    },
+    {
+      "key": "key.set",
+      "name": "Set Key",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ tonic: \"C\"|\"A#\"|\"Bb\"..., scale?: \"major\"|\"minor\"|<mode>, at_s?:double=0 }"
+    },
+    {
+      "key": "step.program",
+      "name": "Program Step Beat",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, beats:[{note, steps:[indices], velocity?, gates?:[0..4, parallel to steps], probabilities?:[0..1, parallel to steps] }"
+    },
+    {
+      "key": "step.set_cell",
+      "name": "Set Step Cell",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, clip?, note, step, on?:bool=true, velocity?:1-127, gate?:0..4, probability?:0..1 }"
+    },
+    {
+      "key": "midi.arpeggiate",
+      "name": "Arpeggiate Chord",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, clip, chord:[pitches], pattern?:\"up\"|\"down\"|\"updown\"|\"random\", rate_beats?:double=0.25, octaves?:int=1, length_beats?:double=4, gate?:double, velocity?:int }"
+    },
+    {
+      "key": "track.set_arp",
+      "name": "Set Arpeggiator",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "the LIVE arpeggiator MIDI FX device on the track (non-destructive - the clip's notes stay put; to bake an arpeggio INTO a clip's notes use midi.arpeggiate, and for swing/groove feel use clip.set_groove or midi.quantize, never this) { track, on?:bool=true, style?:\"up\"|\"down\"|\"updown\"|\"downup\"|\"updown_inc\"|\"converge\"|\"diverge\"|\"pinky_up\"|\"thumb_up\"|\"played\"|\"chord\"|\"random\", rate_beats?:double (1/16 = 0.25) or rate?:\"1/16\"|\"1/8D\"|\"1/4T\" (the snapshot's own spelling â echo it back verbatim) + rate_modifier?:\"straight\"|\"dotted\"|\"triplet\", octaves?:1-8, gate?:0.05-1, swing?:0.5-0.75 (0.5 straight; swings the PATTERN THE ARP GENERATES - to swing a clip's own existing notes use clip.set_groove or midi.quantize), repeats?:1-8, chance?:0-1, vel_decay?:-1..1, shift?:-24..24 semitones, scale?:\"off\"|\"major\"|\"minor\"|\"dorian\"|\"phrygian\"|\"lydian\"|\"mixolydian\"|\"harmonic_minor\"|\"pentatonic_major\"|\"pentatonic_minor\"|\"blues\"|\"whole_tone\", key?:0-11 or a note name (\"D#\" â the snapshot's spelling), hold?:bool, retrigger?:\"off\"|\"note\"|\"bar\", bypassed?:bool (keeps the device + its settings, passes notes through â `on:false` DELETES it) }"
+    },
+    {
+      "key": "midi_learn.map",
+      "name": "MIDI Learn Map",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, param, cc, channel? (default 1) }"
+    },
+    {
+      "key": "midi_learn.unmap",
+      "name": "Remove MIDI Map",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, param }"
+    },
+    {
+      "key": "midi_learn.listen",
+      "name": "MIDI Learn",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, param }"
+    },
+    {
+      "key": "midi_sync.set",
+      "name": "Set MIDI Sync Out",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ device?: <port name> (omit = every MIDI output), clock?, timecode?, mmc? }",
+      "needs_confirm": true
+    },
+    {
+      "key": "control_surface.set",
+      "name": "Set Control Surface",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ name: <controller name, e.g. \"Mackie Control Universal\">, enabled?, midi_in?, midi_out? }",
+      "needs_confirm": true
+    },
+    {
+      "key": "osc.set",
+      "name": "Set OSC Remote",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ enabled?, port? }",
+      "needs_confirm": true
+    },
+    {
+      "key": "view.toggle_browser",
+      "name": "Toggle Browser",
+      "category": "View",
+      "wants_args": false
+    },
+    {
+      "key": "view.toggle_engineer",
+      "name": "Toggle Engineer Panel",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ on?:bool } - omitted = TOGGLE. The engineer panel (the chat column). Its state is `engineer_open` in the snapshot"
+    },
+    {
+      "key": "view.session_rail",
+      "name": "Session Rail",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ on?: bool (omit = toggle) }"
+    },
+    {
+      "key": "view.toggle_dock",
+      "name": "Toggle Device Dock",
+      "category": "View",
+      "wants_args": false
+    },
+    {
+      "key": "view.toggle_launcher",
+      "name": "Clip Launcher Panel",
+      "category": "View",
+      "wants_args": false
+    },
+    {
+      "key": "clip.to_slot",
+      "name": "Clip â Launcher Slot",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track, clip: <index>, scene, copy?: bool }"
+    },
+    {
+      "key": "slot.to_arrangement",
+      "name": "Slot â Arrangement",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ track, scene, start_s?, copy?: bool }"
+    },
+    {
+      "key": "scene.duplicate",
+      "name": "Duplicate Scene",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ scene }"
+    },
+    {
+      "key": "slot.audition",
+      "name": "Audition Slot",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ track, scene } - prehear the slot's loop (tempo-synced, tuned, trimmed) through the preview player without launching; same call again stops"
+    },
+    {
+      "key": "scene.to_arrangement",
+      "name": "Scene â Arrangement",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ scene, start_s?, copy? } - commit every clip in the scene's column to the timeline, aligned (default: at the playhead, moving; copy leaves the deck playing)"
+    },
+    {
+      "key": "slot.set_play_mode",
+      "name": "Slot Play Mode",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ track, scene, loop?: bool, auto_tempo?: bool }"
+    },
+    {
+      "key": "slot.duplicate",
+      "name": "Duplicate Slot Clip",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ track, scene }"
+    },
+    {
+      "key": "launcher.capture",
+      "name": "Capture Jam to Timeline",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ on?: bool (default: toggle) }"
+    },
+    {
+      "key": "slot.record",
+      "name": "Record Into Slot",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ track, scene, bars? } - bars defaults to the loop grid: the take punches out after that many bars and loops (0 / Free grid = roll until stopped)"
+    },
+    {
+      "key": "scene.from_sections",
+      "name": "Scenes From Sections",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ }"
+    },
+    {
+      "key": "view.device_zoom",
+      "name": "Expanded Device View",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ type?: \"eq\"|\"comp\"|... }"
+    },
+    {
+      "key": "track.spectrogram",
+      "name": "Track Spectrogram",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track? (default \"master\"), window_s? (â¤60) }"
+    },
+    {
+      "key": "view.mixer_width",
+      "name": "Mixer Strip Width",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ mode?: \"narrow\"|\"default\"|\"wide\" }"
+    },
+    {
+      "key": "transport.play_continue",
+      "name": "Continue Play",
+      "category": "Transport",
+      "wants_args": false
+    },
+    {
+      "key": "arrange.playhead_home",
+      "name": "Playhead to Start",
+      "category": "Arrange",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "arrange.playhead_end",
+      "name": "Playhead to End",
+      "category": "Arrange",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "clip.consolidate",
+      "name": "Consolidate",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track?, start_s?, end_s? }"
+    },
+    {
+      "key": "clip.crop",
+      "name": "Crop to Selection",
+      "category": "Clip",
+      "wants_args": true,
+      "args": "{ track?, start_s, end_s }"
+    },
+    {
+      "key": "time.insert",
+      "name": "Insert Silence",
+      "category": "Time",
+      "wants_args": true,
+      "args": "{ start_s?, length_s? } - inserts silence across EVERY track, shifting later material right"
+    },
+    {
+      "key": "time.cut",
+      "name": "Cut Time",
+      "category": "Time",
+      "wants_args": true,
+      "args": "{ start_s?, end_s? } - cuts the range out of EVERY track (the whole timeline) and closes the gap; defaults to the time selection - no track.select_all needed"
+    },
+    {
+      "key": "time.copy",
+      "name": "Copy Time",
+      "category": "Time",
+      "wants_args": true,
+      "args": "{ start_s?, end_s? } - copies the range across EVERY track; defaults to the time selection - no track.select_all needed"
+    },
+    {
+      "key": "time.paste",
+      "name": "Paste Time",
+      "category": "Time",
+      "wants_args": true,
+      "args": "{ at_s? }"
+    },
+    {
+      "key": "time.duplicate",
+      "name": "Duplicate Time",
+      "category": "Time",
+      "wants_args": true,
+      "args": "{ start_s?, end_s? } - repeats the range right after itself across EVERY track; defaults to the time selection"
+    },
+    {
+      "key": "time.delete",
+      "name": "Delete Time",
+      "category": "Time",
+      "wants_args": true,
+      "args": "{ start_s?, end_s? } - deletes the range from EVERY track and closes the gap; defaults to the time selection"
+    },
+    {
+      "key": "track.fold_toggle",
+      "name": "Fold Group",
+      "category": "Track",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "track.unfold_all",
+      "name": "Unfold All Groups",
+      "category": "Track",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "view.track_height_inc",
+      "name": "Grow Track Height",
+      "category": "View",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "view.track_height_dec",
+      "name": "Shrink Track Height",
+      "category": "View",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "browser.search_focus",
+      "name": "Search Browser",
+      "category": "View",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "launcher.loop_8_bars",
+      "name": "Loop Length 8 Bars",
+      "category": "Scenes",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "launcher.loop_4_bars",
+      "name": "Loop Length 4 Bars",
+      "category": "Scenes",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "launcher.loop_2_bars",
+      "name": "Loop Length 2 Bars",
+      "category": "Scenes",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "launcher.loop_1_bar",
+      "name": "Loop Length 1 Bar",
+      "category": "Scenes",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "launcher.loop_free",
+      "name": "Loop Length Free",
+      "category": "Scenes",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "nav.up",
+      "name": "Select Up",
+      "category": "Arrange",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "nav.down",
+      "name": "Select Down",
+      "category": "Arrange",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "slot.launch_selected",
+      "name": "Launch Selected Slot",
+      "category": "Scenes",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "arrange.draw_mode",
+      "name": "Draw Mode",
+      "category": "Arrange",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "track.bounce",
+      "name": "Bounce to New Track",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track?, start_s?, end_s? }"
+    },
+    {
+      "key": "view.command_palette",
+      "name": "Search Commands",
+      "category": "View",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "scene.delete",
+      "name": "Delete Scene",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ scene }"
+    },
+    {
+      "key": "slot.move",
+      "name": "Move Slot Clip",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ track, scene, dest_scene, dest_track?, copy? }"
+    },
+    {
+      "key": "launcher.record",
+      "name": "Record Into Next Free Slot",
+      "category": "Scenes",
+      "wants_args": false,
+      "args": "{ } - NO args, and a TOGGLE: session record. EVERY record-armed track records into its next empty pad (one new slot clip per take); calling it again punches out. Prefer it when the ask is \"record a take / into the next free slot\"; use slot.record when the user names the track or scene"
+    },
+    {
+      "key": "launcher.set_loop_length",
+      "name": "Launcher Loop Length",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ bars: 0|0.5|1|2|4|8 }"
+    },
+    {
+      "key": "view.meter_history",
+      "name": "Mixer Meter History",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ track? (default = the focused track), history?: bool (omit = toggle) }"
+    },
+    {
+      "key": "view.comp_scope",
+      "name": "Comp Law/Scope View",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ scope?: bool (omit = toggle) }"
+    },
+    {
+      "key": "device.move_to_track",
+      "name": "Move Device to Track",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ type, occ?: int, from?, to, copy?: bool }"
+    },
+    {
+      "key": "view.meter_style",
+      "name": "Meter Look",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ style: \"phosphor\"|\"solid\"|\"blocks\"|\"dots\"|\"scan\"|\"mono\" }"
+    },
+    {
+      "key": "track.stop_clips",
+      "name": "Stop This Track's Clips",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ track }"
+    },
+    {
+      "key": "scene.rename",
+      "name": "Rename Scene",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ scene, name }"
+    },
+    {
+      "key": "view.tempo_lane",
+      "name": "Tempo Lane",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ on? (omit = toggle) }"
+    },
+    {
+      "key": "view.tooltips",
+      "name": "Tooltips",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ on?: bool (omit = toggle) }"
+    },
+    {
+      "key": "view.track_delay",
+      "name": "Track Delay",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ on?: bool (omit = toggle) } - shows/hides the Track Delay cell in the mixer strips"
+    },
+    {
+      "key": "section.set",
+      "name": "Edit Section",
+      "category": "Markers",
+      "wants_args": true,
+      "args": "{ index, name?, start_s? (alone = move, keep length), end_s?, color? (\"#RRGGBB\" | \"default\") }"
+    },
+    {
+      "key": "vca.rename",
+      "name": "Rename VCA Group",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ name, new_name }"
+    },
+    {
+      "key": "launcher.snapshot_save",
+      "name": "Save Deck Snapshot",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ name? }"
+    },
+    {
+      "key": "launcher.snapshot_recall",
+      "name": "Recall Deck Snapshot",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ snap: <name or index> }"
+    },
+    {
+      "key": "slot.set_loop_region",
+      "name": "Slot Loop Region",
+      "category": "Scenes",
+      "wants_args": true,
+      "args": "{ track, scene, start_beats? (into the source; 0 = the top), length_beats? (per-channel override; 0 = follow the loop-length grid) }"
+    },
+    {
+      "key": "track.separate",
+      "name": "Split into Stems",
+      "category": "Track",
+      "wants_args": true,
+      "args": "{ track? (default = the focused track), stems?: 2|4 (default 4). AI stem split (htdemucs): the track's audio becomes new vocals/drums/bass/other tracks (2 = vocals/accompaniment); minutes of work, runs async like Auto Mix }"
+    },
+    {
+      "key": "midi.insert_at_selection",
+      "name": "Insert Empty MIDI Clip",
+      "category": "MIDI",
+      "wants_args": false,
+      "args": "{} - NO args (Live's shift-cmd-M): fills the ARRANGE TIME SELECTION on the selected MIDI track (track_kind \"midi\", with an instrument) with an empty MIDI clip (no selection = one bar at the playhead on the selected track) and opens the piano roll; to target a NAMED track or range use midi.add_clip"
+    },
+    {
+      "key": "rack.rename",
+      "name": "Rename Rack",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ rack, name }"
+    },
+    {
+      "key": "rack.chain_add",
+      "name": "Add Rack Chain",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ rack, name? }"
+    },
+    {
+      "key": "rack.chain_remove",
+      "name": "Remove Rack Chain",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ rack, chain (index) }"
+    },
+    {
+      "key": "rack.chain_set",
+      "name": "Set Rack Chain",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ rack, chain, name?, volume_db?, pan?: -1..1, mute?, solo? }"
+    },
+    {
+      "key": "rack.plugin_add",
+      "name": "Add Plugin to Chain",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ rack, chain, name (from available_plugins), slot? }"
+    },
+    {
+      "key": "rack.plugin_remove",
+      "name": "Remove Chain Plugin",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ rack, chain, slot }"
+    },
+    {
+      "key": "rack.plugin_move",
+      "name": "Move Chain Plugin",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ rack, from_chain, from_slot, to_chain, to_slot? }"
+    },
+    {
+      "key": "rack.macro_add",
+      "name": "Add Rack Macro",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ rack, name? }"
+    },
+    {
+      "key": "rack.macro_set",
+      "name": "Set Rack Macro",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ rack, macro (index), value?: 0..1, name? }"
+    },
+    {
+      "key": "rack.macro_map",
+      "name": "Map Rack Macro",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ rack, macro, chain, slot, param (index), min?: 0..1, max?: 0..1 }"
+    },
+    {
+      "key": "rack.macro_unmap",
+      "name": "Unmap Rack Macro",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ rack, macro, chain, slot, param }"
+    },
+    {
+      "key": "rack.preset_save",
+      "name": "Save Rack Preset",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ rack, name }"
+    },
+    {
+      "key": "rack.preset_load",
+      "name": "Load Rack Preset",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ track, name }"
+    },
+    {
+      "key": "rack.device_add",
+      "name": "Add Device to Chain",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ rack, chain, device (native type), slot? }"
+    },
+    {
+      "key": "rack.device_remove",
+      "name": "Remove Chain Device",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ rack, chain, device_index }"
+    },
+    {
+      "key": "rack.device_move",
+      "name": "Move Chain Device",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ rack, from_chain, from_device, to_chain, to_index? }"
+    },
+    {
+      "key": "rack.group",
+      "name": "Group Devices into Rack",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ track, devices:[ eq | comp#1 | plugin:0 | <plug-in name> â¦ ], name? }"
+    },
+    {
+      "key": "rack.ungroup",
+      "name": "Ungroup Rack",
+      "category": "Plugin",
+      "wants_args": true,
+      "args": "{ rack }"
+    },
+    {
+      "key": "device.set",
+      "name": "Set Device Param",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ track (name|master|return:â¦|rack:<rack>#<chain>), target (\"comp.threshold_db\"), value }"
+    },
+    {
+      "key": "sampler.crop",
+      "name": "Crop Sample",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, note? } - crops the sample to its START/END region: the region is written as a new wav in the project and loaded in its place (START/END reset to the whole file; undo restores the old file)"
+    },
+    {
+      "key": "sampler.add_layer",
+      "name": "Add Sample Layer",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, path, lo_note?:0-127 (default 0), hi_note?:0-127 (default 127), lo_vel?:1-127 (default 1), hi_vel?:1-127 (default 127), root_note?:0-127 (default = lo_note, or 60 for the whole keyboard), gain_db?:-24..12, key_fade?:0-24, vel_fade?:0-64, note? (a drum pad's Simpler) } - a multi-sample zone: this file plays instead of the main sample for keys lo..hi at velocities lo_vel..hi_vel; EVERY zone holding the note plays, and key_fade / vel_fade ramp a zone in and out over that many keys / velocity steps at each end, so two zones overlapping by their fade widths CROSSFADE (their gains sum to one). Slice mode ignores layers. Up to 16; returns the layer's index; the snapshot lists them under sampler.layers. On a drum track, note picks the pad: velocity layers per pad"
+    },
+    {
+      "key": "sampler.set_layer",
+      "name": "Set Sample Layer",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, index, lo_note?, hi_note?, lo_vel?, hi_vel?, root_note?, gain_db?, key_fade?, vel_fade?, note? }"
+    },
+    {
+      "key": "sampler.remove_layer",
+      "name": "Remove Sample Layer",
+      "category": "MIDI",
+      "wants_args": true,
+      "args": "{ track, index, note? }"
+    },
+    {
+      "key": "view.computer_keyboard",
+      "name": "Computer MIDI Keyboard",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ on?: bool (omit = toggle), octave?: -2..2 (the A key = MIDI 60 at 0), velocity?: 1-127 } - the computer MIDI keyboard (âK): a s d f g h j k l ; ' play the white keys from C on the focused instrument track, w e t y u o p the black keys, Z/X shift the octave, C/V the velocity"
+    },
+    {
+      "key": "view.shortcuts",
+      "name": "Keyboard Shortcuts",
+      "category": "View",
+      "wants_args": false,
+      "user_only": true
+    },
+    {
+      "key": "master.limiter",
+      "name": "Master Safety Limiter",
+      "category": "Mix",
+      "wants_args": true,
+      "args": "{ on?: bool (omit = toggle) } - the master SAFETY limiter: a ceiling-only -1 dBTP limiter (no loudness makeup) on the master chain; new projects seed one"
+    },
+    {
+      "key": "view.gate_tape",
+      "name": "Gate Towers/Tape View",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ tape?: bool (omit = toggle) } - the gate face's hero picture: TOWERS (detect + attenuation meters with the rhythm and key ribbons) or the TAPE (six seconds of the detector, lit where the gate is open)"
+    },
+    {
+      "key": "view.mb_tapes",
+      "name": "Multiband Field/Tapes View",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ tapes?: bool (omit = toggle) } - the multiband compressor face's hero picture: the FIELD (the spectrum in and out, the gap between them the reduction, with the band towers) or the TAPES (six seconds of each band's level with its threshold and reduction)"
+    },
+    {
+      "key": "view.sat_cards",
+      "name": "Saturation Field/Cards View",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ cards?: bool (omit = toggle) } - the multiband saturation face's hero picture: the HEAT FIELD (the spectrum in and out with each band's generated harmonics drawn where they land, the knee lines, the heat towers) or the WAVESHAPER CARDS (a card per band: the curve, the live harmonic stack, THD and heat)"
+    },
+    {
+      "key": "view.ott_tapes",
+      "name": "OTT Field/Tapes View",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ tapes?: bool (omit = toggle) } - the OTT face's hero picture: the FIELD (the spectrum in and out, the gap between them the levelling - red pulled down, warm lifted - with the bipolar towers) or the TAPES (six seconds of each band's level in and out around the -30 dB target every band is pulled toward)"
+    },
+    {
+      "key": "view.clip_scope",
+      "name": "Clipper Tape/Scope View",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ scope?: bool (omit = toggle) } - the clipper face's hero picture: the TAPE (six seconds of the master with the loudness band under the peaks, everything the input reaches above the ceiling filled red - the shave - with the IN / OUT crest bars and the headroom won) or the SCOPE (the wave at sample scale with the top coming off, the corner shaped by hardness)"
+    },
+    {
+      "key": "view.od_scope",
+      "name": "Overdrive Field/Scope View",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ scope?: bool (omit = toggle) } - the overdrive face's hero picture: the FIELD (the spectrum in and out - the grit the drive adds filled warm above the input, what the band-pass took away red below it - with the focus curtain and the tone tilt as gain curves on the 0 dB line) or the SCOPE (the wave bending into the ceiling at -DRIVE dBFS, the squash filled between the ghost and the driven output)"
+    },
+    {
+      "key": "view.sat_tape",
+      "name": "Saturation Scope/Tape View",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ tape?: bool (omit = toggle) } - the single-band saturation face's hero picture: the SCOPE (the wave through the curve at its live level - the input as a ghost, the shaped output bright, the knee as dashed lines pinned at 55 % of the lane so the clip is the picture) or the HEAT TAPE (six seconds of the input and shaped-output peaks against the knee horizon the output flattens against, the input above the knee filled warm to red, a THD lane under it)"
+    },
+    {
+      "key": "view.delay_tape",
+      "name": "Delay Scope/Tape View",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ tape?: bool (omit = toggle) } - the delay face's hero picture: the ECHO SCOPE (the repeats this setting makes - bars at the delay time falling by the feedback, amber where the loop's tone has darkened them, over the note values of one bar at the session tempo, with the miss to the nearest note) or the ECHO TAPE (six seconds of the dry hits and every echo they threw, against the beat grid scrolling with the transport)"
+    },
+    {
+      "key": "view.rev_tape",
+      "name": "Reverb Scope/Tape View",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ tape?: bool (omit = toggle) } - the reverb face's hero picture: the TAIL SCOPE (the reverb's own shape on a log-time axis - the pre-delay gap, the comb onsets, the fall to -60 dB at the decay time, with every hit sliding down the curve as a pip) or the RING TAPE (six seconds of the dry and the wet on one axis with the WASH filled amber wherever the reverb is louder than the source, and the pre-delay bracket + decay slope laid on the newest hit)"
+    },
+    {
+      "key": "view.ir_print",
+      "name": "IR Reverb Field/Print View",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ print?: bool (omit = toggle) } - the IR reverb face's hero picture: the TAIL WATERFALL (the impulse as a spectrogram - time across, frequency up, brightness is level - with the tone cutoff as the dashed ceiling, the true RT60 as the amber line and the pre-delay as the black column at the left) or the ROOM PRINT (the first 100 ms of the impulse at full zoom, where room / hall / plate actually differ, beside the whole tail falling to -60 dB)"
+    },
+    {
+      "key": "view.width_field",
+      "name": "Width Stage/Field View",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ field?: bool (omit = toggle) } - the stereo width face's picture: the STAGE (a top-down listening position - every sample of the master a point in a fan in front of the listener, mono a bright column straight ahead, wide out to the two speaker marks at +-30 degrees, anti-phase past the red rays; the input as a ghost fan, twelve seconds of correlation along the floor) or the FIELD (width per frequency - each band's Side-against-Mid opening as a column mirrored about the centre line, the input a dim ghost, the output lit, red where a band crosses into anti-phase)"
+    },
+    {
+      "key": "view.spectrogram_view",
+      "name": "Spectrogram View",
+      "category": "View",
+      "wants_args": true,
+      "args": "{ picture?: \"tape\"|\"ridge\", under?: \"off\"|\"bands\"|\"notes\", full?: bool } - the analyzer face's three switches, any subset in one call (a bare call cycles the picture). PICTURE is the waterfall's geometry: the TAPE (flat and measurable - a bar:beat ruler along the top, a piano note ruler down the frequency axis with the C octaves ruled through the field, the loudest partial of every column traced as one white thread so a melody reads as a line, and a hover readout of frequency / note / cents / dB / bar) or the RIDGE (the last twelve seconds in perspective, the newest spectrum the lit ridge at the front and older columns receding into the dark). UNDER is the drawer beneath the picture: \"off\", \"bands\" (the eight band histories - sub / bass / lo mid / mid / hi mid / pres / bril / air - plus momentary LUFS over the last minute, with per-lane mean and max: exactly the rows track.spectrogram hands you, so the user is watching your own numbers) or \"notes\" (a twelve-lane chroma tape of which pitch classes have been sounding, with the detected key and its confidence). FULL drops the glass rail and lays the peak / LUFS / tilt readouts over the picture as a HUD - the biggest picture per pixel"
+    }
+  ]
+}

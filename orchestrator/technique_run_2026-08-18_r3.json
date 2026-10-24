@@ -1,0 +1,438 @@
+{
+  "model": "claude-opus-5",
+  "backend": "subscription",
+  "cases": [
+    {
+      "key": "parallel_comp_drums",
+      "technique": "parallel (NY) compression",
+      "brief": "add parallel compression to the drums to thicken them up, but keep the punch",
+      "passed": 0,
+      "repeats": 3,
+      "stable_failure": true,
+      "runs": [
+        {
+          "plan_failures": [],
+          "outcome_failures": [
+            "drums crest moved +0.8 dB (no audible thickening; want <= -0.5)",
+            "drums RMS moved -2.1 dB (want -1..+6 \u2014 the blend should hold or lift the level)"
+          ],
+          "passed": false,
+          "applied_actions": 2,
+          "stop_reason": "nothing to propose",
+          "passes_run": 3,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [
+            "drums RMS moved -1.1 dB (want -1..+6 \u2014 the blend should hold or lift the level)"
+          ],
+          "passed": false,
+          "applied_actions": 1,
+          "stop_reason": "nothing to propose",
+          "passes_run": 3,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [
+            "drums crest moved +0.5 dB (no audible thickening; want <= -0.5)",
+            "drums RMS moved -1.5 dB (want -1..+6 \u2014 the blend should hold or lift the level)"
+          ],
+          "passed": false,
+          "applied_actions": 3,
+          "stop_reason": "nothing to propose",
+          "passes_run": 3,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "duck_pads_under_lead",
+      "technique": "sidechain ducking",
+      "brief": "duck the pads under the lead so the lead always stays on top",
+      "passed": 3,
+      "repeats": 3,
+      "stable_failure": false,
+      "runs": [
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 1,
+          "stop_reason": "nothing to propose",
+          "passes_run": 2,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 1,
+          "stop_reason": "nothing to propose",
+          "passes_run": 2,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 1,
+          "stop_reason": "nothing to propose",
+          "passes_run": 3,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "deess_lead",
+      "technique": "de-essing",
+      "brief": "the lead has piercing sibilance - de-ess it without dulling the melody",
+      "passed": 0,
+      "repeats": 3,
+      "stable_failure": true,
+      "runs": [
+        {
+          "plan_failures": [
+            "no de-esser on 'lead' (deess at 3.5-10 kHz, or a dynamic_eq cut >= 4 kHz)"
+          ],
+          "outcome_failures": [
+            "sibilance bursts only came down 0.6 dB (want >= 3)"
+          ],
+          "passed": false,
+          "applied_actions": 7,
+          "stop_reason": "nothing to propose",
+          "passes_run": 4,
+          "error": null
+        },
+        {
+          "plan_failures": [
+            "no de-esser on 'lead' (deess at 3.5-10 kHz, or a dynamic_eq cut >= 4 kHz)"
+          ],
+          "outcome_failures": [
+            "sibilance bursts only came down 1.2 dB (want >= 3)"
+          ],
+          "passed": false,
+          "applied_actions": 2,
+          "stop_reason": "regressed \u2014 the critic's corrective pass made it worse; reverted",
+          "passes_run": 3,
+          "error": null
+        },
+        {
+          "plan_failures": [
+            "no de-esser on 'lead' (deess at 3.5-10 kHz, or a dynamic_eq cut >= 4 kHz)"
+          ],
+          "outcome_failures": [
+            "sibilance bursts only came down 1.3 dB (want >= 3)"
+          ],
+          "passed": false,
+          "applied_actions": 1,
+          "stop_reason": "regressed \u2014 the critic's corrective pass made it worse; reverted",
+          "passes_run": 3,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "tame_boom_bassline",
+      "technique": "multiband / dynamic low control",
+      "brief": "the bassline gets boomy when it swells - tame the boom without losing the steady low end or dulling its top",
+      "passed": 0,
+      "repeats": 3,
+      "stable_failure": true,
+      "runs": [
+        {
+          "plan_failures": [
+            "no band-selective dynamics on 'bassline' (mb_comp with an active low band, or a low dynamic_eq cut) \u2014 the boom is time-varying, a static EQ cut is the wrong tool"
+          ],
+          "outcome_failures": [
+            "swell-window boom only came down 0.0 dB (want >= 2.5)",
+            "the constant 220/440 top moved -2.0 dB during swells (want +-1.5: full-band compression pumps it)"
+          ],
+          "passed": false,
+          "applied_actions": 1,
+          "stop_reason": "nothing to propose",
+          "passes_run": 3,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [
+            "swell-window boom only came down 0.9 dB (want >= 2.5)",
+            "the constant 220/440 top moved -2.4 dB during swells (want +-1.5: full-band compression pumps it)"
+          ],
+          "passed": false,
+          "applied_actions": 2,
+          "stop_reason": "nothing to propose",
+          "passes_run": 3,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [
+            "swell-window boom only came down 1.8 dB (want >= 2.5)"
+          ],
+          "passed": false,
+          "applied_actions": 1,
+          "stop_reason": "regressed \u2014 the critic's corrective pass made it worse; reverted",
+          "passes_run": 3,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "master_streaming",
+      "technique": "mastering chain",
+      "brief": "master this for streaming: around -14 LUFS, true peak at -1, keep it clean and dynamic",
+      "passed": 3,
+      "repeats": 3,
+      "stable_failure": false,
+      "runs": [
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 1,
+          "stop_reason": "targets met",
+          "passes_run": 2,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 1,
+          "stop_reason": "targets met",
+          "passes_run": 2,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 1,
+          "stop_reason": "targets met",
+          "passes_run": 2,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "widen_pads_mono_lows",
+      "technique": "band-limited stereo width",
+      "brief": "make the pads wider and more spacious, but keep the low end mono and club-safe",
+      "passed": 3,
+      "repeats": 3,
+      "stable_failure": false,
+      "runs": [
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 7,
+          "stop_reason": "nothing to propose",
+          "passes_run": 3,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 8,
+          "stop_reason": "pass budget exhausted",
+          "passes_run": 3,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 7,
+          "stop_reason": "nothing to propose",
+          "passes_run": 4,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "vocal_space_send",
+      "technique": "send/return ambience",
+      "brief": "give the lead a sense of space with a short room reverb, but keep it upfront - not washed out",
+      "passed": 0,
+      "repeats": 3,
+      "stable_failure": true,
+      "runs": [
+        {
+          "plan_failures": [],
+          "outcome_failures": [
+            "post-phrase tail only rose +0.2 dB (want >= 1: no audible space was added)"
+          ],
+          "passed": false,
+          "applied_actions": 2,
+          "stop_reason": "nothing to propose",
+          "passes_run": 3,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [
+            "post-phrase tail only rose +0.1 dB (want >= 1: no audible space was added)"
+          ],
+          "passed": false,
+          "applied_actions": 3,
+          "stop_reason": "nothing to propose",
+          "passes_run": 3,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [
+            "post-phrase tail only rose +0.1 dB (want >= 1: no audible space was added)"
+          ],
+          "passed": false,
+          "applied_actions": 2,
+          "stop_reason": "targets met",
+          "passes_run": 2,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "glue_rhythm_section",
+      "technique": "bus glue compression",
+      "brief": "group the drums and bassline into a rhythm bus and glue them with gentle bus compression",
+      "passed": 0,
+      "repeats": 3,
+      "stable_failure": true,
+      "runs": [
+        {
+          "plan_failures": [
+            "run failed: run stopped: pass 1 failed after 1 applied move(s): 'stem_id'"
+          ],
+          "outcome_failures": [
+            "run failed"
+          ],
+          "passed": false,
+          "applied_actions": 3,
+          "stop_reason": "error",
+          "passes_run": 2,
+          "error": "run stopped: pass 1 failed after 1 applied move(s): 'stem_id'"
+        },
+        {
+          "plan_failures": [
+            "run failed: run stopped: pass 1 failed after 1 applied move(s): 'stem_id'"
+          ],
+          "outcome_failures": [
+            "run failed"
+          ],
+          "passed": false,
+          "applied_actions": 5,
+          "stop_reason": "error",
+          "passes_run": 2,
+          "error": "run stopped: pass 1 failed after 1 applied move(s): 'stem_id'"
+        },
+        {
+          "plan_failures": [
+            "run failed: run stopped: pass 1 failed after 1 applied move(s): 'stem_id'"
+          ],
+          "outcome_failures": [
+            "run failed"
+          ],
+          "passed": false,
+          "applied_actions": 2,
+          "stop_reason": "error",
+          "passes_run": 2,
+          "error": "run stopped: pass 1 failed after 1 applied move(s): 'stem_id'"
+        }
+      ]
+    },
+    {
+      "key": "dynamic_harsh_lead",
+      "technique": "dynamic EQ",
+      "brief": "the lead turns harsh when it gets loud - tame that harshness without dulling the quiet phrases",
+      "passed": 1,
+      "repeats": 3,
+      "stable_failure": false,
+      "runs": [
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 1,
+          "stop_reason": "nothing to propose",
+          "passes_run": 3,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [
+            "loud-phrase harshness only came down 2.2 dB (want >= 3)"
+          ],
+          "passed": false,
+          "applied_actions": 3,
+          "stop_reason": "nothing to propose",
+          "passes_run": 2,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [
+            "loud-phrase harshness only came down 2.4 dB (want >= 3)"
+          ],
+          "passed": false,
+          "applied_actions": 2,
+          "stop_reason": "nothing to propose",
+          "passes_run": 3,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "warm_saturation_bassline",
+      "technique": "harmonic saturation",
+      "brief": "add some tape-style warmth to the bassline - harmonic richness, but don't push its peak level",
+      "passed": 2,
+      "repeats": 3,
+      "stable_failure": false,
+      "runs": [
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 3,
+          "stop_reason": "diminishing returns",
+          "passes_run": 4,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 1,
+          "stop_reason": "nothing to propose",
+          "passes_run": 2,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [
+            "bass peak level grew (saturation should compress peaks, not push them)"
+          ],
+          "passed": false,
+          "applied_actions": 2,
+          "stop_reason": "nothing to propose",
+          "passes_run": 3,
+          "error": null
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "cases": 10,
+    "runs": 30,
+    "not_measured": 3,
+    "stable_failures": 5,
+    "flaky": 2,
+    "clean_passes": 3
+  }
+}

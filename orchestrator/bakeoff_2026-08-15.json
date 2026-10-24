@@ -1,0 +1,97 @@
+{
+  "backend": "subscription",
+  "models": {
+    "claude-opus-5": {
+      "route": {
+        "total": 74,
+        "counts": {
+          "resolved": 63,
+          "mis-scoped": 9,
+          "over-reach": 2,
+          "unresolved": 0
+        },
+        "score": 85.1,
+        "headline": "resolved",
+        "harm": [
+          "mis-scoped",
+          "over-reach"
+        ],
+        "wall_s": 452.4
+      },
+      "operate": {
+        "total": 39,
+        "counts": {
+          "correct": 31,
+          "wrong": 0,
+          "escalated": 0,
+          "over-reach": 5,
+          "none": 3
+        },
+        "score": 79.5,
+        "seconds": 606.0,
+        "headline": "correct",
+        "harm": [
+          "wrong",
+          "escalated",
+          "over-reach"
+        ],
+        "wall_s": 168.0
+      },
+      "answer": {
+        "total": 29,
+        "counts": {
+          "answered": 29,
+          "ungrounded": 0,
+          "missed": 0,
+          "bluffed": 0
+        },
+        "score": 100.0,
+        "headline": "answered",
+        "harm": [
+          "bluffed",
+          "ungrounded",
+          "missed"
+        ],
+        "wall_s": 129.2
+      }
+    },
+    "claude-sonnet-5": {
+      "route": {
+        "total": 74,
+        "counts": {
+          "resolved": 56,
+          "mis-scoped": 15,
+          "over-reach": 3,
+          "unresolved": 0
+        },
+        "score": 75.7,
+        "headline": "resolved",
+        "harm": [
+          "mis-scoped",
+          "over-reach"
+        ],
+        "wall_s": 510.4
+      },
+      "operate": {
+        "total": 39,
+        "counts": {
+          "correct": 35,
+          "wrong": 1,
+          "escalated": 0,
+          "over-reach": 2,
+          "none": 1
+        },
+        "score": 89.7,
+        "seconds": 752.5,
+        "headline": "correct",
+        "harm": [
+          "wrong",
+          "escalated",
+          "over-reach"
+        ],
+        "wall_s": 202.3
+      }
+    }
+  },
+  "note": "Stopped by James after 5 of 6 track/model cells. sonnet-5 answer was not run; its committed qa_baseline.json (recorded 2026-08-08 on this same subscription backend, when Sonnet was the default) reads 29/29 answered. Backend: subscription \u2014 the Claude Agent SDK owns the tool loop, so these are internally comparable, not transferable to the product's API loop."
+}

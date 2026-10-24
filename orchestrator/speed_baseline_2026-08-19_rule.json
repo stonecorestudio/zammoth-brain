@@ -1,0 +1,345 @@
+{
+  "backend": "rule",
+  "model": null,
+  "max_passes": 3,
+  "summary": {
+    "runs": 13,
+    "errored": 6,
+    "wall_s_median": 4.7,
+    "wall_s_p95": 14.0,
+    "wall_s_total": 39.2,
+    "cost_usd_median": 0.0,
+    "cost_usd_p95": 0.0,
+    "cost_usd_total": 0.0,
+    "tokens_in_total": 0,
+    "tokens_out_total": 0
+  },
+  "runs": [
+    {
+      "key": "parallel_comp_drums",
+      "project": "technique_demo",
+      "brief": "add parallel compression to the drums to thicken them up, but keep the punch",
+      "backend": "rule",
+      "wall_s": 0.5,
+      "passes": null,
+      "stop_reason": null,
+      "applied": 0,
+      "pass_timings_s": [],
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 0.0,
+      "error": "BriefNotUnderstood: no targets derivable from brief 'add parallel compression to the drums to thicken them up, but keep the punch'; known patterns: 'master for streaming/spotify/club', 'master to -X LUFS', '<stem> clarit"
+    },
+    {
+      "key": "duck_pads_under_lead",
+      "project": "technique_demo",
+      "brief": "duck the pads under the lead so the lead always stays on top",
+      "backend": "rule",
+      "wall_s": 0.5,
+      "passes": null,
+      "stop_reason": null,
+      "applied": 0,
+      "pass_timings_s": [],
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 0.0,
+      "error": "BriefNotUnderstood: no targets derivable from brief 'duck the pads under the lead so the lead always stays on top'; known patterns: 'master for streaming/spotify/club', 'master to -X LUFS', '<stem> clarity', 'less harsh'"
+    },
+    {
+      "key": "deess_lead",
+      "project": "technique_demo",
+      "brief": "the lead has piercing sibilance - de-ess it without dulling the melody",
+      "backend": "rule",
+      "wall_s": 0.5,
+      "passes": null,
+      "stop_reason": null,
+      "applied": 0,
+      "pass_timings_s": [],
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 0.0,
+      "error": "BriefNotUnderstood: no targets derivable from brief 'the lead has piercing sibilance - de-ess it without dulling the melody'; known patterns: 'master for streaming/spotify/club', 'master to -X LUFS', '<stem> clarity', 'l"
+    },
+    {
+      "key": "tame_boom_bassline",
+      "project": "technique_demo",
+      "brief": "the bassline gets boomy when it swells - tame the boom without losing the steady low end or dulling its top",
+      "backend": "rule",
+      "wall_s": 0.5,
+      "passes": null,
+      "stop_reason": null,
+      "applied": 0,
+      "pass_timings_s": [],
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 0.0,
+      "error": "BriefNotUnderstood: no targets derivable from brief 'the bassline gets boomy when it swells - tame the boom without losing the steady low end or dulling its top'; known patterns: 'master for streaming/spotify/club', 'mas"
+    },
+    {
+      "key": "master_streaming",
+      "project": "technique_demo",
+      "brief": "master this for streaming: around -14 LUFS, true peak at -1, keep it clean and dynamic",
+      "backend": "rule",
+      "wall_s": 2.9,
+      "passes": 2,
+      "stop_reason": "targets met",
+      "applied": 1,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 0.0,
+          "apply": 0.5,
+          "render": 0.6,
+          "at_s": 1.8
+        }
+      ],
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 0.0,
+      "error": null
+    },
+    {
+      "key": "widen_pads_mono_lows",
+      "project": "technique_demo",
+      "brief": "make the pads wider and more spacious, but keep the low end mono and club-safe",
+      "backend": "rule",
+      "wall_s": 8.8,
+      "passes": 4,
+      "stop_reason": "pass budget exhausted",
+      "applied": 4,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 0.0,
+          "apply": 0.5,
+          "render": 0.6,
+          "at_s": 1.91
+        },
+        {
+          "pass_number": 2,
+          "agent": 0.0,
+          "apply": 0.8,
+          "render": 0.6,
+          "at_s": 3.83
+        },
+        {
+          "pass_number": 3,
+          "agent": 0.0,
+          "apply": 0.8,
+          "render": 0.6,
+          "at_s": 5.77
+        },
+        {
+          "pass_number": 4,
+          "agent": 0.0,
+          "apply": 0.8,
+          "render": 0.6,
+          "at_s": 8.25
+        }
+      ],
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 0.0,
+      "error": null
+    },
+    {
+      "key": "vocal_space_send",
+      "project": "technique_demo",
+      "brief": "give the lead a sense of space with a short room reverb, but keep it upfront - not washed out",
+      "backend": "rule",
+      "wall_s": 0.5,
+      "passes": null,
+      "stop_reason": null,
+      "applied": 0,
+      "pass_timings_s": [],
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 0.0,
+      "error": "BriefNotUnderstood: no targets derivable from brief 'give the lead a sense of space with a short room reverb, but keep it upfront - not washed out'; known patterns: 'master for streaming/spotify/club', 'master to -X LUFS"
+    },
+    {
+      "key": "glue_rhythm_section",
+      "project": "technique_demo",
+      "brief": "group the drums and bassline into a rhythm bus and glue them with gentle bus compression",
+      "backend": "rule",
+      "wall_s": 0.5,
+      "passes": null,
+      "stop_reason": null,
+      "applied": 0,
+      "pass_timings_s": [],
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 0.0,
+      "error": "BriefNotUnderstood: no targets derivable from brief 'group the drums and bassline into a rhythm bus and glue them with gentle bus compression'; known patterns: 'master for streaming/spotify/club', 'master to -X LUFS', '<"
+    },
+    {
+      "key": "dynamic_harsh_lead",
+      "project": "technique_demo",
+      "brief": "the lead turns harsh when it gets loud - tame that harshness without dulling the quiet phrases",
+      "backend": "rule",
+      "wall_s": 2.3,
+      "passes": 3,
+      "stop_reason": "targets met",
+      "applied": 3,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 0.0,
+          "apply": 0.2,
+          "render": 0.4,
+          "at_s": 1.2
+        },
+        {
+          "pass_number": 2,
+          "agent": 0.0,
+          "apply": 0.1,
+          "render": 0.4,
+          "at_s": 1.92
+        }
+      ],
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 0.0,
+      "error": null
+    },
+    {
+      "key": "warm_saturation_bassline",
+      "project": "technique_demo",
+      "brief": "add some tape-style warmth to the bassline - harmonic richness, but don't push its peak level",
+      "backend": "rule",
+      "wall_s": 1.5,
+      "passes": 2,
+      "stop_reason": "targets met",
+      "applied": 1,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 0.0,
+          "apply": 0.1,
+          "render": 0.4,
+          "at_s": 1.13
+        }
+      ],
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 0.0,
+      "error": null
+    },
+    {
+      "key": "wild_tiny_two_30s",
+      "project": "tiny_two_30s",
+      "brief": "master for streaming",
+      "backend": "rule",
+      "wall_s": 5.0,
+      "passes": 2,
+      "stop_reason": "targets met",
+      "applied": 1,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 0.0,
+          "apply": 0.9,
+          "render": 1.0,
+          "at_s": 3.2
+        }
+      ],
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 0.0,
+      "error": null
+    },
+    {
+      "key": "wild_hires_96k_f32",
+      "project": "hires_96k_f32",
+      "brief": "master for streaming",
+      "backend": "rule",
+      "wall_s": 14.0,
+      "passes": 2,
+      "stop_reason": "targets met",
+      "applied": 1,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 0.0,
+          "apply": 2.6,
+          "render": 3.0,
+          "at_s": 9.02
+        }
+      ],
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 0.0,
+      "error": null
+    },
+    {
+      "key": "wild_many_stems_30",
+      "project": "many_stems_30",
+      "brief": "master for streaming",
+      "backend": "rule",
+      "wall_s": 4.7,
+      "passes": 4,
+      "stop_reason": "pass budget exhausted",
+      "applied": 4,
+      "pass_timings_s": [
+        {
+          "pass_number": 1,
+          "agent": 0.0,
+          "apply": 0.2,
+          "render": 0.3,
+          "at_s": 1.04
+        },
+        {
+          "pass_number": 2,
+          "agent": 0.0,
+          "apply": 0.4,
+          "render": 0.3,
+          "at_s": 2.03
+        },
+        {
+          "pass_number": 3,
+          "agent": 0.0,
+          "apply": 0.4,
+          "render": 0.3,
+          "at_s": 3.01
+        },
+        {
+          "pass_number": 4,
+          "agent": 0.0,
+          "apply": 0.4,
+          "render": 0.3,
+          "at_s": 4.33
+        }
+      ],
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_usd": 0.0,
+      "error": null
+    }
+  ]
+}

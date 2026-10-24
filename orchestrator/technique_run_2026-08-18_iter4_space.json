@@ -1,0 +1,52 @@
+{
+  "model": "claude-opus-5",
+  "backend": "subscription",
+  "cases": [
+    {
+      "key": "vocal_space_send",
+      "technique": "send/return ambience",
+      "brief": "give the lead a sense of space with a short room reverb, but keep it upfront - not washed out",
+      "passed": 3,
+      "repeats": 3,
+      "stable_failure": false,
+      "unmeasured": false,
+      "runs": [
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 2,
+          "stop_reason": "targets met",
+          "passes_run": 2,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 2,
+          "stop_reason": "targets met",
+          "passes_run": 2,
+          "error": null
+        },
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 2,
+          "stop_reason": "nothing to propose",
+          "passes_run": 3,
+          "error": null
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "cases": 1,
+    "runs": 3,
+    "not_measured": 0,
+    "stable_failures": 0,
+    "flaky": 0,
+    "clean_passes": 1
+  }
+}

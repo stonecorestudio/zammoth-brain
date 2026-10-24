@@ -1,0 +1,37 @@
+{
+  "runs": 3,
+  "scores": [
+    100.0,
+    91.7,
+    91.7
+  ],
+  "score_mean": 94.5,
+  "score_min": 91.7,
+  "score_max": 100.0,
+  "stable_correct": 10,
+  "stable_failures": [],
+  "flaky": [
+    [
+      "duck the piano under lead_vox so the vocal stays on top",
+      {
+        "correct": 2,
+        "over-reach": 1
+      }
+    ],
+    [
+      "give lead_vox a short room reverb on a return, not too wet",
+      {
+        "correct": 2,
+        "wrong": 1
+      }
+    ]
+  ],
+  "detail": {
+    "give lead_vox a short room reverb on a return, not too wet": [
+      "vertical incomplete: wanted ['return.add', 'send.set'] in order, called ['return.add']"
+    ],
+    "duck the piano under lead_vox so the vocal stays on top": [
+      "4 commands where 1 was the honest cost: ['duck.set_key', 'device.set', 'device.set', 'device.set']"
+    ]
+  }
+}

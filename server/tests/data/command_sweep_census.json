@@ -1,0 +1,3095 @@
+{
+ "agent.transpose bare": {
+  "outcome": "refused"
+ },
+ "agent.transpose wrong_type": {
+  "outcome": "queued"
+ },
+ "arrange.draw_mode bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "arrange.draw_mode example": {
+  "outcome": "ok"
+ },
+ "arrange.draw_mode wrong_type": {
+  "outcome": "refused"
+ },
+ "arrange.fit_height bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "arrange.fit_height example": {
+  "outcome": "ok"
+ },
+ "arrange.fit_width bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "arrange.fit_width example": {
+  "outcome": "ok"
+ },
+ "arrange.loop_selection bare": {
+  "outcome": "refused"
+ },
+ "arrange.loop_selection example": {
+  "outcome": "ok"
+ },
+ "arrange.loop_selection wrong_type": {
+  "outcome": "refused"
+ },
+ "arrange.playhead_bar_left bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "arrange.playhead_bar_left example": {
+  "outcome": "ok"
+ },
+ "arrange.playhead_bar_right bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "arrange.playhead_bar_right example": {
+  "outcome": "ok"
+ },
+ "arrange.playhead_end bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "arrange.playhead_end example": {
+  "outcome": "ok"
+ },
+ "arrange.playhead_home bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "arrange.playhead_home example": {
+  "outcome": "ok"
+ },
+ "arrange.playhead_left bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "arrange.playhead_left example": {
+  "outcome": "ok"
+ },
+ "arrange.playhead_right bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "arrange.playhead_right example": {
+  "outcome": "ok"
+ },
+ "arrange.select_loop bare": {
+  "outcome": "refused"
+ },
+ "arrange.select_loop example": {
+  "outcome": "ok"
+ },
+ "arrange.toggle_follow bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "arrange.toggle_follow example": {
+  "outcome": "ok"
+ },
+ "arrange.toggle_follow wrong_type": {
+  "outcome": "refused"
+ },
+ "arrange.zoom_back bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "arrange.zoom_back example": {
+  "outcome": "ok"
+ },
+ "arrange.zoom_in bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "arrange.zoom_in example": {
+  "outcome": "ok"
+ },
+ "arrange.zoom_out bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "arrange.zoom_out example": {
+  "outcome": "ok"
+ },
+ "arrange.zoom_selection bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "arrange.zoom_selection example": {
+  "outcome": "ok"
+ },
+ "arrangement.build bare": {
+  "outcome": "refused"
+ },
+ "arrangement.build wrong_type": {
+  "outcome": "refused"
+ },
+ "auto_filter.set_key bare": {
+  "outcome": "refused"
+ },
+ "auto_filter.set_key no_target": {
+  "outcome": "refused"
+ },
+ "auto_filter.set_key wrong_type": {
+  "outcome": "refused"
+ },
+ "automation.clear bare": {
+  "outcome": "refused"
+ },
+ "automation.clear example": {
+  "outcome": "ok"
+ },
+ "automation.clear no_target": {
+  "outcome": "refused"
+ },
+ "automation.clear wrong_type": {
+  "outcome": "refused"
+ },
+ "automation.edit_toggle bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "automation.edit_toggle example": {
+  "outcome": "ok"
+ },
+ "automation.edit_toggle wrong_type": {
+  "outcome": "refused"
+ },
+ "automation.record bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "automation.record no_target": {
+  "outcome": "refused"
+ },
+ "automation.record wrong_type": {
+  "outcome": "refused"
+ },
+ "automation.reenable bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "automation.reenable example": {
+  "outcome": "ok"
+ },
+ "automation.reenable no_target": {
+  "outcome": "refused"
+ },
+ "automation.reenable wrong_type": {
+  "outcome": "refused"
+ },
+ "automation.set_curve bare": {
+  "outcome": "refused"
+ },
+ "automation.set_curve example": {
+  "outcome": "ok"
+ },
+ "automation.set_curve no_target": {
+  "outcome": "refused"
+ },
+ "automation.set_curve word_index": {
+  "outcome": "refused"
+ },
+ "automation.set_curve wrong_type": {
+  "outcome": "refused"
+ },
+ "automation.write bare": {
+  "outcome": "refused"
+ },
+ "automation.write example": {
+  "outcome": "ok"
+ },
+ "automation.write no_target": {
+  "outcome": "refused"
+ },
+ "automation.write wrong_type": {
+  "outcome": "refused"
+ },
+ "browser.search_focus bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "browser.search_focus wrong_type": {
+  "outcome": "refused"
+ },
+ "bus.remove bare": {
+  "outcome": "refused"
+ },
+ "bus.remove example": {
+  "outcome": "ok"
+ },
+ "bus.remove no_target": {
+  "outcome": "refused"
+ },
+ "bus.remove wrong_type": {
+  "outcome": "refused"
+ },
+ "bus.rename bare": {
+  "outcome": "refused"
+ },
+ "bus.rename example": {
+  "outcome": "queued"
+ },
+ "bus.rename no_target": {
+  "outcome": "refused"
+ },
+ "bus.rename wrong_type": {
+  "outcome": "refused"
+ },
+ "bus.route bare": {
+  "outcome": "refused"
+ },
+ "bus.route example": {
+  "outcome": "ok"
+ },
+ "bus.route no_target": {
+  "outcome": "refused"
+ },
+ "bus.route wrong_type": {
+  "outcome": "refused"
+ },
+ "chord.set bare": {
+  "outcome": "refused"
+ },
+ "chord.set wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.add_effect bare": {
+  "outcome": "refused"
+ },
+ "clip.add_effect example": {
+  "outcome": "ok"
+ },
+ "clip.add_effect no_target": {
+  "outcome": "refused"
+ },
+ "clip.add_effect word_index": {
+  "outcome": "refused"
+ },
+ "clip.add_effect wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.auto_pitch bare": {
+  "outcome": "refused"
+ },
+ "clip.auto_pitch no_target": {
+  "outcome": "refused"
+ },
+ "clip.auto_pitch word_index": {
+  "outcome": "refused"
+ },
+ "clip.auto_pitch wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.consolidate bare": {
+  "outcome": "refused"
+ },
+ "clip.consolidate no_target": {
+  "outcome": "refused"
+ },
+ "clip.consolidate wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.copy bare": {
+  "outcome": "refused"
+ },
+ "clip.copy example": {
+  "outcome": "ok"
+ },
+ "clip.copy no_target": {
+  "outcome": "refused"
+ },
+ "clip.copy word_index": {
+  "outcome": "refused"
+ },
+ "clip.copy wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.crop bare": {
+  "outcome": "refused"
+ },
+ "clip.crop example": {
+  "outcome": "ok"
+ },
+ "clip.crop no_target": {
+  "outcome": "refused"
+ },
+ "clip.crop wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.cut bare": {
+  "outcome": "refused"
+ },
+ "clip.cut example": {
+  "outcome": "ok"
+ },
+ "clip.cut no_target": {
+  "outcome": "refused"
+ },
+ "clip.cut word_index": {
+  "outcome": "refused"
+ },
+ "clip.cut wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.delete bare": {
+  "outcome": "refused"
+ },
+ "clip.delete example": {
+  "outcome": "ok"
+ },
+ "clip.delete no_target": {
+  "outcome": "refused"
+ },
+ "clip.delete word_index": {
+  "outcome": "refused"
+ },
+ "clip.delete wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.duplicate bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "clip.duplicate example": {
+  "outcome": "ok"
+ },
+ "clip.duplicate no_target": {
+  "outcome": "refused"
+ },
+ "clip.duplicate word_index": {
+  "outcome": "refused"
+ },
+ "clip.duplicate wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.extract_groove bare": {
+  "outcome": "refused"
+ },
+ "clip.extract_groove no_target": {
+  "outcome": "refused"
+ },
+ "clip.extract_groove word_index": {
+  "outcome": "refused"
+ },
+ "clip.extract_groove wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.fade bare": {
+  "outcome": "refused"
+ },
+ "clip.fade example": {
+  "outcome": "ok"
+ },
+ "clip.fade no_target": {
+  "outcome": "refused"
+ },
+ "clip.fade word_index": {
+  "outcome": "refused"
+ },
+ "clip.fade wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.gain bare": {
+  "outcome": "refused"
+ },
+ "clip.gain example": {
+  "outcome": "ok"
+ },
+ "clip.gain no_target": {
+  "outcome": "refused"
+ },
+ "clip.gain word_index": {
+  "outcome": "refused"
+ },
+ "clip.gain wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.loop bare": {
+  "outcome": "refused"
+ },
+ "clip.loop example": {
+  "outcome": "ok"
+ },
+ "clip.loop no_target": {
+  "outcome": "refused"
+ },
+ "clip.loop word_index": {
+  "outcome": "refused"
+ },
+ "clip.loop wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.match_key bare": {
+  "outcome": "refused"
+ },
+ "clip.match_key no_target": {
+  "outcome": "refused"
+ },
+ "clip.match_key word_index": {
+  "outcome": "refused"
+ },
+ "clip.match_key wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.move bare": {
+  "outcome": "refused"
+ },
+ "clip.move example": {
+  "outcome": "ok"
+ },
+ "clip.move no_target": {
+  "outcome": "refused"
+ },
+ "clip.move word_index": {
+  "outcome": "refused"
+ },
+ "clip.move wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.normalize bare": {
+  "outcome": "refused"
+ },
+ "clip.normalize example": {
+  "outcome": "ok"
+ },
+ "clip.normalize no_target": {
+  "outcome": "refused"
+ },
+ "clip.normalize word_index": {
+  "outcome": "refused"
+ },
+ "clip.normalize wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.paste bare": {
+  "outcome": "refused"
+ },
+ "clip.paste example": {
+  "outcome": "ok"
+ },
+ "clip.paste no_target": {
+  "outcome": "refused"
+ },
+ "clip.paste wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.pitch bare": {
+  "outcome": "refused"
+ },
+ "clip.pitch example": {
+  "outcome": "ok"
+ },
+ "clip.pitch no_target": {
+  "outcome": "refused"
+ },
+ "clip.pitch word_index": {
+  "outcome": "refused"
+ },
+ "clip.pitch wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.pitch_correct bare": {
+  "outcome": "refused"
+ },
+ "clip.pitch_correct no_target": {
+  "outcome": "refused"
+ },
+ "clip.pitch_correct word_index": {
+  "outcome": "refused"
+ },
+ "clip.pitch_correct wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.remove_effect bare": {
+  "outcome": "refused"
+ },
+ "clip.remove_effect example": {
+  "outcome": "ok"
+ },
+ "clip.remove_effect no_target": {
+  "outcome": "refused"
+ },
+ "clip.remove_effect word_index": {
+  "outcome": "refused"
+ },
+ "clip.remove_effect wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.reverse bare": {
+  "outcome": "refused"
+ },
+ "clip.reverse example": {
+  "outcome": "ok"
+ },
+ "clip.reverse no_target": {
+  "outcome": "refused"
+ },
+ "clip.reverse word_index": {
+  "outcome": "refused"
+ },
+ "clip.reverse wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.set_groove bare": {
+  "outcome": "refused"
+ },
+ "clip.set_groove no_target": {
+  "outcome": "refused"
+ },
+ "clip.set_groove word_index": {
+  "outcome": "refused"
+ },
+ "clip.set_groove wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.split bare": {
+  "outcome": "refused"
+ },
+ "clip.split example": {
+  "outcome": "ok"
+ },
+ "clip.split no_target": {
+  "outcome": "refused"
+ },
+ "clip.split word_index": {
+  "outcome": "refused"
+ },
+ "clip.split wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.stretch_mode bare": {
+  "outcome": "refused"
+ },
+ "clip.stretch_mode no_target": {
+  "outcome": "refused"
+ },
+ "clip.stretch_mode word_index": {
+  "outcome": "refused"
+ },
+ "clip.stretch_mode wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.to_slot bare": {
+  "outcome": "refused"
+ },
+ "clip.to_slot no_target": {
+  "outcome": "refused"
+ },
+ "clip.to_slot word_index": {
+  "outcome": "refused"
+ },
+ "clip.to_slot wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.trim bare": {
+  "outcome": "refused"
+ },
+ "clip.trim example": {
+  "outcome": "ok"
+ },
+ "clip.trim no_target": {
+  "outcome": "refused"
+ },
+ "clip.trim word_index": {
+  "outcome": "refused"
+ },
+ "clip.trim wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.warp bare": {
+  "outcome": "refused"
+ },
+ "clip.warp example": {
+  "outcome": "ok"
+ },
+ "clip.warp no_target": {
+  "outcome": "refused"
+ },
+ "clip.warp word_index": {
+  "outcome": "refused"
+ },
+ "clip.warp wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.warp_all bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "clip.warp_all example": {
+  "outcome": "ok"
+ },
+ "clip.warp_all wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.warp_marker bare": {
+  "outcome": "refused"
+ },
+ "clip.warp_marker example": {
+  "outcome": "ok"
+ },
+ "clip.warp_marker no_target": {
+  "outcome": "refused"
+ },
+ "clip.warp_marker word_index": {
+  "outcome": "refused"
+ },
+ "clip.warp_marker wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.warp_move bare": {
+  "outcome": "refused"
+ },
+ "clip.warp_move no_target": {
+  "outcome": "refused"
+ },
+ "clip.warp_move word_index": {
+  "outcome": "refused"
+ },
+ "clip.warp_move wrong_type": {
+  "outcome": "refused"
+ },
+ "clip.warp_remove bare": {
+  "outcome": "refused"
+ },
+ "clip.warp_remove example": {
+  "outcome": "ok"
+ },
+ "clip.warp_remove no_target": {
+  "outcome": "refused"
+ },
+ "clip.warp_remove word_index": {
+  "outcome": "refused"
+ },
+ "clip.warp_remove wrong_type": {
+  "outcome": "refused"
+ },
+ "comp.flatten bare": {
+  "outcome": "refused"
+ },
+ "comp.flatten no_target": {
+  "outcome": "refused"
+ },
+ "comp.flatten word_index": {
+  "outcome": "refused"
+ },
+ "comp.flatten wrong_type": {
+  "outcome": "refused"
+ },
+ "comp.set_segment bare": {
+  "outcome": "refused"
+ },
+ "comp.set_segment no_target": {
+  "outcome": "refused"
+ },
+ "comp.set_segment word_index": {
+  "outcome": "refused"
+ },
+ "comp.set_segment wrong_type": {
+  "outcome": "refused"
+ },
+ "control_surface.set bare": {
+  "outcome": "refused"
+ },
+ "control_surface.set wrong_type": {
+  "outcome": "refused"
+ },
+ "device.add bare": {
+  "outcome": "refused"
+ },
+ "device.add example": {
+  "outcome": "ok"
+ },
+ "device.add no_target": {
+  "outcome": "refused"
+ },
+ "device.add wrong_type": {
+  "outcome": "refused"
+ },
+ "device.enable bare": {
+  "outcome": "refused"
+ },
+ "device.enable example": {
+  "outcome": "ok"
+ },
+ "device.enable no_target": {
+  "outcome": "refused"
+ },
+ "device.enable wrong_type": {
+  "outcome": "refused"
+ },
+ "device.move_to_track bare": {
+  "outcome": "refused"
+ },
+ "device.move_to_track example": {
+  "outcome": "ok"
+ },
+ "device.move_to_track no_target": {
+  "outcome": "refused"
+ },
+ "device.move_to_track wrong_type": {
+  "outcome": "refused"
+ },
+ "device.remove bare": {
+  "outcome": "refused"
+ },
+ "device.remove example": {
+  "outcome": "ok"
+ },
+ "device.remove no_target": {
+  "outcome": "refused"
+ },
+ "device.remove wrong_type": {
+  "outcome": "refused"
+ },
+ "device.set bare": {
+  "outcome": "refused"
+ },
+ "device.set example": {
+  "outcome": "ok"
+ },
+ "device.set no_target": {
+  "outcome": "refused"
+ },
+ "device.set wrong_type": {
+  "outcome": "refused"
+ },
+ "drum_rack.promote bare": {
+  "outcome": "refused"
+ },
+ "drum_rack.promote no_target": {
+  "outcome": "refused"
+ },
+ "drum_rack.promote wrong_type": {
+  "outcome": "refused"
+ },
+ "duck.set_key bare": {
+  "outcome": "refused"
+ },
+ "duck.set_key example": {
+  "outcome": "ok"
+ },
+ "duck.set_key no_target": {
+  "outcome": "refused"
+ },
+ "duck.set_key wrong_type": {
+  "outcome": "refused"
+ },
+ "edit.delete bare": {
+  "outcome": "refused"
+ },
+ "edit.delete no_target": {
+  "outcome": "refused"
+ },
+ "edit.delete wrong_type": {
+  "outcome": "refused"
+ },
+ "edit.duplicate bare": {
+  "outcome": "refused"
+ },
+ "edit.duplicate no_target": {
+  "outcome": "refused"
+ },
+ "edit.duplicate wrong_type": {
+  "outcome": "refused"
+ },
+ "edit.new bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "edit.new wrong_type": {
+  "outcome": "refused"
+ },
+ "edit.open bare": {
+  "outcome": "refused"
+ },
+ "edit.open no_target": {
+  "outcome": "refused"
+ },
+ "edit.open wrong_type": {
+  "outcome": "refused"
+ },
+ "edit.redo bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "edit.rename bare": {
+  "outcome": "refused"
+ },
+ "edit.rename no_target": {
+  "outcome": "refused"
+ },
+ "edit.rename wrong_type": {
+  "outcome": "refused"
+ },
+ "edit.undo bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "edit.undo wrong_type": {
+  "outcome": "refused"
+ },
+ "grid.narrower bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "grid.narrower example": {
+  "outcome": "ok"
+ },
+ "grid.toggle_mode bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "grid.toggle_mode example": {
+  "outcome": "ok"
+ },
+ "grid.toggle_mode wrong_type": {
+  "outcome": "refused"
+ },
+ "grid.toggle_snap bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "grid.toggle_snap example": {
+  "outcome": "ok"
+ },
+ "grid.toggle_snap wrong_type": {
+  "outcome": "refused"
+ },
+ "grid.toggle_triplet bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "grid.toggle_triplet example": {
+  "outcome": "ok"
+ },
+ "grid.toggle_triplet wrong_type": {
+  "outcome": "refused"
+ },
+ "grid.wider bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "grid.wider example": {
+  "outcome": "ok"
+ },
+ "groove.create bare": {
+  "outcome": "refused"
+ },
+ "groove.create wrong_type": {
+  "outcome": "refused"
+ },
+ "groove.export bare": {
+  "outcome": "refused"
+ },
+ "groove.export wrong_type": {
+  "outcome": "refused"
+ },
+ "groove.import bare": {
+  "outcome": "refused"
+ },
+ "groove.import wrong_type": {
+  "outcome": "refused"
+ },
+ "groove.list bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "groove.set_amount bare": {
+  "outcome": "refused"
+ },
+ "groove.set_amount wrong_type": {
+  "outcome": "refused"
+ },
+ "group.create bare": {
+  "outcome": "refused"
+ },
+ "group.create example": {
+  "outcome": "ok"
+ },
+ "group.create wrong_type": {
+  "outcome": "refused"
+ },
+ "instrument.load_sample bare": {
+  "outcome": "refused"
+ },
+ "instrument.load_sample no_target": {
+  "outcome": "refused"
+ },
+ "instrument.load_sample wrong_type": {
+  "outcome": "refused"
+ },
+ "instrument.preset_delete bare": {
+  "outcome": "refused"
+ },
+ "instrument.preset_delete wrong_type": {
+  "outcome": "refused"
+ },
+ "instrument.preset_list bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "instrument.preset_list wrong_type": {
+  "outcome": "refused"
+ },
+ "instrument.preset_rename bare": {
+  "outcome": "refused"
+ },
+ "instrument.preset_rename wrong_type": {
+  "outcome": "refused"
+ },
+ "instrument.preset_save bare": {
+  "outcome": "refused"
+ },
+ "instrument.preset_save no_target": {
+  "outcome": "refused"
+ },
+ "instrument.preset_save wrong_type": {
+  "outcome": "refused"
+ },
+ "instrument.set_modulation bare": {
+  "outcome": "refused"
+ },
+ "instrument.set_modulation no_target": {
+  "outcome": "refused"
+ },
+ "instrument.set_modulation wrong_type": {
+  "outcome": "refused"
+ },
+ "instrument.set_param bare": {
+  "outcome": "refused"
+ },
+ "instrument.set_param no_target": {
+  "outcome": "refused"
+ },
+ "instrument.set_param wrong_type": {
+  "outcome": "refused"
+ },
+ "instrument.set_patch bare": {
+  "outcome": "refused"
+ },
+ "instrument.set_patch no_target": {
+  "outcome": "refused"
+ },
+ "instrument.set_patch wrong_type": {
+  "outcome": "refused"
+ },
+ "key.set bare": {
+  "outcome": "refused"
+ },
+ "key.set example": {
+  "outcome": "ok"
+ },
+ "key.set wrong_type": {
+  "outcome": "refused"
+ },
+ "launcher.capture bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "launcher.capture wrong_type": {
+  "outcome": "refused"
+ },
+ "launcher.loop_1_bar bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "launcher.loop_2_bars bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "launcher.loop_4_bars bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "launcher.loop_8_bars bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "launcher.loop_free bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "launcher.set_loop_length bare": {
+  "outcome": "refused"
+ },
+ "launcher.set_loop_length wrong_type": {
+  "outcome": "refused"
+ },
+ "launcher.snapshot_delete bare": {
+  "outcome": "refused"
+ },
+ "launcher.snapshot_delete wrong_type": {
+  "outcome": "refused"
+ },
+ "launcher.snapshot_follow bare": {
+  "outcome": "refused"
+ },
+ "launcher.snapshot_follow wrong_type": {
+  "outcome": "refused"
+ },
+ "launcher.snapshot_recall bare": {
+  "outcome": "refused"
+ },
+ "launcher.snapshot_recall wrong_type": {
+  "outcome": "refused"
+ },
+ "launcher.snapshot_rename bare": {
+  "outcome": "refused"
+ },
+ "launcher.snapshot_rename wrong_type": {
+  "outcome": "refused"
+ },
+ "launcher.snapshot_save bare": {
+  "outcome": "refused"
+ },
+ "launcher.snapshot_save no_target": {
+  "outcome": "refused"
+ },
+ "launcher.snapshot_save word_index": {
+  "outcome": "refused"
+ },
+ "launcher.snapshot_save wrong_type": {
+  "outcome": "refused"
+ },
+ "library.add bare": {
+  "outcome": "refused"
+ },
+ "library.add wrong_type": {
+  "outcome": "refused"
+ },
+ "library.import bare": {
+  "outcome": "refused"
+ },
+ "library.import no_target": {
+  "outcome": "refused"
+ },
+ "library.import word_index": {
+  "outcome": "refused"
+ },
+ "library.import wrong_type": {
+  "outcome": "refused"
+ },
+ "library.remove bare": {
+  "outcome": "refused"
+ },
+ "library.remove no_target": {
+  "outcome": "refused"
+ },
+ "library.remove wrong_type": {
+  "outcome": "refused"
+ },
+ "library.search bare": {
+  "outcome": "refused"
+ },
+ "library.search wrong_type": {
+  "outcome": "refused"
+ },
+ "marker.add bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "marker.add example": {
+  "outcome": "ok"
+ },
+ "marker.add wrong_type": {
+  "outcome": "refused"
+ },
+ "marker.remove bare": {
+  "outcome": "refused"
+ },
+ "marker.remove example": {
+  "outcome": "ok"
+ },
+ "marker.remove no_target": {
+  "outcome": "refused"
+ },
+ "marker.remove word_index": {
+  "outcome": "refused"
+ },
+ "marker.remove wrong_type": {
+  "outcome": "refused"
+ },
+ "marker.set bare": {
+  "outcome": "refused"
+ },
+ "marker.set example": {
+  "outcome": "ok"
+ },
+ "marker.set no_target": {
+  "outcome": "refused"
+ },
+ "marker.set word_index": {
+  "outcome": "refused"
+ },
+ "marker.set wrong_type": {
+  "outcome": "refused"
+ },
+ "master.limiter bare": {
+  "outcome": "refused"
+ },
+ "master.limiter example": {
+  "outcome": "ok"
+ },
+ "master.limiter wrong_type": {
+  "outcome": "refused"
+ },
+ "metronome.set bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "metronome.set wrong_type": {
+  "outcome": "refused"
+ },
+ "metronome.set_record_only bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "metronome.set_record_only wrong_type": {
+  "outcome": "refused"
+ },
+ "metronome.set_rhythm bare": {
+  "outcome": "refused"
+ },
+ "metronome.set_rhythm wrong_type": {
+  "outcome": "refused"
+ },
+ "metronome.set_sound bare": {
+  "outcome": "refused"
+ },
+ "metronome.set_sound wrong_type": {
+  "outcome": "refused"
+ },
+ "midi.add_cc bare": {
+  "outcome": "refused"
+ },
+ "midi.add_cc no_target": {
+  "outcome": "refused"
+ },
+ "midi.add_cc word_index": {
+  "outcome": "refused"
+ },
+ "midi.add_cc wrong_type": {
+  "outcome": "refused"
+ },
+ "midi.add_clip bare": {
+  "outcome": "refused"
+ },
+ "midi.add_clip no_target": {
+  "outcome": "refused"
+ },
+ "midi.add_clip wrong_type": {
+  "outcome": "refused"
+ },
+ "midi.add_note bare": {
+  "outcome": "refused"
+ },
+ "midi.add_note no_target": {
+  "outcome": "refused"
+ },
+ "midi.add_note word_index": {
+  "outcome": "refused"
+ },
+ "midi.add_note wrong_type": {
+  "outcome": "refused"
+ },
+ "midi.add_notes bare": {
+  "outcome": "refused"
+ },
+ "midi.add_notes no_target": {
+  "outcome": "refused"
+ },
+ "midi.add_notes word_index": {
+  "outcome": "refused"
+ },
+ "midi.add_notes wrong_type": {
+  "outcome": "refused"
+ },
+ "midi.arpeggiate bare": {
+  "outcome": "refused"
+ },
+ "midi.arpeggiate no_target": {
+  "outcome": "refused"
+ },
+ "midi.arpeggiate word_index": {
+  "outcome": "refused"
+ },
+ "midi.arpeggiate wrong_type": {
+  "outcome": "refused"
+ },
+ "midi.insert_at_selection bare": {
+  "outcome": "refused"
+ },
+ "midi.quantize bare": {
+  "outcome": "refused"
+ },
+ "midi.quantize no_target": {
+  "outcome": "refused"
+ },
+ "midi.quantize word_index": {
+  "outcome": "refused"
+ },
+ "midi.quantize wrong_type": {
+  "outcome": "refused"
+ },
+ "midi.remove_note bare": {
+  "outcome": "refused"
+ },
+ "midi.remove_note no_target": {
+  "outcome": "refused"
+ },
+ "midi.remove_note word_index": {
+  "outcome": "refused"
+ },
+ "midi.remove_note wrong_type": {
+  "outcome": "refused"
+ },
+ "midi.set_mpe bare": {
+  "outcome": "refused"
+ },
+ "midi.set_mpe no_target": {
+  "outcome": "refused"
+ },
+ "midi.set_mpe word_index": {
+  "outcome": "refused"
+ },
+ "midi.set_mpe wrong_type": {
+  "outcome": "refused"
+ },
+ "midi.set_velocity bare": {
+  "outcome": "refused"
+ },
+ "midi.set_velocity no_target": {
+  "outcome": "refused"
+ },
+ "midi.set_velocity word_index": {
+  "outcome": "refused"
+ },
+ "midi.set_velocity wrong_type": {
+  "outcome": "refused"
+ },
+ "midi_input.arm bare": {
+  "outcome": "refused"
+ },
+ "midi_input.arm no_target": {
+  "outcome": "refused"
+ },
+ "midi_input.arm wrong_type": {
+  "outcome": "refused"
+ },
+ "midi_input.set bare": {
+  "outcome": "refused"
+ },
+ "midi_input.set wrong_type": {
+  "outcome": "refused"
+ },
+ "midi_learn.listen bare": {
+  "outcome": "refused"
+ },
+ "midi_learn.listen no_target": {
+  "outcome": "refused"
+ },
+ "midi_learn.listen wrong_type": {
+  "outcome": "refused"
+ },
+ "midi_learn.map bare": {
+  "outcome": "refused"
+ },
+ "midi_learn.map no_target": {
+  "outcome": "refused"
+ },
+ "midi_learn.map wrong_type": {
+  "outcome": "refused"
+ },
+ "midi_learn.unmap bare": {
+  "outcome": "refused"
+ },
+ "midi_learn.unmap no_target": {
+  "outcome": "refused"
+ },
+ "midi_learn.unmap wrong_type": {
+  "outcome": "refused"
+ },
+ "midi_output.set bare": {
+  "outcome": "refused"
+ },
+ "midi_output.set no_target": {
+  "outcome": "refused"
+ },
+ "midi_output.set wrong_type": {
+  "outcome": "refused"
+ },
+ "midi_sync.set bare": {
+  "outcome": "refused"
+ },
+ "midi_sync.set wrong_type": {
+  "outcome": "refused"
+ },
+ "mix.measure bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "modifier.add bare": {
+  "outcome": "refused"
+ },
+ "modifier.add no_target": {
+  "outcome": "refused"
+ },
+ "modifier.add wrong_type": {
+  "outcome": "refused"
+ },
+ "modifier.clear bare": {
+  "outcome": "refused"
+ },
+ "modifier.clear no_target": {
+  "outcome": "refused"
+ },
+ "modifier.clear wrong_type": {
+  "outcome": "refused"
+ },
+ "nav.down bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "nav.up bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "note.audition bare": {
+  "outcome": "refused"
+ },
+ "note.audition no_target": {
+  "outcome": "refused"
+ },
+ "note.audition wrong_type": {
+  "outcome": "refused"
+ },
+ "osc.set bare": {
+  "outcome": "refused"
+ },
+ "osc.set wrong_type": {
+  "outcome": "refused"
+ },
+ "pack.add bare": {
+  "outcome": "refused"
+ },
+ "pack.add wrong_type": {
+  "outcome": "refused"
+ },
+ "pack.build_instrument bare": {
+  "outcome": "refused"
+ },
+ "pack.build_instrument wrong_type": {
+  "outcome": "refused"
+ },
+ "pack.build_kit bare": {
+  "outcome": "refused"
+ },
+ "pack.build_kit wrong_type": {
+  "outcome": "refused"
+ },
+ "pack.create bare": {
+  "outcome": "refused"
+ },
+ "pack.create wrong_type": {
+  "outcome": "refused"
+ },
+ "pack.finish bare": {
+  "outcome": "refused"
+ },
+ "pack.finish wrong_type": {
+  "outcome": "refused"
+ },
+ "pack.list bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "pack.list wrong_type": {
+  "outcome": "refused"
+ },
+ "pack.multisample bare": {
+  "outcome": "refused"
+ },
+ "pack.multisample no_target": {
+  "outcome": "refused"
+ },
+ "pack.multisample wrong_type": {
+  "outcome": "refused"
+ },
+ "pack.read bare": {
+  "outcome": "refused"
+ },
+ "pack.read wrong_type": {
+  "outcome": "refused"
+ },
+ "pack.remove bare": {
+  "outcome": "refused"
+ },
+ "pack.remove wrong_type": {
+  "outcome": "refused"
+ },
+ "pad.device_add bare": {
+  "outcome": "refused"
+ },
+ "pad.device_add no_target": {
+  "outcome": "refused"
+ },
+ "pad.device_add wrong_type": {
+  "outcome": "refused"
+ },
+ "plugin.add bare": {
+  "outcome": "refused"
+ },
+ "plugin.add no_target": {
+  "outcome": "refused"
+ },
+ "plugin.add wrong_type": {
+  "outcome": "refused"
+ },
+ "plugin.enable bare": {
+  "outcome": "refused"
+ },
+ "plugin.enable no_target": {
+  "outcome": "refused"
+ },
+ "plugin.enable wrong_type": {
+  "outcome": "refused"
+ },
+ "plugin.move bare": {
+  "outcome": "refused"
+ },
+ "plugin.move no_target": {
+  "outcome": "refused"
+ },
+ "plugin.move wrong_type": {
+  "outcome": "refused"
+ },
+ "plugin.params bare": {
+  "outcome": "refused"
+ },
+ "plugin.params no_target": {
+  "outcome": "refused"
+ },
+ "plugin.params wrong_type": {
+  "outcome": "refused"
+ },
+ "plugin.quarantine bare": {
+  "outcome": "refused"
+ },
+ "plugin.quarantine wrong_type": {
+  "outcome": "refused"
+ },
+ "plugin.remove bare": {
+  "outcome": "refused"
+ },
+ "plugin.remove no_target": {
+  "outcome": "refused"
+ },
+ "plugin.remove wrong_type": {
+  "outcome": "refused"
+ },
+ "plugin.scan bare": {
+  "outcome": "refused"
+ },
+ "plugin.scan wrong_type": {
+  "outcome": "refused"
+ },
+ "plugin.set_param bare": {
+  "outcome": "refused"
+ },
+ "plugin.set_param no_target": {
+  "outcome": "refused"
+ },
+ "plugin.set_param wrong_type": {
+  "outcome": "refused"
+ },
+ "plugin.set_program bare": {
+  "outcome": "refused"
+ },
+ "plugin.set_program no_target": {
+  "outcome": "refused"
+ },
+ "plugin.set_program wrong_type": {
+  "outcome": "refused"
+ },
+ "plugin.set_sidechain bare": {
+  "outcome": "refused"
+ },
+ "plugin.set_sidechain no_target": {
+  "outcome": "refused"
+ },
+ "plugin.set_sidechain wrong_type": {
+  "outcome": "refused"
+ },
+ "plugin.trust bare": {
+  "outcome": "refused"
+ },
+ "plugin.trust wrong_type": {
+  "outcome": "refused"
+ },
+ "project.import_chain bare": {
+  "outcome": "refused"
+ },
+ "project.import_chain no_target": {
+  "outcome": "refused"
+ },
+ "project.import_chain wrong_type": {
+  "outcome": "refused"
+ },
+ "project.import_dawproject bare": {
+  "outcome": "refused"
+ },
+ "project.import_dawproject wrong_type": {
+  "outcome": "refused"
+ },
+ "project.import_track bare": {
+  "outcome": "refused"
+ },
+ "project.import_track no_target": {
+  "outcome": "refused"
+ },
+ "project.import_track wrong_type": {
+  "outcome": "refused"
+ },
+ "project.peek bare": {
+  "outcome": "refused"
+ },
+ "project.peek wrong_type": {
+  "outcome": "refused"
+ },
+ "project.switch bare": {
+  "outcome": "refused"
+ },
+ "project.switch wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.chain_add bare": {
+  "outcome": "refused"
+ },
+ "rack.chain_add no_target": {
+  "outcome": "refused"
+ },
+ "rack.chain_add wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.chain_remove bare": {
+  "outcome": "refused"
+ },
+ "rack.chain_remove no_target": {
+  "outcome": "refused"
+ },
+ "rack.chain_remove wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.chain_set bare": {
+  "outcome": "refused"
+ },
+ "rack.chain_set no_target": {
+  "outcome": "refused"
+ },
+ "rack.chain_set wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.create bare": {
+  "outcome": "refused"
+ },
+ "rack.create no_target": {
+  "outcome": "refused"
+ },
+ "rack.create wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.device_add bare": {
+  "outcome": "refused"
+ },
+ "rack.device_add no_target": {
+  "outcome": "refused"
+ },
+ "rack.device_add word_index": {
+  "outcome": "refused"
+ },
+ "rack.device_add wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.device_move bare": {
+  "outcome": "refused"
+ },
+ "rack.device_move no_target": {
+  "outcome": "refused"
+ },
+ "rack.device_move wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.device_remove bare": {
+  "outcome": "refused"
+ },
+ "rack.device_remove no_target": {
+  "outcome": "refused"
+ },
+ "rack.device_remove wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.group bare": {
+  "outcome": "refused"
+ },
+ "rack.group no_target": {
+  "outcome": "refused"
+ },
+ "rack.group wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.macro_add bare": {
+  "outcome": "refused"
+ },
+ "rack.macro_add no_target": {
+  "outcome": "refused"
+ },
+ "rack.macro_add wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.macro_map bare": {
+  "outcome": "refused"
+ },
+ "rack.macro_map no_target": {
+  "outcome": "refused"
+ },
+ "rack.macro_map wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.macro_set bare": {
+  "outcome": "refused"
+ },
+ "rack.macro_set no_target": {
+  "outcome": "refused"
+ },
+ "rack.macro_set wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.macro_unmap bare": {
+  "outcome": "refused"
+ },
+ "rack.macro_unmap no_target": {
+  "outcome": "refused"
+ },
+ "rack.macro_unmap wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.plugin_add bare": {
+  "outcome": "refused"
+ },
+ "rack.plugin_add no_target": {
+  "outcome": "refused"
+ },
+ "rack.plugin_add word_index": {
+  "outcome": "refused"
+ },
+ "rack.plugin_add wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.plugin_move bare": {
+  "outcome": "refused"
+ },
+ "rack.plugin_move no_target": {
+  "outcome": "refused"
+ },
+ "rack.plugin_move wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.plugin_remove bare": {
+  "outcome": "refused"
+ },
+ "rack.plugin_remove no_target": {
+  "outcome": "refused"
+ },
+ "rack.plugin_remove word_index": {
+  "outcome": "refused"
+ },
+ "rack.plugin_remove wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.preset_load bare": {
+  "outcome": "refused"
+ },
+ "rack.preset_load no_target": {
+  "outcome": "refused"
+ },
+ "rack.preset_load wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.preset_save bare": {
+  "outcome": "refused"
+ },
+ "rack.preset_save no_target": {
+  "outcome": "refused"
+ },
+ "rack.preset_save wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.rename bare": {
+  "outcome": "refused"
+ },
+ "rack.rename no_target": {
+  "outcome": "refused"
+ },
+ "rack.rename wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.ungroup bare": {
+  "outcome": "refused"
+ },
+ "rack.ungroup no_target": {
+  "outcome": "refused"
+ },
+ "rack.ungroup wrong_type": {
+  "outcome": "refused"
+ },
+ "rack.wrap bare": {
+  "outcome": "refused"
+ },
+ "rack.wrap no_target": {
+  "outcome": "refused"
+ },
+ "rack.wrap wrong_type": {
+  "outcome": "refused"
+ },
+ "record.count_in bare": {
+  "outcome": "refused"
+ },
+ "record.count_in wrong_type": {
+  "outcome": "refused"
+ },
+ "record.punch bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "record.punch wrong_type": {
+  "outcome": "refused"
+ },
+ "reference.listen bare": {
+  "outcome": "refused"
+ },
+ "reference.listen wrong_type": {
+  "outcome": "refused"
+ },
+ "return.add bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "return.add example": {
+  "outcome": "ok"
+ },
+ "return.add wrong_type": {
+  "outcome": "refused"
+ },
+ "return.remove bare": {
+  "outcome": "refused"
+ },
+ "return.remove example": {
+  "outcome": "ok"
+ },
+ "return.remove no_target": {
+  "outcome": "refused"
+ },
+ "return.remove wrong_type": {
+  "outcome": "refused"
+ },
+ "return.rename bare": {
+  "outcome": "refused"
+ },
+ "return.rename example": {
+  "outcome": "queued"
+ },
+ "return.rename no_target": {
+  "outcome": "refused"
+ },
+ "return.rename wrong_type": {
+  "outcome": "refused"
+ },
+ "return.set_level bare": {
+  "outcome": "refused"
+ },
+ "return.set_level example": {
+  "outcome": "ok"
+ },
+ "return.set_level no_target": {
+  "outcome": "refused"
+ },
+ "return.set_level wrong_type": {
+  "outcome": "refused"
+ },
+ "return.set_prefader bare": {
+  "outcome": "refused"
+ },
+ "return.set_prefader example": {
+  "outcome": "ok"
+ },
+ "return.set_prefader no_target": {
+  "outcome": "refused"
+ },
+ "return.set_prefader wrong_type": {
+  "outcome": "refused"
+ },
+ "route.stem bare": {
+  "outcome": "refused"
+ },
+ "route.stem example": {
+  "outcome": "ok"
+ },
+ "route.stem no_target": {
+  "outcome": "refused"
+ },
+ "route.stem wrong_type": {
+  "outcome": "refused"
+ },
+ "sampler.add_layer bare": {
+  "outcome": "refused"
+ },
+ "sampler.add_layer no_target": {
+  "outcome": "refused"
+ },
+ "sampler.add_layer wrong_type": {
+  "outcome": "refused"
+ },
+ "sampler.add_sound bare": {
+  "outcome": "refused"
+ },
+ "sampler.add_sound no_target": {
+  "outcome": "refused"
+ },
+ "sampler.add_sound wrong_type": {
+  "outcome": "refused"
+ },
+ "sampler.crop bare": {
+  "outcome": "refused"
+ },
+ "sampler.crop no_target": {
+  "outcome": "refused"
+ },
+ "sampler.crop wrong_type": {
+  "outcome": "refused"
+ },
+ "sampler.remove_layer bare": {
+  "outcome": "refused"
+ },
+ "sampler.remove_layer no_target": {
+  "outcome": "refused"
+ },
+ "sampler.remove_layer word_index": {
+  "outcome": "refused"
+ },
+ "sampler.remove_layer wrong_type": {
+  "outcome": "refused"
+ },
+ "sampler.remove_sound bare": {
+  "outcome": "refused"
+ },
+ "sampler.remove_sound no_target": {
+  "outcome": "refused"
+ },
+ "sampler.remove_sound wrong_type": {
+  "outcome": "refused"
+ },
+ "sampler.replace_sound bare": {
+  "outcome": "refused"
+ },
+ "sampler.replace_sound no_target": {
+  "outcome": "refused"
+ },
+ "sampler.replace_sound wrong_type": {
+  "outcome": "refused"
+ },
+ "sampler.set bare": {
+  "outcome": "refused"
+ },
+ "sampler.set no_target": {
+  "outcome": "refused"
+ },
+ "sampler.set wrong_type": {
+  "outcome": "refused"
+ },
+ "sampler.set_layer bare": {
+  "outcome": "refused"
+ },
+ "sampler.set_layer no_target": {
+  "outcome": "refused"
+ },
+ "sampler.set_layer word_index": {
+  "outcome": "refused"
+ },
+ "sampler.set_layer wrong_type": {
+  "outcome": "refused"
+ },
+ "sampler.set_sound bare": {
+  "outcome": "refused"
+ },
+ "sampler.set_sound no_target": {
+  "outcome": "refused"
+ },
+ "sampler.set_sound wrong_type": {
+  "outcome": "refused"
+ },
+ "sampler.slice bare": {
+  "outcome": "refused"
+ },
+ "sampler.slice no_target": {
+  "outcome": "refused"
+ },
+ "sampler.slice wrong_type": {
+  "outcome": "refused"
+ },
+ "sampler.slice_to_midi bare": {
+  "outcome": "refused"
+ },
+ "sampler.slice_to_midi no_target": {
+  "outcome": "refused"
+ },
+ "sampler.slice_to_midi wrong_type": {
+  "outcome": "refused"
+ },
+ "scene.add bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "scene.add wrong_type": {
+  "outcome": "refused"
+ },
+ "scene.delete bare": {
+  "outcome": "refused"
+ },
+ "scene.delete no_target": {
+  "outcome": "refused"
+ },
+ "scene.delete word_index": {
+  "outcome": "refused"
+ },
+ "scene.delete wrong_type": {
+  "outcome": "refused"
+ },
+ "scene.duplicate bare": {
+  "outcome": "refused"
+ },
+ "scene.duplicate no_target": {
+  "outcome": "refused"
+ },
+ "scene.duplicate word_index": {
+  "outcome": "refused"
+ },
+ "scene.duplicate wrong_type": {
+  "outcome": "refused"
+ },
+ "scene.from_sections bare": {
+  "outcome": "refused"
+ },
+ "scene.launch bare": {
+  "outcome": "refused"
+ },
+ "scene.launch no_target": {
+  "outcome": "refused"
+ },
+ "scene.launch word_index": {
+  "outcome": "refused"
+ },
+ "scene.launch wrong_type": {
+  "outcome": "refused"
+ },
+ "scene.rename bare": {
+  "outcome": "refused"
+ },
+ "scene.rename no_target": {
+  "outcome": "refused"
+ },
+ "scene.rename word_index": {
+  "outcome": "refused"
+ },
+ "scene.rename wrong_type": {
+  "outcome": "refused"
+ },
+ "scene.to_arrangement bare": {
+  "outcome": "refused"
+ },
+ "scene.to_arrangement no_target": {
+  "outcome": "refused"
+ },
+ "scene.to_arrangement word_index": {
+  "outcome": "refused"
+ },
+ "scene.to_arrangement wrong_type": {
+  "outcome": "refused"
+ },
+ "section.add bare": {
+  "outcome": "refused"
+ },
+ "section.add wrong_type": {
+  "outcome": "refused"
+ },
+ "section.remove bare": {
+  "outcome": "refused"
+ },
+ "section.remove no_target": {
+  "outcome": "refused"
+ },
+ "section.remove word_index": {
+  "outcome": "refused"
+ },
+ "section.remove wrong_type": {
+  "outcome": "refused"
+ },
+ "section.set bare": {
+  "outcome": "refused"
+ },
+ "section.set no_target": {
+  "outcome": "refused"
+ },
+ "section.set word_index": {
+  "outcome": "refused"
+ },
+ "section.set wrong_type": {
+  "outcome": "refused"
+ },
+ "send.set bare": {
+  "outcome": "refused"
+ },
+ "send.set example": {
+  "outcome": "ok"
+ },
+ "send.set no_target": {
+  "outcome": "refused"
+ },
+ "send.set wrong_type": {
+  "outcome": "refused"
+ },
+ "session.export bare": {
+  "outcome": "refused"
+ },
+ "session.export wrong_type": {
+  "outcome": "refused"
+ },
+ "session.save bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "slot.audition bare": {
+  "outcome": "refused"
+ },
+ "slot.audition no_target": {
+  "outcome": "refused"
+ },
+ "slot.audition word_index": {
+  "outcome": "refused"
+ },
+ "slot.audition wrong_type": {
+  "outcome": "refused"
+ },
+ "slot.clear bare": {
+  "outcome": "refused"
+ },
+ "slot.clear no_target": {
+  "outcome": "refused"
+ },
+ "slot.clear word_index": {
+  "outcome": "refused"
+ },
+ "slot.clear wrong_type": {
+  "outcome": "refused"
+ },
+ "slot.duplicate bare": {
+  "outcome": "refused"
+ },
+ "slot.duplicate no_target": {
+  "outcome": "refused"
+ },
+ "slot.duplicate word_index": {
+  "outcome": "refused"
+ },
+ "slot.duplicate wrong_type": {
+  "outcome": "refused"
+ },
+ "slot.launch bare": {
+  "outcome": "refused"
+ },
+ "slot.launch no_target": {
+  "outcome": "refused"
+ },
+ "slot.launch word_index": {
+  "outcome": "refused"
+ },
+ "slot.launch wrong_type": {
+  "outcome": "refused"
+ },
+ "slot.launch_selected bare": {
+  "outcome": "refused"
+ },
+ "slot.move bare": {
+  "outcome": "refused"
+ },
+ "slot.move no_target": {
+  "outcome": "refused"
+ },
+ "slot.move word_index": {
+  "outcome": "refused"
+ },
+ "slot.move wrong_type": {
+  "outcome": "refused"
+ },
+ "slot.select bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "slot.select no_target": {
+  "outcome": "refused"
+ },
+ "slot.select word_index": {
+  "outcome": "refused"
+ },
+ "slot.select wrong_type": {
+  "outcome": "refused"
+ },
+ "slot.set_clip bare": {
+  "outcome": "refused"
+ },
+ "slot.set_clip no_target": {
+  "outcome": "refused"
+ },
+ "slot.set_clip word_index": {
+  "outcome": "refused"
+ },
+ "slot.set_clip wrong_type": {
+  "outcome": "refused"
+ },
+ "slot.set_follow_action bare": {
+  "outcome": "refused"
+ },
+ "slot.set_follow_action no_target": {
+  "outcome": "refused"
+ },
+ "slot.set_follow_action word_index": {
+  "outcome": "refused"
+ },
+ "slot.set_follow_action wrong_type": {
+  "outcome": "refused"
+ },
+ "slot.set_loop_region bare": {
+  "outcome": "refused"
+ },
+ "slot.set_loop_region no_target": {
+  "outcome": "refused"
+ },
+ "slot.set_loop_region word_index": {
+  "outcome": "refused"
+ },
+ "slot.set_loop_region wrong_type": {
+  "outcome": "refused"
+ },
+ "slot.set_play_mode bare": {
+  "outcome": "refused"
+ },
+ "slot.set_play_mode no_target": {
+  "outcome": "refused"
+ },
+ "slot.set_play_mode word_index": {
+  "outcome": "refused"
+ },
+ "slot.set_play_mode wrong_type": {
+  "outcome": "refused"
+ },
+ "slot.stop bare": {
+  "outcome": "refused"
+ },
+ "slot.stop no_target": {
+  "outcome": "refused"
+ },
+ "slot.stop word_index": {
+  "outcome": "refused"
+ },
+ "slot.stop wrong_type": {
+  "outcome": "refused"
+ },
+ "slot.to_arrangement bare": {
+  "outcome": "refused"
+ },
+ "slot.to_arrangement no_target": {
+  "outcome": "refused"
+ },
+ "slot.to_arrangement word_index": {
+  "outcome": "refused"
+ },
+ "slot.to_arrangement wrong_type": {
+  "outcome": "refused"
+ },
+ "sound.render bare": {
+  "outcome": "refused"
+ },
+ "sound.render wrong_type": {
+  "outcome": "refused"
+ },
+ "step.program bare": {
+  "outcome": "refused"
+ },
+ "step.program no_target": {
+  "outcome": "refused"
+ },
+ "step.program wrong_type": {
+  "outcome": "refused"
+ },
+ "step.set_cell bare": {
+  "outcome": "refused"
+ },
+ "step.set_cell no_target": {
+  "outcome": "refused"
+ },
+ "step.set_cell word_index": {
+  "outcome": "refused"
+ },
+ "step.set_cell wrong_type": {
+  "outcome": "refused"
+ },
+ "take.delete_unused bare": {
+  "outcome": "refused"
+ },
+ "take.delete_unused no_target": {
+  "outcome": "refused"
+ },
+ "take.delete_unused word_index": {
+  "outcome": "refused"
+ },
+ "take.delete_unused wrong_type": {
+  "outcome": "refused"
+ },
+ "take.select bare": {
+  "outcome": "refused"
+ },
+ "take.select no_target": {
+  "outcome": "refused"
+ },
+ "take.select word_index": {
+  "outcome": "refused"
+ },
+ "take.select wrong_type": {
+  "outcome": "refused"
+ },
+ "take.show bare": {
+  "outcome": "refused"
+ },
+ "take.show no_target": {
+  "outcome": "refused"
+ },
+ "take.show word_index": {
+  "outcome": "refused"
+ },
+ "take.show wrong_type": {
+  "outcome": "refused"
+ },
+ "tempo.add bare": {
+  "outcome": "refused"
+ },
+ "tempo.add example": {
+  "outcome": "ok"
+ },
+ "tempo.add wrong_type": {
+  "outcome": "refused"
+ },
+ "tempo.move bare": {
+  "outcome": "refused"
+ },
+ "tempo.move example": {
+  "outcome": "ok"
+ },
+ "tempo.move no_target": {
+  "outcome": "refused"
+ },
+ "tempo.move word_index": {
+  "outcome": "refused"
+ },
+ "tempo.move wrong_type": {
+  "outcome": "refused"
+ },
+ "tempo.remove bare": {
+  "outcome": "refused"
+ },
+ "tempo.remove example": {
+  "outcome": "ok"
+ },
+ "tempo.remove no_target": {
+  "outcome": "refused"
+ },
+ "tempo.remove word_index": {
+  "outcome": "refused"
+ },
+ "tempo.remove wrong_type": {
+  "outcome": "refused"
+ },
+ "tempo.set bare": {
+  "outcome": "refused"
+ },
+ "tempo.set example": {
+  "outcome": "ok"
+ },
+ "tempo.set wrong_type": {
+  "outcome": "refused"
+ },
+ "tempo.set_time_sig bare": {
+  "outcome": "refused"
+ },
+ "tempo.set_time_sig example": {
+  "outcome": "ok"
+ },
+ "tempo.set_time_sig wrong_type": {
+  "outcome": "refused"
+ },
+ "time.copy bare": {
+  "outcome": "refused"
+ },
+ "time.copy example": {
+  "outcome": "ok"
+ },
+ "time.copy wrong_type": {
+  "outcome": "refused"
+ },
+ "time.cut bare": {
+  "outcome": "refused"
+ },
+ "time.cut example": {
+  "outcome": "ok"
+ },
+ "time.cut wrong_type": {
+  "outcome": "refused"
+ },
+ "time.delete bare": {
+  "outcome": "refused"
+ },
+ "time.delete example": {
+  "outcome": "ok"
+ },
+ "time.delete wrong_type": {
+  "outcome": "refused"
+ },
+ "time.duplicate bare": {
+  "outcome": "refused"
+ },
+ "time.duplicate example": {
+  "outcome": "ok"
+ },
+ "time.duplicate wrong_type": {
+  "outcome": "refused"
+ },
+ "time.insert bare": {
+  "outcome": "refused"
+ },
+ "time.insert example": {
+  "outcome": "ok"
+ },
+ "time.insert wrong_type": {
+  "outcome": "refused"
+ },
+ "time.paste bare": {
+  "outcome": "refused"
+ },
+ "time.paste example": {
+  "outcome": "ok"
+ },
+ "time.paste wrong_type": {
+  "outcome": "refused"
+ },
+ "track.add bare": {
+  "outcome": "refused"
+ },
+ "track.add wrong_type": {
+  "outcome": "refused"
+ },
+ "track.add_blank bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "track.add_blank example": {
+  "outcome": "ok"
+ },
+ "track.add_blank wrong_type": {
+  "outcome": "refused"
+ },
+ "track.add_drum_kit bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "track.add_drum_kit wrong_type": {
+  "outcome": "refused"
+ },
+ "track.add_midi bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "track.add_midi example": {
+  "outcome": "ok"
+ },
+ "track.add_midi wrong_type": {
+  "outcome": "refused"
+ },
+ "track.bounce bare": {
+  "outcome": "refused"
+ },
+ "track.bounce no_target": {
+  "outcome": "refused"
+ },
+ "track.bounce wrong_type": {
+  "outcome": "refused"
+ },
+ "track.delete bare": {
+  "outcome": "refused"
+ },
+ "track.delete example": {
+  "outcome": "ok"
+ },
+ "track.delete no_target": {
+  "outcome": "refused"
+ },
+ "track.delete wrong_type": {
+  "outcome": "refused"
+ },
+ "track.duplicate bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "track.duplicate example": {
+  "outcome": "ok"
+ },
+ "track.duplicate no_target": {
+  "outcome": "refused"
+ },
+ "track.duplicate wrong_type": {
+  "outcome": "refused"
+ },
+ "track.fold_height bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "track.fold_height example": {
+  "outcome": "ok"
+ },
+ "track.fold_height no_target": {
+  "outcome": "refused"
+ },
+ "track.fold_height wrong_type": {
+  "outcome": "refused"
+ },
+ "track.fold_toggle bare": {
+  "outcome": "refused"
+ },
+ "track.fold_toggle example": {
+  "outcome": "ok"
+ },
+ "track.fold_toggle no_target": {
+  "outcome": "refused"
+ },
+ "track.fold_toggle wrong_type": {
+  "outcome": "refused"
+ },
+ "track.freeze bare": {
+  "outcome": "refused"
+ },
+ "track.freeze no_target": {
+  "outcome": "refused"
+ },
+ "track.freeze wrong_type": {
+  "outcome": "refused"
+ },
+ "track.keep_latency bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "track.keep_latency example": {
+  "outcome": "ok"
+ },
+ "track.keep_latency no_target": {
+  "outcome": "refused"
+ },
+ "track.keep_latency wrong_type": {
+  "outcome": "refused"
+ },
+ "track.mute_toggle bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "track.mute_toggle example": {
+  "outcome": "ok"
+ },
+ "track.mute_toggle no_target": {
+  "outcome": "refused"
+ },
+ "track.mute_toggle wrong_type": {
+  "outcome": "refused"
+ },
+ "track.rename bare": {
+  "outcome": "refused"
+ },
+ "track.rename example": {
+  "outcome": "ok"
+ },
+ "track.rename no_target": {
+  "outcome": "refused"
+ },
+ "track.rename wrong_type": {
+  "outcome": "refused"
+ },
+ "track.select bare": {
+  "outcome": "refused"
+ },
+ "track.select example": {
+  "outcome": "ok"
+ },
+ "track.select no_target": {
+  "outcome": "refused"
+ },
+ "track.select wrong_type": {
+  "outcome": "refused"
+ },
+ "track.select_all bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "track.select_all example": {
+  "outcome": "ok"
+ },
+ "track.separate bare": {
+  "outcome": "refused"
+ },
+ "track.separate no_target": {
+  "outcome": "refused"
+ },
+ "track.separate wrong_type": {
+  "outcome": "refused"
+ },
+ "track.set_arp bare": {
+  "outcome": "refused"
+ },
+ "track.set_arp no_target": {
+  "outcome": "refused"
+ },
+ "track.set_arp wrong_type": {
+  "outcome": "refused"
+ },
+ "track.set_colour bare": {
+  "outcome": "refused"
+ },
+ "track.set_colour example": {
+  "outcome": "ok"
+ },
+ "track.set_colour no_target": {
+  "outcome": "refused"
+ },
+ "track.set_colour wrong_type": {
+  "outcome": "refused"
+ },
+ "track.set_delay bare": {
+  "outcome": "refused"
+ },
+ "track.set_delay example": {
+  "outcome": "ok"
+ },
+ "track.set_delay no_target": {
+  "outcome": "refused"
+ },
+ "track.set_delay wrong_type": {
+  "outcome": "refused"
+ },
+ "track.set_gain bare": {
+  "outcome": "refused"
+ },
+ "track.set_gain example": {
+  "outcome": "ok"
+ },
+ "track.set_gain no_target": {
+  "outcome": "refused"
+ },
+ "track.set_gain wrong_type": {
+  "outcome": "refused"
+ },
+ "track.set_instrument bare": {
+  "outcome": "refused"
+ },
+ "track.set_instrument no_target": {
+  "outcome": "refused"
+ },
+ "track.set_instrument wrong_type": {
+  "outcome": "refused"
+ },
+ "track.set_midi_input bare": {
+  "outcome": "refused"
+ },
+ "track.set_midi_input no_target": {
+  "outcome": "refused"
+ },
+ "track.set_midi_input wrong_type": {
+  "outcome": "refused"
+ },
+ "track.set_monitor bare": {
+  "outcome": "refused"
+ },
+ "track.set_monitor no_target": {
+  "outcome": "refused"
+ },
+ "track.set_monitor wrong_type": {
+  "outcome": "refused"
+ },
+ "track.set_mute bare": {
+  "outcome": "refused"
+ },
+ "track.set_mute example": {
+  "outcome": "ok"
+ },
+ "track.set_mute no_target": {
+  "outcome": "refused"
+ },
+ "track.set_mute wrong_type": {
+  "outcome": "refused"
+ },
+ "track.set_pan bare": {
+  "outcome": "refused"
+ },
+ "track.set_pan example": {
+  "outcome": "ok"
+ },
+ "track.set_pan no_target": {
+  "outcome": "refused"
+ },
+ "track.set_pan wrong_type": {
+  "outcome": "refused"
+ },
+ "track.set_width bare": {
+  "outcome": "refused"
+ },
+ "track.set_width example": {
+  "outcome": "ok"
+ },
+ "track.set_width no_target": {
+  "outcome": "refused"
+ },
+ "track.set_width wrong_type": {
+  "outcome": "refused"
+ },
+ "track.solo bare": {
+  "moved": true,
+  "outcome": "ok"
+ },
+ "track.solo example": {
+  "outcome": "ok"
+ },
+ "track.solo no_target": {
+  "outcome": "refused"
+ },
+ "track.solo wrong_type": {
+  "outcome": "refused"
+ },
+ "track.spectrogram bare": {
+  "outcome": "refused"
+ },
+ "track.spectrogram no_target": {
+  "outcome": "refused"
+ },
+ "track.spectrogram wrong_type": {
+  "outcome": "refused"
+ },
+ "track.stop_clips bare": {
+  "outcome": "refused"
+ },
+ "track.stop_clips no_target": {
+  "outcome": "refused"
+ },
+ "track.stop_clips wrong_type": {
+  "outcome": "refused"
+ },
+ "track.unfold_all bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "track.unfold_all example": {
+  "outcome": "ok"
+ },
+ "transport.back_to_arrangement bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "transport.back_to_arrangement no_target": {
+  "outcome": "refused"
+ },
+ "transport.back_to_arrangement wrong_type": {
+  "outcome": "refused"
+ },
+ "transport.go_to_marker bare": {
+  "outcome": "refused"
+ },
+ "transport.go_to_marker example": {
+  "outcome": "ok"
+ },
+ "transport.go_to_marker no_target": {
+  "outcome": "refused"
+ },
+ "transport.go_to_marker word_index": {
+  "outcome": "refused"
+ },
+ "transport.go_to_marker wrong_type": {
+  "outcome": "refused"
+ },
+ "transport.play_clips bare": {
+  "outcome": "refused"
+ },
+ "transport.play_continue bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "transport.play_pause bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "transport.return_to_start bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "transport.return_to_start example": {
+  "outcome": "ok"
+ },
+ "transport.seek bare": {
+  "outcome": "refused"
+ },
+ "transport.seek example": {
+  "outcome": "ok"
+ },
+ "transport.seek wrong_type": {
+  "outcome": "refused"
+ },
+ "transport.stop bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "transport.stop_clips bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "vca.assign bare": {
+  "outcome": "refused"
+ },
+ "vca.assign no_target": {
+  "outcome": "refused"
+ },
+ "vca.assign wrong_type": {
+  "outcome": "refused"
+ },
+ "vca.create bare": {
+  "outcome": "refused"
+ },
+ "vca.create wrong_type": {
+  "outcome": "refused"
+ },
+ "vca.remove bare": {
+  "outcome": "refused"
+ },
+ "vca.remove wrong_type": {
+  "outcome": "refused"
+ },
+ "vca.rename bare": {
+  "outcome": "refused"
+ },
+ "vca.rename wrong_type": {
+  "outcome": "refused"
+ },
+ "vca.set bare": {
+  "outcome": "refused"
+ },
+ "vca.set wrong_type": {
+  "outcome": "refused"
+ },
+ "vca.unassign bare": {
+  "outcome": "refused"
+ },
+ "vca.unassign no_target": {
+  "outcome": "refused"
+ },
+ "vca.unassign wrong_type": {
+  "outcome": "refused"
+ },
+ "view.audio_clip_editor bare": {
+  "outcome": "refused"
+ },
+ "view.audio_clip_editor no_target": {
+  "outcome": "refused"
+ },
+ "view.audio_clip_editor word_index": {
+  "outcome": "refused"
+ },
+ "view.audio_clip_editor wrong_type": {
+  "outcome": "refused"
+ },
+ "view.clip_scope bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.clip_scope wrong_type": {
+  "outcome": "refused"
+ },
+ "view.command_palette bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.command_palette wrong_type": {
+  "outcome": "refused"
+ },
+ "view.comp_scope bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.comp_scope wrong_type": {
+  "outcome": "refused"
+ },
+ "view.computer_keyboard bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.computer_keyboard wrong_type": {
+  "outcome": "refused"
+ },
+ "view.delay_tape bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.delay_tape wrong_type": {
+  "outcome": "refused"
+ },
+ "view.device_fold bare": {
+  "outcome": "refused"
+ },
+ "view.device_fold wrong_type": {
+  "outcome": "refused"
+ },
+ "view.device_zoom bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.device_zoom wrong_type": {
+  "outcome": "refused"
+ },
+ "view.drum_rack bare": {
+  "outcome": "refused"
+ },
+ "view.drum_rack no_target": {
+  "outcome": "refused"
+ },
+ "view.drum_rack wrong_type": {
+  "outcome": "refused"
+ },
+ "view.gate_tape bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.gate_tape wrong_type": {
+  "outcome": "refused"
+ },
+ "view.io_section bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.io_section wrong_type": {
+  "outcome": "refused"
+ },
+ "view.ir_print bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.ir_print wrong_type": {
+  "outcome": "refused"
+ },
+ "view.mb_tapes bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.mb_tapes wrong_type": {
+  "outcome": "refused"
+ },
+ "view.meter_history bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.meter_history no_target": {
+  "outcome": "refused"
+ },
+ "view.meter_history wrong_type": {
+  "outcome": "refused"
+ },
+ "view.meter_style bare": {
+  "outcome": "refused"
+ },
+ "view.meter_style wrong_type": {
+  "outcome": "refused"
+ },
+ "view.mixer_width bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.mixer_width wrong_type": {
+  "outcome": "refused"
+ },
+ "view.od_scope bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.od_scope wrong_type": {
+  "outcome": "refused"
+ },
+ "view.ott_tapes bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.ott_tapes wrong_type": {
+  "outcome": "refused"
+ },
+ "view.rev_tape bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.rev_tape wrong_type": {
+  "outcome": "refused"
+ },
+ "view.sampler_editor bare": {
+  "outcome": "refused"
+ },
+ "view.sampler_editor no_target": {
+  "outcome": "refused"
+ },
+ "view.sampler_editor wrong_type": {
+  "outcome": "refused"
+ },
+ "view.sat_cards bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.sat_cards wrong_type": {
+  "outcome": "refused"
+ },
+ "view.sat_tape bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.sat_tape wrong_type": {
+  "outcome": "refused"
+ },
+ "view.session_rail bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.session_rail wrong_type": {
+  "outcome": "refused"
+ },
+ "view.shortcuts bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.snapshot bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.snapshot wrong_type": {
+  "outcome": "refused"
+ },
+ "view.spectrogram_view bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.spectrogram_view wrong_type": {
+  "outcome": "refused"
+ },
+ "view.synth_editor bare": {
+  "outcome": "refused"
+ },
+ "view.synth_editor no_target": {
+  "outcome": "refused"
+ },
+ "view.synth_editor wrong_type": {
+  "outcome": "refused"
+ },
+ "view.tempo_lane bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.tempo_lane wrong_type": {
+  "outcome": "refused"
+ },
+ "view.time_ruler bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.time_ruler wrong_type": {
+  "outcome": "refused"
+ },
+ "view.toggle_browser bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.toggle_browser wrong_type": {
+  "outcome": "refused"
+ },
+ "view.toggle_dock bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.toggle_dock wrong_type": {
+  "outcome": "refused"
+ },
+ "view.toggle_engineer bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.toggle_engineer wrong_type": {
+  "outcome": "refused"
+ },
+ "view.toggle_launcher bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.toggle_launcher wrong_type": {
+  "outcome": "refused"
+ },
+ "view.tooltips bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.tooltips wrong_type": {
+  "outcome": "refused"
+ },
+ "view.track_delay bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.track_delay wrong_type": {
+  "outcome": "refused"
+ },
+ "view.track_height_dec bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.track_height_dec no_target": {
+  "outcome": "refused"
+ },
+ "view.track_height_dec wrong_type": {
+  "outcome": "refused"
+ },
+ "view.track_height_inc bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.track_height_inc no_target": {
+  "outcome": "refused"
+ },
+ "view.track_height_inc wrong_type": {
+  "outcome": "refused"
+ },
+ "view.width_field bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.width_field wrong_type": {
+  "outcome": "refused"
+ }
+}

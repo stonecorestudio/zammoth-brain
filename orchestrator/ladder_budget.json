@@ -1,0 +1,15 @@
+{
+ "max": {
+  "agent_time_s": 25.0,
+  "brain_share_s": 14.5,
+  "first_activity_max_s": 2.74,
+  "measure_s": 4.3,
+  "prep_max_s": 2.05,
+  "renders_master": 8,
+  "renders_stem": 7,
+  "rounds": 27,
+  "tool_calls": 17
+ },
+ "slack": "counts exact; seconds x3 + 1",
+ "turns": 14
+}

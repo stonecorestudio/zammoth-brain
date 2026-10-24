@@ -1,0 +1,235 @@
+{
+  "model": "claude-opus-5",
+  "backend": "subscription",
+  "cases": [
+    {
+      "key": "parallel_comp_drums",
+      "technique": "parallel (NY) compression",
+      "brief": "add parallel compression to the drums to thicken them up, but keep the punch",
+      "passed": 0,
+      "repeats": 1,
+      "stable_failure": true,
+      "runs": [
+        {
+          "plan_failures": [
+            "no parallel compression: want a comp on 'drums' with 0 < mix <= 0.8 (mix is the wet/dry blend; 1.0 is a plain insert)"
+          ],
+          "outcome_failures": [
+            "drums crest moved +3.0 dB (no audible thickening; want <= -0.5)",
+            "drums RMS moved -3.9 dB (want -1..+6 \u2014 the blend should hold or lift the level)"
+          ],
+          "passed": false,
+          "applied_actions": 3,
+          "stop_reason": "targets met",
+          "passes_run": 2,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "duck_pads_under_lead",
+      "technique": "sidechain ducking",
+      "brief": "duck the pads under the lead so the lead always stays on top",
+      "passed": 1,
+      "repeats": 1,
+      "stable_failure": false,
+      "runs": [
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 2,
+          "stop_reason": "nothing to propose",
+          "passes_run": 2,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "deess_lead",
+      "technique": "de-essing",
+      "brief": "the lead has piercing sibilance - de-ess it without dulling the melody",
+      "passed": 0,
+      "repeats": 1,
+      "stable_failure": true,
+      "runs": [
+        {
+          "plan_failures": [
+            "no de-esser on 'lead' (deess at 3.5-10 kHz, or a dynamic_eq cut >= 4 kHz)"
+          ],
+          "outcome_failures": [
+            "sibilance bursts only came down 0.0 dB (want >= 3)"
+          ],
+          "passed": false,
+          "applied_actions": 0,
+          "stop_reason": "targets met",
+          "passes_run": 1,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "tame_boom_bassline",
+      "technique": "multiband / dynamic low control",
+      "brief": "the bassline gets boomy when it swells - tame the boom without losing the steady low end or dulling its top",
+      "passed": 0,
+      "repeats": 1,
+      "stable_failure": true,
+      "runs": [
+        {
+          "plan_failures": [
+            "no band-selective dynamics on 'bassline' (mb_comp with an active low band, or a low dynamic_eq cut) \u2014 the boom is time-varying, a static EQ cut is the wrong tool"
+          ],
+          "outcome_failures": [
+            "steady low end moved -3.1 dB (want +-1.5: tame the swells, keep the foundation)",
+            "the constant 220/440 top moved -6.4 dB during swells (want +-1.5: full-band compression pumps it)"
+          ],
+          "passed": false,
+          "applied_actions": 4,
+          "stop_reason": "regressed \u2014 the critic's corrective pass made it worse; reverted",
+          "passes_run": 4,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "master_streaming",
+      "technique": "mastering chain",
+      "brief": "master this for streaming: around -14 LUFS, true peak at -1, keep it clean and dynamic",
+      "passed": 1,
+      "repeats": 1,
+      "stable_failure": false,
+      "runs": [
+        {
+          "plan_failures": [],
+          "outcome_failures": [],
+          "passed": true,
+          "applied_actions": 1,
+          "stop_reason": "targets met",
+          "passes_run": 2,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "widen_pads_mono_lows",
+      "technique": "band-limited stereo width",
+      "brief": "make the pads wider and more spacious, but keep the low end mono and club-safe",
+      "passed": 0,
+      "repeats": 1,
+      "stable_failure": true,
+      "runs": [
+        {
+          "plan_failures": [
+            "no band-selective width on 'pads': want an imager (width_high > 1, width_low <= 1), a high band_width, or a full-band widen WITH a low-end guard (bass_mono / narrowed lows) \u2014 naked full-band width loosens the low end"
+          ],
+          "outcome_failures": [
+            "high-band side energy only rose -0.0 dB (want >= 2: it should actually get wider)",
+            "pad mids moved +3.0 dB (want +-1.5)"
+          ],
+          "passed": false,
+          "applied_actions": 9,
+          "stop_reason": "targets met (critic pass)",
+          "passes_run": 4,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "vocal_space_send",
+      "technique": "send/return ambience",
+      "brief": "give the lead a sense of space with a short room reverb, but keep it upfront - not washed out",
+      "passed": 0,
+      "repeats": 1,
+      "stable_failure": true,
+      "runs": [
+        {
+          "plan_failures": [],
+          "outcome_failures": [
+            "post-phrase tail only rose +0.1 dB (want >= 1: no audible space was added)",
+            "lead level moved -5.5 dB while singing (want +-1.5: keep it upfront)"
+          ],
+          "passed": false,
+          "applied_actions": 6,
+          "stop_reason": "nothing to propose",
+          "passes_run": 3,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "glue_rhythm_section",
+      "technique": "bus glue compression",
+      "brief": "group the drums and bassline into a rhythm bus and glue them with gentle bus compression",
+      "passed": 0,
+      "repeats": 1,
+      "stable_failure": true,
+      "runs": [
+        {
+          "plan_failures": [
+            "no group action making a bus with drums + bassline"
+          ],
+          "outcome_failures": [],
+          "passed": false,
+          "applied_actions": 3,
+          "stop_reason": "targets met",
+          "passes_run": 3,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "dynamic_harsh_lead",
+      "technique": "dynamic EQ",
+      "brief": "the lead turns harsh when it gets loud - tame that harshness without dulling the quiet phrases",
+      "passed": 0,
+      "repeats": 1,
+      "stable_failure": true,
+      "runs": [
+        {
+          "plan_failures": [
+            "no threshold-gated presence control on 'lead' (a dynamic_eq cut at 2-6 kHz, a 2-4.5 kHz de-esser, or an mb_comp high band) \u2014 a static EQ cut dulls the quiet phrases too"
+          ],
+          "outcome_failures": [
+            "loud-phrase harshness only came down 1.9 dB (want >= 3)",
+            "quiet-phrase presence moved -1.9 dB (want +-1.5: the fix must be threshold-gated, not a static cut)"
+          ],
+          "passed": false,
+          "applied_actions": 1,
+          "stop_reason": "targets met",
+          "passes_run": 2,
+          "error": null
+        }
+      ]
+    },
+    {
+      "key": "warm_saturation_bassline",
+      "technique": "harmonic saturation",
+      "brief": "add some tape-style warmth to the bassline - harmonic richness, but don't push its peak level",
+      "passed": 0,
+      "repeats": 1,
+      "stable_failure": true,
+      "runs": [
+        {
+          "plan_failures": [
+            "no saturation on 'bassline' (tape warmth is the saturation device \u2014 overdrive is the aggressive tool)"
+          ],
+          "outcome_failures": [
+            "added harmonics only rose -0.5 dB at 110/165 Hz (want >= 10: no audible warmth)"
+          ],
+          "passed": false,
+          "applied_actions": 1,
+          "stop_reason": "targets met",
+          "passes_run": 2,
+          "error": null
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "cases": 10,
+    "stable_failures": 8,
+    "flaky": 0,
+    "clean_passes": 2
+  }
+}
