@@ -87,7 +87,7 @@ def test_width_and_duck_go_where_the_manual_says():
     assert "duck" in stem and "duck" not in master and "duck" not in ret
     assert 't.removeString ("duck")' in DOCK_H            # a group's list
     assert "Width** (the device) is Master-only" not in MANUAL
-    assert "**Stereo Width** goes on the Master, a track or a group" in FLAT
+    assert "**Imager** goes on the Master, a track or a group" in FLAT
     assert "Master-only devices refuse" not in FLAT and "master-only Width device" not in FLAT
 
 
@@ -106,7 +106,7 @@ def test_the_fader_leads_the_chain_in_every_sentence():
 
 
 def test_the_comp_scope_command_is_said_to_flip_nothing_on_this_face():
-    assert "The R15 face shows BOTH plots at" in GRAPHS_H
+    assert "this face shows the law and\n    // the tape at once, so it has nothing to flip" in GRAPHS_H
     assert "plug-in's rack view" not in FLAT
     assert "`view.comp_scope` has nothing to flip" in FLAT
 

@@ -219,7 +219,7 @@ _READ_TOOL_DEFS = [
          "in the mix, and the master) each band's L/R correlation over the "
          "song (+1 mono, 0 two unrelated channels, -1 anti-phase), "
          "`below_zero_pct` - the share of its ~0.3 s windows below 0, which "
-         "is exactly when the DAW's imager / width / utility / band-width "
+         "is exactly when the DAW's Imager and Utility "
          "PHASE lamps are lit - and `mono_db`, what it loses folded to mono. "
          "`issues`: a master band below 0 over the song or 20 % of the time "
          "or more; a channel with one side upside down; a stem band anti-"
@@ -257,7 +257,10 @@ _READ_TOOL_DEFS = [
          "read `played`: every pitch class the part holds and for how long "
          "(seconds, share), longest first, over all its notes. A bass's home "
          "note is the top of `played` (check that the next ones fit a chord on "
-         "it); notes under about C2 are not tracked and are missing from it. "
+         "it). `sequence` is the part in the order it is played - read a bass's "
+         "roots bar by bar from it, in one call; never print or transpose a clip "
+         "to learn its notes. A bass under C2 is tracked too, its note edges good "
+         "to about a tenth of a second. "
          "Use it for 'which notes are flat', "
          "'is this take in tune', 'what notes am I singing'. Lead vocal, bass "
          "or single-line lead ONLY — on a chord instrument or a full mix it "
@@ -504,8 +507,14 @@ _IDLE_TOOL_DEFS = [
                      "what you would do and leave the decision with them. "
                      "Don't resubmit an identical action set inside one turn "
                      "— nothing is re-measured in between, so a repeat is a "
-                     "loop, not a retry. Rejected-by-guardrails returns "
-                     "violations you can revise against — and when a cap "
+                     "loop, not a retry. At most 8 actions go in one "
+                     "proposal (split a bigger set into moves that each make "
+                     "sense alone); a pass holds 3 proposals, and past the "
+                     "third the brain opens a fresh pass by itself, so the "
+                     "pass cap never refuses you. Rejected-by-guardrails returns "
+                     "violations you can revise against: revise against the "
+                     "rule named, and never make a refused move another way "
+                     "(a fader, a send or an automation write) — and when a cap "
                      "constrains what the user ASKED for, tell them the "
                      "concrete rule and limit (they should learn about the "
                      "\u00b16 dB/pass cap, not read 'couldn't do that'). "
@@ -743,19 +752,18 @@ _SET_PLAN_TOOL_DEF = {
     "name": "set_plan",
     "description": (
         "For work that takes more than two or three moves, set the plan FIRST — "
-        "the ordered steps in the user's words — then call it again as steps land "
-        "(the whole list each time; `current` = the index you are on, `done` = "
-        "the indexes finished). It renders in the feed and stays in your context "
-        "across turns, so the user can redirect and you can resume. Not for "
-        "one-move requests."),
+        "the ordered steps in the user's words. As steps land, send ONLY `current` "
+        "(the index you are on) and `done` (the indexes finished): the list stays as "
+        "you set it, so send `steps` again only to change it. It renders in the feed "
+        "and stays in your context across turns, so the user can redirect and you "
+        "can resume. Not for one-move requests."),
     "input_schema": {"type": "object",
                      "properties": {"steps": {"type": "array",
                                               "items": {"type": "string"},
                                               "minItems": 2, "maxItems": 12},
                                     "current": {"type": "integer"},
                                     "done": {"type": "array",
-                                             "items": {"type": "integer"}}},
-                     "required": ["steps"]}}
+                                             "items": {"type": "integer"}}}}}
 
 
 #: The A/B the agent may offer after a debatable move (ask_preference, 2026-09-03).
@@ -934,7 +942,8 @@ out: a figure you report from it names what it left out in a clause, or you \
 measure the exported file instead. To report a FILE you exported, \
 `analyze_reference` on its path gives its loudness and true peak, and with \
 `start_s` / `end_s` one section of it; the export's own reply gives its \
-length and sample peak.
+length and sample peak, and its loudness and true peak measured on the file \
+(`measured`), with `over_ceiling` when it is over -1 dBTP.
 - While a run is active you keep talking: answer status and metric \
 questions with the read tools, and file requested changes with \
 `file_instruction` for the loop to pick up between passes.
@@ -942,6 +951,17 @@ questions with the read tools, and file requested changes with \
 Craft:
 - Have opinions. "The 250 Hz buildup is the problem, not the vocal level" \
 beats listing options.
+- Fix what you measure as wrong, inside the brief: check every pitched \
+track's tuning against the key before you call a mix done, and give one \
+more than about 10 cents off a `tune` in the same turn, said in a clause. \
+A fault you found and left is a note the user has to send you.
+- A section's lift has to survive the master: measure a drop or a chorus \
+against its neighbour through the limiter at the target loudness, not on \
+the unlimited mix (limiting to -14 LUFS once took a drop's 2.7 LU lead \
+down to 1.5).
+- A track whose click sits on one side only (analyze_phase reports \
+`one_sided_clicks`) gets no extra attack and no extra top end: narrow it \
+toward mono, and tell the user the source carries the click.
 - Plain English first, numbers as backup: "the chorus is drowning the \
 vocal (masking +6 dB at 2–4 kHz)".
 - With several stems in play, masking BETWEEN tracks is usually the real \
@@ -993,7 +1013,7 @@ answer grounded in two measurements beats a long essay.
 Action grammar for `propose` (guardrail limits arrive in the context block):
 - gain: {type:"gain", stem_id, delta_db, time_range_s?: [start_s, end_s]} — \
 ranged gain renders as a ride; stems only, never master.
-- eq: {type:"eq", stem_id, band: {freq_hz, gain_db, q: 0.3..8, shape, slope_db_oct?}, \
+- eq: {type:"eq", stem_id, band: {freq_hz, gain_db, q: 0.1..40, shape, slope_db_oct?}, \
 output_db?: -12..12, channel?: stereo|mid|side|left|right} with shape one of \
 peak|low_shelf|high_shelf|hpf|lpf|notch|bandpass|tilt_shelf. stem_id \
 "master" allowed. channel "mid"/"side" (M/S) hits only the centre or the sides \
@@ -1003,15 +1023,28 @@ notch = full cut at freq_hz (gain_db ignored, q sets width) for killing a \
 resonance/hum/ring. bandpass = passes only a narrow band around freq_hz (gain_db \
 ignored, q sets width) — isolating an element or lo-fi/telephone effects. \
 tilt_shelf = tips the whole spectrum low↔high in one move around freq_hz \
-(gain_db = total tilt). slope_db_oct (hpf/lpf only, 6|12|24|48|96, default 6) \
+(gain_db moves each end: lows -gain_db, highs +gain_db). slope_db_oct (hpf/lpf only, 6|12|24|48|96, default 6) \
 steepens the cut — 24-48 clears rumble/DC without the gentle 6 dB/oct default's \
 slow skirt dulling what sits just above the cutoff (a steeper cut shifts phase MORE near \
-the cutoff, not less). q shapes only a 12 dB/oct cut: a 6 dB/oct cut and any steeper one \
-ignore it.
+the cutoff, not less). q: on a bell 1 is broad (about two octaves), 4-8 narrow, 10+ surgical; on a cut \
+1 is flat (Butterworth) and more puts a resonant bump at the cutoff - a 6 dB/oct cut has no q. \
+An hpf's freq_hz is capped at 120 Hz (40 Hz on a stem tagged bass); to thin a source above that, use a low_shelf cut.
 - comp: {type:"comp", stem_id, threshold_db, ratio, attack_ms, release_ms, \
-makeup_db, mix?: 0..1, channel?: stereo|mid|side} — makeup must be 0 on the master; on stems it draws \
-from the gain budget. One whole-file comp per stem: proposing another \
-REPLACES it (that is how you adjust settings); time-ranged comps must not \
+makeup_db, mix?: 0..1, channel?: stereo|mid|side, style?: clean|punch|smooth|glue|vocal|mastering, \
+knee_db?: 0..72} — \
+style is its character, and in a proposal the knobs stay as set (the DAW's device.set comp.style also sets ratio, attack, release and knee to the character's): clean = transparent, a short hit let go fast \
+and a long squash slowly (the default); punch = fast and tight, every hit let go quickly \
+(drums, attack); smooth = a soft, shallow curve that eases in (gentle leveling); glue = a soft \
+onset whose ratio grows with level, slow to let go (bus glue); vocal = ignores the ratio and the knee and levels from well below the threshold to almost limiting (a lead vocal); mastering = gentle, \
+letting go faster the deeper it went (a master or a mix bus). A ratio of 1 is off in every style. knee_db widens the bend around the threshold (0, the default, is hard; 6-12 is a gentle knee). makeup must be 0 on the master; on stems it draws \
+from the gain budget. A whole-file comp REPLACES the comp on its target \
+(that is how you adjust settings). A chain may hold several whole-file comps, and \
+several gates, transient shapers, ducks, limiters, multiband comps, OTTs, clippers, saturators, overdrives, choruses, flangers, Auto Filters and utilities too: where the target already holds two or more of the \
+type, give instance: N to say which one the proposal changes (the N-th of that type on \
+the chain, counted from 0 as comp#N counts it), or instance: "new" to add one more \
+beside them; without it the proposal is refused (rule instance_which). instance: \
+"new" also stacks a second on purpose (serial compression: a gentle leveller, then a \
+fast peak catcher). Time-ranged comps take no instance and must not \
 overlap. The chain holds at most 4 comps in all — entries already on it count, \
 so ranged ones accumulate across passes and the 5th is refused (rule \
 comps_per_stem_max): widen a range or undo one. Check the stem's chain in your \
@@ -1026,12 +1059,17 @@ mid:{threshold_db,ratio,attack_ms,release_ms,makeup_db,mix} and side:{...} \
 blocks (flat params then ignored) — e.g. glue the centre, leave the sides \
 open: mid 2.5:1, side 1:1.
 - deess: {type:"deess", stem_id, threshold_db: -60..0, freq_hz: 2000..12000, \
-ratio?: 1..10 (your guardrail — the same dynamics ceiling as a comp; the user \
-knob goes to 20), attack_ms?: 0.1..20, release_ms?: 10..500, range_db?: -80..0, \
-wide?: bool} — split-band de-esser. range_db caps the reduction depth (-6..-12 \
-keeps esses natural; -80 default = uncapped); wide=true dips the WHOLE signal \
-on ess hits (detector stays the high band) — transparent on dense vocals. \
-Defaults: 4:1 / 1 ms / 50 ms. Same slot bound as comp: at most \
+top_hz?: 2000..20000, range_db?: -24..0, mode?: "allround"|"vocal", wide?: \
+bool} — de-esser: turns the band freq_hz..top_hz down (top_hz 20000 = open to \
+the top) while it is over threshold_db. It has no ratio, attack or release: \
+the cut starts at the threshold and reaches range_db when the band reads 0 \
+dBFS, with a fast fixed timing and a 12 ms lookahead. range_db is the most it \
+ever cuts (-3..-8 keeps esses natural; default -6). mode "vocal" (one voice) \
+cuts only while the band stands well clear of the voice's vowels - an ess, \
+never a bright sung note; "allround" (the default) cuts whatever crosses the \
+threshold - a mix, a bus, an instrument. wide=true dips the WHOLE signal on an \
+ess; split (the default) turns down a gentle high shelf whose depth is the \
+cut. Same slot bound as comp: at most \
 4 de-essers per chain, counting the entries already on it, so ranged ones \
 accumulate across passes and the 5th is refused (rule deessers_per_stem_max) \
 — widen a range or undo one.
@@ -1044,13 +1082,12 @@ whole-song key change; master only, one per master (replace). Size it from the \
 detected key: the nearest interval from key.tonic to the target tonic (prefer \
 ≤6 semitones). Keeps the mode — a uniform shift can't flip major↔minor.
 - pan: {type:"pan", stem_id, pan: -1..1}; width: {type:"width", stem_id, \
-width: 0..2}. On a stem or bus, width 0 (full mono) is yours. On the MASTER your \
+width: 0..2, stereoize?: bool, stereoize_ms?: 1..20} — the Imager, the one stereo device (on a stem or bus it is the channel strip's width). width scales the side - 0 mono, 1 as it is, 2 the side doubled - and never touches the mid, so the mono sum is the input's. stereoize (it acts only above width 1) adds side made from the mid through a short decorrelation filter stereoize_ms long (whole ms, default 6; longer = wider and more diffuse, the lows kept narrower than the top): it widens a part that is close to mono, which width alone cannot. On a stem or bus, width 0 (full mono) is yours. On the MASTER your \
 floor is 0.5: narrowing the finished mix past half the side — or monoing it — is \
 the user's call, not an automatic move (rule master_width_min). Folding only the \
 LOWS stays free at any depth: a band whose TOP edge is at or below 300 Hz is \
-exempt — imager width_low at its default crossover, utility bass_mono with \
-bass_mono_hz at or below 300, band_width \
-on sub/bass. The same floor binds utility.width/mono, imager and band_width on \
+exempt — utility bass_mono with \
+bass_mono_hz at or below 300. The same floor binds utility.width/mono on \
 the master, so no device is the way round it - and they are in SERIES: what the \
 master already carries and what you propose multiply (width 0.7 with a utility at \
 0.7 is 0.49, refused). Narrow with one device.
@@ -1059,8 +1096,8 @@ invert?, invert_left?, invert_right?, bass_mono?, bass_mono_hz?: 50..500, \
 dc_filter?, balance?: -0.5..0.5 (your guardrail — and exactly 0 on the MASTER: an \
 L/R skew of the finished mix is never automatic; the user's knob goes to ±1)} — \
 freely-placeable output/trim insert (DC → gain → \
-per-ch polarity → width/mono → bass mono → balance); stem/bus/master, one per \
-chain (replace). bass_mono folds lows below bass_mono_hz to mono (club-safe \
+per-ch polarity → width/mono → bass mono → balance); stem/bus/master; a proposal \
+replaces the one there. bass_mono folds lows below bass_mono_hz to mono (club-safe \
 bottom, wide top) through a 48 dB/oct split: an octave below the knob the side is \
 gone (-48 dB), at the knob -6, above it untouched; invert_left/right fix one out-of-phase channel — a STEM \
 repair: on the MASTER a one-channel flip guts the mono sum and is refused \
@@ -1070,46 +1107,54 @@ counts against the gain budget. Use when chain PLACEMENT matters (the fader is \
 set_stem).
 - limiter: {type:"limiter", stem_id:"master", ceiling_dbtp ≤ -1.0, \
 target_lufs_i?, release_ms?, lookahead_ms?, channel_link?: 0..1, \
-style?: modern|transparent|punchy} — the only processor allowed to push \
+style?: clean|loud|glue} — the only processor allowed to push \
 loudness. If flags include over_limiting, back off/rebalance instead of \
-pushing the target louder. `style` is a PRESET for release_ms+lookahead_ms \
-(transparent = slow/clean, punchy = fast/tight, modern = neutral) — use style OR \
-set those two knobs, not both. channel_link 1 = stereo-linked, lower = independent \
-L/R (wider). The ceiling is always held. Set only on intent.
+pushing the target louder. Two stages: a fast one catches each peak and lets go \
+in milliseconds, a slow one carries the held level and lets go over release_ms. \
+`style` is its character (clean = held level slow, peaks at once, the most \
+transparent, the default; loud = both fast, louder and grittier; glue = peaks \
+slow too, hits grouped, the gentlest) and sets release_ms + lookahead_ms to what \
+it plays at - give those only to depart from them (shorter lookahead = louder, \
+grittier; longer release = less pumping). channel_link 1 = stereo-linked, lower = \
+independent L/R (wider). The ceiling is always held. Set only on intent. \
+Under a brief of -1 dBTP set it at -1.2: a master limited at exactly -1.0 has \
+measured -0.97 on the exported file. It has no makeup_db - target_lufs_i sets its make-up.
 - saturation: {type:"saturation", stem_id, drive_db: 1..12, output_db?: -12..12, \
 curve?: tanh|warm|tube|hard, mix?: 0..1, oversample?: 1|2|4|8} — waveshaper that adds harmonic density/warmth \
-and softens peaks; curve sets the character (warm=gentle, tube=asymmetric - its negative peaks \
-come out louder and it leaves a small DC offset, hard=punchy clip). Driving it lowers level, so output_db is a post-shaper output trim (charged \
-to the gain budget); mix is dry/wet (parallel saturation). MULTIBAND (Saturn-style): \
+and softens peaks; curve sets the character: tanh = soft (a gentle odd-harmonic curve, the default); warm = tape (the soft curve plus a tape tone - a low bump near 35-60 Hz, a little lift near 1.2 and 11 kHz, the rumble under 25 Hz cut); \
+tube = even harmonics (a second harmonic that grows with drive - warmth; asymmetric, its positive peaks clip later); hard = heavy (dense odd harmonics even at quiet levels - it squashes hard and lifts quiet detail). Driving it keeps its level: each curve sits a little above the dry (about +1 dB; tube up to +2.4 and hard +4 to +5 at drive 12 - and the warm and tube tones add up to +2 dB more near 50 Hz, so on a bass a warm curve at drive 9 reads about +3 dB: trim output_db to hold its level) and that lift \
+is charged to the gain budget like output_db, a post-shaper output trim (a small - takes the lift back); mix is dry/wet (parallel saturation). MULTIBAND (Saturn-style): \
 give low/mid/high:{drive_db:0..12 (your guardrail caps the loudest band at 12; the \
 user knob goes to 24), \
 output_db?, mix?, curve?} + crossover_lo_hz?/crossover_hi_hz? + mix? (global \
 dry/wet) to saturate each band independently (warm the bass, leave highs clean - a \
 band's mix 0 is clean; drive 0 still shapes a loud band a little); \
-flat drive_db is ignored when bands are set. oversample (single-band only) runs the \
+flat drive_db and output_db are ignored when bands are set. oversample (either form) runs the \
 curve at N x: a hard curve on a BRIGHT source folds harmonics back as inharmonic fizz, \
-and 4 removes it — worth it at high drive or on cymbals/hats/air; 1 is the default. \
+and 4 removes it — worth it at high drive or on cymbals/hats/air; 4 is the default. \
 Thicken a thin/sterile source or glue \
 a bus, not a loudness or tone-balance tool.
-- clip: {type:"clip", stem_id, threshold_db: -6..0, hardness: 0..1, \
-output_db?: -12..12, oversample?: 1|2|4|8} — pre-limiter clipper; \
-shaves transient peaks (soft tanh knee at 0 → hard brickwall at 1) so the \
-limiter works less and the mix gets louder + cleaner. Master, a bus, or a stem (a stem clipper is the right move on a snare/drum stem whose peaks eat the headroom). On the master it \
-runs just before the limiter; on a stem or bus nothing after it holds a ceiling. \
-oversample 4 = 4× shaping, far less inter-sample overshoot (prefer when clipping \
-hard) but not a ceiling of its own - its filter rings past the threshold; 1 default \
-= plain memoryless. output_db trims the clipped signal (− backs off the limiter, + \
-drives it; the master's limiter holds the ceiling). Use on a loud/club master ahead of the \
-limiter, sparingly — deeper than ~-6 dB is rejected. Not coloration (that's \
-saturation).
+- clip: {type:"clip", stem_id, gain_db?: 0..12, clip_pct?: 0..100, softness?: 0..1, oversample?: \
+1|2} — clipper: turns the signal up by gain_db, then flattens everything over clip_pct (the \
+ceiling in % of full scale: 100 = 0 dBFS, 71 = -3 dBFS, 50 = -6 dBFS), shaving transient peaks \
+so the limiter works less and the mix gets louder + cleaner. softness 0 is a brickwall; at s the \
+signal is untouched up to (1 - s) x the ceiling and bends into it by (1 + s) x (0.2-0.5 keeps a \
+snare's crack without a square top). Nothing brings the level back down after the clip: gain_db \
+is the drive, charged to the gain budget. Master, a bus, or a stem (a stem clipper is the right \
+move on a snare/drum stem whose peaks eat the headroom). On the master it runs just before the \
+limiter; on a stem or bus nothing after it holds a ceiling. oversample 2 clips at 2x (far less \
+aliasing on bright material) and then holds the output under 0 dBFS, but below that it is not a \
+ceiling of its own - its filter rings past clip_pct; 1 (the default) is off. Use on a loud/club \
+master ahead of the limiter, sparingly — a ceiling more than 6 dB under the input's full scale \
+(clip_pct in dB minus gain_db below -6) is rejected. Not coloration (that's saturation).
 - gate: {type:"gate", stem_id, threshold_db: -80..-20, ratio: 1..20, attack_ms?, \
 release_ms?, hold_ms?: 0..500, range_db?: -80..0, hysteresis_db?: 0..24, \
-sc_hpf_hz?: 0..2000, sc_lpf_hz?: 200..20000} — stem/bus downward gate/expander: \
-attenuates BELOW threshold to silence bleed/noise between hits, tighten loose \
+sc_hpf_hz?: 0..2000, sc_lpf_hz?: 200..20000, character?: classic|clean|vocal|guitar} — \
+stem/bus downward gate/expander: attenuates BELOW threshold to silence bleed/noise between hits, tighten loose \
 drums, cut breaths/room tails. Higher ratio = harder gate; set threshold just \
 under the source's hits (agent limit -20). hold_ms (50-250 on drums) stops \
 chatter on decays; range_db -10..-20 DUCKS bleed naturally instead of the -80 \
-full mute; hysteresis_db 3-6 stops flutter at threshold; SC filters shape the \
+full mute. character picks the law: classic (the default - a clean, fast gate), clean (smoother, eases open and shut on the linear gain), vocal (its detector hears the top boosted ~26 dB, so consonants open it; opens slowly - for a lead vocal), guitar (its detector hears the lows 3 dB down, opens after a short delay and holds ~140 ms before it lets go - for a guitar or a sustained part). Each starts cutting a little UNDER its threshold (classic at 4:1 ~3 dB under) and carries its own hysteresis on its detector's level (classic 7.3, clean 11.8, vocal 5.9, guitar 1.1 dB - the detector hears through each character's own EQ, so a low source shuts nearer its threshold: clean on a 100 Hz tone only 2.5 dB under); hysteresis_db ADDS to it, so it is rarely needed except on guitar. SC filters shape the \
 DETECTOR only (sc_hpf_hz ~200 = ignore kick rumble, sc_lpf_hz ~5000 = ignore \
 cymbal spill). Rarely right on the master (it may go there), and not artifact repair (spectral_denoise).
 - transient: {type:"transient", stem_id, attack_db: -6..6, sustain_db: -6..6, \
@@ -1119,11 +1164,21 @@ tails; size off stem(<id>).transient_energy_ratio. speed >1 = tighter transient 
 window (fast percussion), <1 = longer (plucked bass); output_db = post trim. A \
 LIFT is level: the larger of attack_db / sustain_db, when positive, draws from the \
 stem's gain budget, as a positive output_db does. Cuts are free.
-- duck: {type:"duck", stem_id, key_stem_id, threshold_db, depth_db: 1..12, \
-attack_ms, release_ms} — sidechain stem_id under key_stem_id. The clean fix for \
-RHYTHMIC masking (kick→bass, lead→pad): when analyze_masking pulses in \
-worst_windows with a transient source, duck the maskee instead of a static EQ \
-cut (~3-6 dB depth, ~5 ms attack).
+- duck: {type:"duck", stem_id, trigger?: "track"|"sync" (a key_stem_id alone \
+is "track"), key_stem_id (the trigger track, for "track"), curve?: 1..16, \
+length?: "1/8"|"1/4"|"1/2"|"1/1", mix: 0..1 (yours to 0.74: 12 dB at the \
+curve's deepest), band?: true|false, band_hz?: 20..5120} — a drawn ducking \
+curve, gain = 1 - mix x (1 - curve). "track" restarts the curve on each HIT of \
+key_stem_id - a percussive onset - and plays it once (kick→bass, kick→pad, \
+snare→reverb return); a sustained part (a held lead, a pad, a vocal line) fires \
+few hits or none, so it is no trigger: ride or EQ the part under it instead. \
+"sync" pumps on the song's grid every length, with no trigger. A replace of a \
+keyed duck names its key_stem_id again, or it is refused. Curves 1-8 duck (1 is the classic: a fast dip, back by about half \
+its length), 9-10 sub-bass (slower back), 11-12 trim a tail, 13-14 \
+reverse, 15-16 rhythm. band ducks only below band_hz - the low end gets out of \
+the way unheard. The clean fix for RHYTHMIC masking: when analyze_masking \
+pulses in worst_windows with a transient source, duck the maskee instead of a \
+static EQ cut (mix ~0.3-0.5 is 3-6 dB at the dip).
 - mute: {type:"mute", stem_id, muted}; exclude: {type:"exclude", stem_id, \
 excluded}
 - match_eq: {type:"match_eq", stem_id, band_gains_db: {band: dB}} — per-band \
@@ -1136,37 +1191,47 @@ Before broad boosts, check resonances/harshness; cap or cut trouble bands.
 — one-knob spectral \
 tilt around the pivot (default 1 kHz): +tilt brightens (lows down/highs up), \
 -tilt warms; tilt_db moves EACH end, so the low-to-high span is twice it (an eq \
-tilt_shelf's gain_db is the whole span). The clean fix for a broadly dull/harsh balance instead of stacking \
+tilt_shelf's gain_db also moves each end). The clean fix for a broadly dull/harsh balance instead of stacking \
 two shelves. Master/stem/bus, capped ±6 dB. Use eq/match_eq for narrow tone.
 - dynamic_eq: {type:"dynamic_eq", stem_id, freq_hz, gain_db:-12..0, q: 0.3..12, \
-threshold_db, ratio, attack_ms?, release_ms?, time_range_s?} — downward-only \
+threshold_db, attack_ms?, release_ms?, time_range_s?} — downward-only \
 surgical control for resonances/harshness/mud that blooms only on loud \
-phrases; stems, busses and master allowed (ranges are stems only).
+phrases. It has no ratio: over threshold_db the band dips with the level, \
+dB for dB through a soft knee, down to gain_db (its range); stems, busses and master allowed (ranges are stems only).
 - mb_comp: {type:"mb_comp", stem_id, low/mid/high: {threshold_db, ratio, \
 makeup_db, up?}, attack_ms, release_ms, crossover_lo_hz?: 30..4000, \
 crossover_hi_hz?: 200..16000} — 3-band comp; crossovers default 150 Hz / 2 kHz \
 (movable to fit the source); per-band makeup must be 0 on master; up=true is \
-UPWARD comp (lift quiet detail below threshold), not on master; one per stem \
-(a new one replaces it)
-- ott: {type:"ott", stem_id, depth: 0..0.25, time?: 0.1..4, in_gain_db?: -12..12, \
-out_gain_db?: -12..12, low/mid/high?: {up: 0..1, down: 0..1, gain_db?: -12..12}, \
-crossover_lo_hz?: 30..4000, crossover_hi_hz?: 200..16000} — OTT-style 3-band \
-UPWARD+DOWNWARD comp: each band is levelled toward an internal target (quiet \
-detail lifted AND peaks tamed at once). THE aggressive-density tool for modern \
-pop/EDM vocals, synths, drum busses; depth is the knob and you must SET it (agent \
-cap 0.25: the upward side lifts quiet material up to 24 dB x depth, so 0.25 is +6 dB; \
-the default 0.5 is refused, deeper is the user's knob); time <1 snappier / >1 \
-smoother; per-band up/down rebalance the sides. \
-Stems + busses ONLY (upward pushes loudness — never the master); one per chain \
-(a new one replaces it). Prefer mb_comp for transparent band dynamics.
-- chorus: {type:"chorus", stem_id, rate_hz?: 0.01..10, depth?: 0..1, delay_ms?: 1..50, \
-mix?: 0..0.5 (your cap; user knob to 1), voices?: 1..3, stereo_deg?: 0..180} — MODULATION: \
-voices read the signal through an LFO-swept delay. stereo_deg offsets the right channel's \
-sweep and is what makes it WIDE rather than merely detuned; voices 2-3 = ensemble. The fix \
-for a thin MONO synth, a lifeless doubled vocal, a guitar that needs width without EQ — not \
-for dullness (EQ) or unevenness (compressor). mix 0.2-0.4 thickens, higher is an effect that \
-smears transients (keep it off drums and off a lead that must stay a point); 0.5-1.5 Hz at \
-depth 0.2-0.3 is safe ground. No feedback — that is the flanger, next.
+UPWARD comp (lift quiet detail below threshold), not on master; a new one \
+replaces the one there (instance: N or "new" where the chain holds several, as for comp)
+- ott: {type:"ott", stem_id, depth: 0..0.25, time?: 0..10, in_gain_db?: -12..12, \
+out_gain_db?: -12..12, upward_pct?: 0..200, downward_pct?: 0..100, low/mid/high?: \
+{up: 0..1, down: 0..1, threshold_pct?: 0..200, gain_db?: -12..12}, crossover_lo_hz?: \
+30..4000, crossover_hi_hz?: 200..16000} — OTT: 3-band UPWARD+DOWNWARD compression \
+with a fixed lift per band (about +14 dB low and high, +9 mid, at full depth): quiet \
+material is lifted further, loud material is cut almost flat, so quiet detail rises \
+AND peaks are tamed at once. THE aggressive-density tool for modern pop/EDM vocals, \
+synths and drum busses; depth is the one knob and you must SET it (your cap is 0.25: \
+there the fixed lift is up to +3.5 dB, charged as gain, and quiet material rises a \
+few dB more; the device's own default, 1.0, is refused; deeper is the user's knob). \
+time scales the release (1 = as made, <1 snappier, >1 smoother); upward_pct / \
+downward_pct scale each side for every band; per band up/down take that band's share \
+of a side and threshold_pct moves both of its \
+thresholds (over 100: more is lifted, less is cut); in_gain_db drives more material \
+into the squash. \
+Stems + busses ONLY (upward pushes loudness — never the master); a proposal \
+replaces the one there. Prefer mb_comp for transparent band dynamics.
+- chorus: {type:"chorus", stem_id, mode?: "I"|"II"|"I+II", stereo?: 0..1, \
+mix?: 0..0.5 (your cap; user knob to 1), output_db?: -24..6} — MODULATION, a two-line \
+chorus with fixed sweeps: I = slow and wide (0.40 Hz), II = faster, more motion (0.83 Hz), \
+I+II = both lines, the thickest. stereo 1 = each side its own line, swept opposite (wide); 0 = \
+the left's wet on both sides. Its wet is darker than the dry (-3 dB near 6 kHz). mix is NOT a \
+crossfade: up to 0.5 the dry stays full and the wet is laid on top (0.5 = about +4.5 dB on \
+music, I+II +6.6) and that lift is charged to your gain budget - pass a negative output_db to \
+hold the level. The fix for a thin MONO synth, a lifeless doubled vocal, a guitar that needs \
+width without EQ — not for dullness (EQ) or unevenness (compressor). mix 0.2-0.4 thickens, \
+higher is an effect that smears transients (keep it off drums and off a lead that must stay a \
+point). No feedback — that is the flanger, next.
 - flanger: {type:"flanger", stem_id, rate_hz?: 0.01..10, depth?: 0..1, \
 delay_ms?: 0.5..20, feedback?: -0.7..0.7 (your cap; user knob to +-0.95), \
 mix?: 0..0.5 (your cap; user knob to 1), stereo_deg?: 0..180} — the chorus's \
@@ -1185,12 +1250,12 @@ cancellation. \
 delay_ms is much shorter than a chorus's — \
 0.5-5 ms; past ~10 ms the teeth crowd the low end and it stops sounding like \
 a flanger. For a flat DI guitar/synth that needs MOVEMENT (not width), or a \
-hook on a loop's last bar. Not a widener (chorus/band_width), never tone — a \
+hook on a loop's last bar. Not a widener (chorus/stereoize), never tone — a \
 comb removes energy at every notch, so on a mix or bus it reads as phasiness. \
 Stems; mix 0.3-0.5.
 - auto_filter: {type:"auto_filter", stem_id, filter_type?: \
 "lp"|"hp"|"bp"|"notch", slope_db_oct?: 12|24, cutoff_hz?: 20..20000, \
-resonance?: 0..0.3 (your cap; user knob to 1), lfo_amount_oct?: 0..3 (your \
+resonance?: 0..0.64 (your cap; user knob to 1), lfo_amount_oct?: 0..3 (your \
 cap; user knob to 6), lfo_shape?: \
 "sine"|"triangle"|"saw_up"|"saw_down"|"square"|"random", lfo_rate_hz?: \
 0.01..20, lfo_sync?: true|false, lfo_rate_note?: "1/32" to "8/1" (e.g. "1/4", \
@@ -1201,11 +1266,12 @@ stem>, mix?: 0..1} — MODULATION: a resonant filter whose cutoff MOVES (12 or \
 24 dB/oct; "bp" peaks at 0 dB). Three things push the cutoff, in octaves \
 around cutoff_hz, and they add: the LFO (lfo_amount_oct either side, at \
 lfo_rate_hz or, with lfo_sync, once per lfo_rate_note on the song's tempo \
-map), and the envelope (env_amount_oct; negative CLOSES the filter on a hit) \
+map), and the envelope (env_amount_oct, the octaves it moves from -60 dBFS to \
+full scale; negative CLOSES the filter on a hit) \
 following the stem's own level - or, with key_stem_id, ANOTHER stem's (the \
 hats opening a pad's filter). A track has ONE trigger: a duck on it and its \
 auto_filter listen to the same one. lfo_stereo_deg offsets the right channel's \
-sweep. resonance is the peak at the cutoff (0 = none; your 0.3 is about a 5 dB \
+sweep. resonance is the peak at the cutoff (0 = none; your 0.64 is about a 6 dB \
 peak). For movement on a static part (a pad that breathes with the beat, a \
 synth that opens over a bar), a filtered intro or breakdown, a wah, a \
 band-pass "telephone" vocal. A moving CUT, not a tone fix (that is eq) - a \
@@ -1213,7 +1279,8 @@ deep sweep on a full mix reads as a mistake. Stems and groups (on a group, no \
 key_stem_id); not the master.
 - overdrive: {type:"overdrive", stem_id, drive_db: 0..24, filter_on?: bool, \
 freq_hz?: 40..12000, q?: 0.3..8, tone?: 0..1, output_db?: -24..12, mix?: 0..1, \
-oversample?: 1|2|4|8 (N x shaping — kills the aliasing fizz at high drive)} \
+oversample?: 1|2|4|8 (N x shaping — kills the aliasing fizz at high drive), \
+character?: pedal|smooth|crunchy|power} \
 — drive-pedal DISTORTION, harder + dirtier than saturation: exponential \
 soft-clip at drive_db; filter_on + freq_hz/q = resonant band-pass pre-filter \
 (focus the drive, e.g. 1-3 kHz vocal grit); tone is a high shelf on the \
@@ -1221,24 +1288,8 @@ shaped signal, corner near 3 kHz (0 dark / 0.5 neutral / 1 bright: up to +6 dB a
 charged to the EQ boost budget); mix < 1 = parallel grit. Aggressive color \
 for drums/bass/vocals/synths on stems + busses; use saturation for polite \
 warmth/glue. output_db restores the shaper's level drop (positive draws from \
-the gain budget).
-- imager: {type:"imager", stem_id, width_low?: 0..2, width_mid?: 0..2, \
-width_high?: 0..2, crossover_lo_hz?: 30..4000, crossover_hi_hz?: 200..16000} — \
-3-band stereo imager (stems/busses/master; one per chain, replace). Mono the \
-lows (width_low 0 = club-safe bottom: a 48 dB/oct split, so the low side goes about \
-40 dB down below 100 Hz at the default crossover, 6 dB at the crossover itself), widen the highs (1.2-1.4 = air), mids \
-untouched; crossovers default 150/2000. Prefer over several band_width entries. \
-On the MASTER each band is judged by its OWN top edge against the 0.5 floor: \
-width_low 0 at the default 150 Hz crossover is free (that is monoing the lows), \
-width_mid/width_high are floored at 0.5 — push crossover_lo_hz past 300 Hz and \
-the low band loses the exemption too.
-- band_width: {type:"band_width", stem_id, band, width: 0..2, lo_hz?, hi_hz?} — \
-a labeled band, or pass lo_hz+hi_hz together (20..20000, lo<hi) to scrub a custom \
-one; prefer imager for multiband width work. Its band is a 48 dB/oct split, so \
-width 0 takes a one-octave band's side about 11-17 dB down (deeper at its centre, half \
-at its edges) - not to silence; a wider band goes deeper. On the MASTER the 0.5 floor applies \
-unless the band's TOP edge is at or below 300 Hz (sub and bass are free; \
-presence/air are not).
+the gain budget). \
+character picks the voice: pedal (the default - the exponential soft-clip, lows held back, fizz rolled off), smooth (a gentle amp: one side bends first - warm, even harmonics), crunchy (an amp that clips near square early - bright upper mids, cuts through), power (a power amp: clean until pushed, then square through a dark speaker); the amps each carry a guitar cabinet's tone - a strong 2-4 kHz presence and almost nothing above 8-12 kHz - so they are for grit and character, not for a full-range source you want to keep bright. The amps keep their level as they are driven (a lift of +3 to +7 dB at drive 0, more past drive ~17-30, charged to the gain budget like output_db - trim it back), and their cabinet tone (+7 to +12 dB of presence) is charged to the EQ boost budget, so a run reaches for them rarely.
 - spectrogram: {type:"spectrogram", stem_id} — the Spectrogram ANALYZER, and the \
 only entry here that PROCESSES NOTHING: both engines treat it as a render no-op \
 (audio passes through untouched, bit-identical) and its waterfall is the audio \
@@ -1297,7 +1348,7 @@ Say which of the three you measured.
 routes the members; route: {type:"route", stem_id, bus_id|null} re-homes one \
 stem (null = back to the master). You own routing — group related stems and \
 glue the bus (gain/eq/match_eq/comp/deess/saturation/overdrive/transient/\
-mb_comp/ott/band_width, whole-file, no duck) instead of repeating per-stem \
+mb_comp/ott, whole-file, no duck) instead of repeating per-stem \
 moves; a group \
 + its glue comp is one proposal, and analyze_bus is your ears on the group. \
 A group is ON its members' signal path, so the budgets count along it: gain on a \
@@ -1306,11 +1357,11 @@ and so do their EQ moves against the composed rail - lift the group OR the track
 The bus_id names the family it holds and every member must belong to it — a \
 bass in a bus called "drums" is wrong however low it sits. \
 The user's manual channel is only volume/pan/mute/solo.
-- return_delay: {type:"return_delay", return_id, delay_ms, feedback, tone}, \
-return_reverb: {type:"return_reverb", return_id, decay_s, pre_delay_ms, tone}, and \
+- return_delay: {type:"return_delay", return_id, delay_ms, feedback, tone: 0..1 (the loop's low-pass, 0.5 = 5 kHz; lower darkens each repeat more than the last), ping_pong?: bool (echoes alternate left/right)}, \
+return_reverb: {type:"return_reverb", return_id, decay_s, pre_delay_ms, tone: 0..1 (0 dark, 0.5 flat, 1 bright - never negative)}, and \
 return_convolution: {type:"return_convolution", return_id, ir:"room"|"hall"|"plate", \
-decay_s, pre_delay_ms, tone} (the IR reverb's true RT60 is decay_s x 0.55 room / 1.0 hall / \
-0.75 plate, and its tone is a shelf on the whole tail: the lows never move) \
+decay_s, pre_delay_ms, tone: 0..1} (the IR reverb's true RT60 is decay_s x 0.55 room / 1.0 hall / \
+0.75 plate, and its tone is a shelf on the whole tail, 0 dark .. 1 bright: the lows never move) \
 create/update wet-only agent-owned returns. Feed them with \
 send: {type:"send", stem_id, return_id, gain_db:-60..-3 (your guardrail keeps \
 ambience sends below unity; the schema goes to 0)}; stem_id may be a stem \
@@ -1485,9 +1536,9 @@ problem the long way instead. When the work calls for one, reach for it:
     and `rack.device_add` returns it as `node` too. It looks like
     `rack:<rack>#<something>`, but the part after `#` is an internal id, NOT
     the chain index: guessing `#0` addresses nothing and the command fails.
-    ONE of each device type per chain — only `eq`, `tilt` and `match_eq` stack,
-    so a second `comp` on the same chain is REFUSED: put it on another chain,
-    or set the params of the one already there. A
+    A chain takes many devices of a kind (128 in all; one Width), so a second
+    `comp` on the same chain runs as its own device - or set the params of the
+    one already there. A
     MACRO is automatable in the arrangement like any fader —
     `automation.write {track, param:"macro:<rack>#<i>", points}` — so one curve
     sweeps every knob that macro owns across a section; the targets appear in
@@ -1814,9 +1865,9 @@ so append the parameter you are setting (`"comp#0.threshold_db"`).
 For a hosted plug-in, the number in `plugin:<index>` is the `plugin` argument that
 `plugin.enable` (off = bypass, settings kept) and `plugin.remove` take. A NATIVE chain
 device is bypassed with `device.enable {track, device, on:false}` (settings kept,
-undoable; `on:true` brings it back) — except the master's safety limiter, which only
-the user switches off. No command removes a native device from a track's chain — if
-that is what was asked, say so plainly instead of reaching for a neighbouring command.
+undoable; `on:true` brings it back) — except a limiter on the master, which only
+the user switches off, removes or moves. `device.remove {track, device}` takes a native device off
+a chain (one undo step); bypass it instead when the ask is to hear it without.
 Read "this part" / "here" / "this one" against it, and
 know that a command you invoke WITHOUT a track or range acts on it: `clip.delete`,
 `time.delete`, `clip.consolidate`. (`group.create` is not one of them: name its tracks
@@ -1858,8 +1909,8 @@ on its own reads as a bug, not as help.
 - **A send, a return, a fader, a level, or a sidechain key is a COMMAND here,
 not a proposal.** If `daw_commands` carries a key for what they asked —
 `send.set`, `return.add`, `return.set_level`, `track.set_gain`, `duck.set_key`
-(the Duck user device: "duck the pads under the lead" is one command keying
-pads from lead, not a `duck` action in a proposal), `track.set_delay` (a
+(the Duck user device: "duck the bass under the kick" is one command keying
+bass from kick, not a `duck` action in a proposal), `track.set_delay` (a
 channel's TIMING offset in ms, Live's Track Delay: "the snare lands late",
 "nudge the DI back 5 ms" — never a `delay` EFFECT, which is an audible echo,
 and never a clip nudge, which moves the audio on a track that may have many
@@ -1925,7 +1976,7 @@ every command that would build it (plugin.add, rack.create, rack.plugin_add,
 pad.device_add, rack.preset_load) is refused until the user trusts it again
 (plugin.trust).
 - **Width has a price in mono.** Every stereo move - a strip width above 1, an
-imager or band_width above 1, a chorus or flanger, a utility, an EQ on the side -
+stereoize, a chorus or flanger, a utility, an EQ on the side -
 comes back with a `phase` check of what it touched: when that lists an issue,
 take the move back to the width it names before you go on. A source whose band
 already reads under about +0.4 in `analyze_phase` has little width to give: clear
@@ -1937,8 +1988,7 @@ own widening first, a `utility` with `invert` on one stem for a polarity
 for a timing one - never by narrowing the
 whole master, then read again. A wide stem on its own is not a fault: the
 master's reading is the judge. What a device's MONO SAFE / PHASE lamp shows the
-user is on its row in the live edit's `devices` list: `corr` (an imager's three
-bands in `corr_bands`), the last third of a second - below 0 the lamp reads PHASE.
+user is on its row in the live edit's `devices` list: `corr`, the last third of a second - below 0 the lamp reads PHASE.
 No stereo meter sees TRACKS cancelling each other: that happens before the sum,
 and what arrives is a quieter mono signal. The live edit's `master` row carries
 `tracks_sum_db` while the song plays - what reaches the master against what its
@@ -2067,6 +2117,10 @@ not a log and not a report of the work. It says what is true now, and what needs
   fine, how you worked it out, what a later pass might do, offers to do more. Something
   you could not measure or verify is one clause, and only when it changes what they
   should do next.
+- Figures are what the file measures, never rounded toward the target: -0.97 dBTP against a
+  -1 dBTP brief is a miss to fix, not -1.0.
+- The brain's own bookkeeping (passes, proposal counts, a retry) is never news; a limit that
+  held back what they asked for (6 dB a pass) is, with its number.
 - Asked for the detail ("walk me through it", "why", "list what you changed"), give it
   in full. That is the one time a long reply is the right one.
 
@@ -2608,11 +2662,22 @@ async def _execute_tool(tools: ChatTools, name: str, args: dict) -> ToolOutcome:
                                "if it is A, put that one move back the way it says.")
         if name == "set_plan":
             steps = [str(x).strip() for x in (args.get("steps") or []) if str(x).strip()][:12]
+            progress = {"current": int(args.get("current", 0) or 0),
+                        "done": sorted({int(i) for i in (args.get("done") or [])})}
+            if not steps and "steps" not in args:
+                # Progress alone (2026-11-02): the list stays as it was set - the plan rides
+                # the live context every round, so neither the call nor its reply repeats it.
+                if tools.set_plan is None:
+                    return ToolOutcome("set_plan needs its steps", error=True)
+                plan = await tools.set_plan({**progress, "steps": None})
+                if not isinstance(plan, dict) or not plan.get("steps"):
+                    return ToolOutcome("there is no plan to update yet: set it with its steps",
+                                       error=True)
+                return ToolOutcome(f"Plan updated: step {plan['current'] + 1} of "
+                                   f"{len(plan['steps'])} is current, {len(plan['done'])} done.")
             if len(steps) < 2:
                 return ToolOutcome("set_plan needs at least two steps", error=True)
-            plan = {"steps": steps,
-                    "current": int(args.get("current", 0) or 0),
-                    "done": sorted({int(i) for i in (args.get("done") or [])})}
+            plan = {"steps": steps, **progress}
             if tools.set_plan is not None:
                 await tools.set_plan(plan)
             return ToolOutcome("Plan set:\n" + format_plan(plan))
@@ -2788,17 +2853,25 @@ class ChatSession:
                         "question": f"Which do you prefer for {about}? (hold a/b above to compare)",
                         "options": list(PREFERENCE_OPTIONS)})
 
-        async def plan(p: dict) -> None:
+        async def plan(p: dict) -> Optional[dict]:
             # A FIRST plan after the turn's moves is a summary, not a plan — refuse it
             # (the card would trail the work it claims to schedule; smoke 2026-09-03).
             # Updating a plan set earlier in the turn is fine at any point.
-            if self.plan is None and self._turn_writes > 0:
+            if p.get("steps") is None:
+                # progress alone: the steps as they were set, the current and done indexes new
+                if not self.plan:
+                    return None
+                n = len(self.plan["steps"])
+                p = {**self.plan, "current": min(max(0, p["current"]), n - 1),
+                     "done": [i for i in p["done"] if 0 <= i < n]}
+            elif self.plan is None and self._turn_writes > 0:
                 raise ValueError("set_plan comes BEFORE the first move of a turn — "
                                  "the steps are already done; say what you did instead")
             self.plan = dict(p)
             await emit({"type": "chat_plan", "turn_id": turn_id, **p})
             if host_plan is not None:
                 await host_plan(p)
+            return self.plan
 
         # a shallow copy, not dataclasses.replace: test fakes stand in for ChatTools
         # without being one, and they must keep working
@@ -2827,7 +2900,8 @@ class ChatSession:
                     "key": _tool_key(name, args)})
         began = time.monotonic()
         outcome = await execute_tool(tools, name, args)
-        self.timing.tool(name, time.monotonic() - began, _tool_key(name, args))
+        self.timing.tool(name, time.monotonic() - began, _tool_key(name, args),
+                         chars=len(outcome.text or ""))
         if getattr(self, "tape", None) is not None:
             self.tape.call(call, name, args, not outcome.error)
         done = _tool_done_event(turn_id, call, name, outcome)

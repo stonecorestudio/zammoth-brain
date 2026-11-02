@@ -55,7 +55,7 @@ def intersample_peak(audio: np.ndarray) -> np.ndarray:
     simply aligned on that sample. Silence is assumed outside the file, as the native's history
     starts at zero.
 
-    THE CREST BETWEEN THE POINTS (user QA 2026-10-08, D28; ``tpStep`` in MonitorChain.cpp). Four
+    THE CREST BETWEEN THE POINTS (user QA 2026-10-08, D28; ``tpBlock`` in MonitorChain.cpp). Four
     points a sample are not the peak: a crest midway between two of them is under-read by up to
     0.2 dB on content rich in highs, and the limiter let that through. Round every point that
     is a local maximum of |x| the vertex of the parabola through it and its two neighbours is

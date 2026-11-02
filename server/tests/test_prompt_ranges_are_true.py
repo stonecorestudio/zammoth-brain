@@ -63,8 +63,6 @@ BAND_FIELDS = ("low", "mid", "high", "side")
 #   "sym" -> both, at ±LIMITS[key]
 NARROWED_BY_GUARDRAIL: dict[tuple[str, str], tuple[str, str]] = {
     ("comp", "ratio"):                  ("hi", "comp_ratio_max"),
-    ("deess", "ratio"):                 ("hi", "comp_ratio_max"),        # guardrails.py:550
-    ("dynamic_eq", "ratio"):            ("hi", "comp_ratio_max"),
     ("dynamic_eq", "gain_db"):          ("lo", "dynamic_eq_cut_min_db"),
     ("saturation", "drive_db"):         ("hi", "saturation_drive_max_db"),
     ("overdrive", "drive_db"):          ("hi", "overdrive_drive_max_db"),
@@ -76,10 +74,8 @@ NARROWED_BY_GUARDRAIL: dict[tuple[str, str], tuple[str, str]] = {
     ("auto_filter", "lfo_amount_oct"):  ("hi", "auto_filter_lfo_amount_max_oct"),
     ("auto_filter", "env_amount_oct"):  ("sym", "auto_filter_env_amount_max_oct"),
     ("tilt", "tilt_db"):                ("sym", "tilt_max_db"),
-    ("clip", "threshold_db"):           ("lo", "clip_threshold_min_db"),
     ("gate", "threshold_db"):           ("hi", "gate_threshold_max_db"),
     ("utility", "balance"):             ("sym", "utility_balance_max"),
-    ("duck", "depth_db"):               ("hi", "duck_depth_max_db"),
     ("tune", "cents"):                  ("sym", "tune_cents_max"),
     ("transpose", "semitones"):         ("sym", "transpose_semitones_max"),
     ("spectral_denoise", "reduction_db"): ("hi", "spectral_denoise_reduction_max_db"),
@@ -271,14 +267,14 @@ def test_the_clip_bullets_placement_claim_matches_what_the_session_accepts(name,
     so it stays true whichever layer moves."""
     body = _clip_bullet(_prompts()[name])
     session = Session(demo_project)
-    stem_ok = _accepts(session, type="clip", stem_id="stem_a", threshold_db=-3.0, hardness=0.5)
+    stem_ok = _accepts(session, type="clip", stem_id="stem_a", clip_pct=71.0, softness=0.5)
     grouped = session.propose(ProposalRequest(
         rationale="a bus to probe the clipper's placement against",
         predicted_impact=[],
         actions=[{"type": "group", "bus_id": "drums", "members": ["stem_a", "stem_b"]}]))
     assert grouped.accepted, "could not make a bus to probe against"
     session.apply(grouped.proposal_id)
-    bus_ok = _accepts(session, type="clip", stem_id="drums", threshold_db=-3.0, hardness=0.5)
+    bus_ok = _accepts(session, type="clip", stem_id="drums", clip_pct=71.0, softness=0.5)
 
     says_master_only = "master-only" in body.lower()
     assert says_master_only is not stem_ok, (
@@ -368,13 +364,34 @@ def test_the_one_channel_polarity_flip_is_marked_a_stem_repair(name, demo_projec
         f"{name}: offers invert_left/right without saying the master refuses it"
 
 
+# ---------- the two caps a `lo..hi` claim cannot carry (the pre-merge review of 2026-10-28) ----------
+
+def _bullet(blob: str, label: str) -> str:
+    for name, body in _bullets(blob):
+        if name == label:
+            return body.replace("\\\n", " ").replace("\n", " ")
+    raise AssertionError(f"no {label} bullet in this prompt")
+
+
 @pytest.mark.parametrize("name", PROMPT_NAMES)
-def test_band_width_free_edges_are_offered(name, demo_project):
-    """`BandWidthAction` grew `lo_hz`/`hi_hz` in 2026-07-19; the run agent's bullet still
-    said 'one fixed labeled band only', so it had to round a real request to a named band."""
-    assert _accepts(Session(demo_project), type="band_width", stem_id="stem_a", band="mid",
-                    width=0.6, lo_hz=700.0, hi_hz=1200.0), \
-        "the engine no longer takes free band edges — update the prompt, then this test"
-    body = next(b for label, b in _bullets(_prompts()[name]) if label == "band_width")
-    assert "lo_hz" in body and "hi_hz" in body, \
-        f"{name}: band_width takes free edges the prompt never mentions"
+def test_the_duck_cap_the_prompt_states_is_the_guardrails(name):
+    """The Duck's agent cap is a DEPTH (duck_depth_max_db) carried as a mix: 1 - 10^(-12/20) =
+    0.749. The prompt said "yours to 0.75" - a value the guardrail refuses."""
+    body = _bullet(_prompts()[name], "duck")
+    m = re.search(r"yours to (\d+(?:\.\d+)?): (\d+) dB", body)
+    assert m, f"{name}: the duck bullet states no cap as 'yours to <mix>: <dB> dB'"
+    cap = 1.0 - 10.0 ** (-LIMITS["duck_depth_max_db"] / 20.0)
+    said, db = float(m.group(1)), float(m.group(2))
+    assert db == LIMITS["duck_depth_max_db"], (name, db)
+    assert said <= cap + 1e-9 and said >= cap - 0.01, f"{name}: says {said}, the cap is {cap:.4f}"
+
+
+@pytest.mark.parametrize("name", PROMPT_NAMES)
+def test_the_clip_floor_the_prompt_states_is_the_guardrails(name):
+    """The clipper's crush floor: clip_pct in dB minus gain_db may not go under
+    clip_threshold_min_db (clip_law.crush_db). The old threshold_db cap had a test; its
+    replacement had none."""
+    body = _bullet(_prompts()[name], "clip")
+    m = re.search(r"more than (\d+) dB under the input's full scale", body)
+    assert m, f"{name}: the clip bullet states no crush floor"
+    assert -float(m.group(1)) == LIMITS["clip_threshold_min_db"], (name, m.group(1))

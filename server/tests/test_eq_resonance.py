@@ -17,11 +17,11 @@ the master safety limiter stood between that and the monitor; a soloed track or 
 bus tap had nothing at all, and the EQ face drew it as a flat line because the curve
 is clamped to +/-12 dB for display.
 
-So the PAIR is bound where the coefficients are built (`slope_cascade_coeffs`, shared
-by `dsp._sloped_cut` and the monitor oracle, and mirrored in
-`MonitorChain::makeBandCascade`) — the one place every write path reaches. q shapes a
-single section, because a resonant 12 dB/oct filter is a musical sound; a real cascade
-runs Butterworth, which is what Pro-Q does by not offering Q above 12 dB/oct.
+So the PAIR is bound where the coefficients are built - the one place every write path
+reaches. Since 2026-10-27 that is the EQ's law (`eq_law`, `EqLaw.h`), measured on a
+reference EQ: q shapes ONLY the cascade's most resonant section (q 1 = Butterworth), so a
+steep cut can resonate as a 12 dB/oct one can, and the resonance is one section's - it
+never compounds with the order.
 """
 from __future__ import annotations
 
@@ -29,7 +29,10 @@ import numpy as np
 import pytest
 
 from mix_engine.dsp import _eq_band
-from mix_engine.reference_monitor import BUTTERWORTH_Q, slope_cascade_coeffs
+from mix_engine.eq_law import band_sections
+from scipy.signal import freqz
+
+BUTTERWORTH_Q = 1.0   # the EQ law's flat cut
 
 SR = 48000
 
@@ -57,19 +60,20 @@ def test_a_legal_q_cannot_detonate_a_cascade(shape, slope):
 
 
 @pytest.mark.parametrize("slope", [24, 48, 96])
-def test_above_12_db_per_oct_q_makes_no_difference(slope):
-    """It is bounded by running BUTTERWORTH, not by some other clamp further down —
-    so above 12 dB/oct the q knob must change nothing at all."""
+def test_above_12_db_per_oct_q_shapes_one_section_only(slope):
+    """q acts on a steep cut (the reference EQ's law), and the cascade's peak is never more
+    than its most resonant section's alone: the resonance does not compound."""
     hot = _peak_db("lpf", 8.0, slope)
     flat = _peak_db("lpf", BUTTERWORTH_Q, slope)
-    assert abs(hot - flat) < 1e-9, f"q still shapes a slope-{slope} cascade ({hot} vs {flat})"
-    # …and against the coefficients directly, which is what both engines consume.
-    a = slope_cascade_coeffs("lpf", SR, 1000.0, 8.0, slope)
-    b = slope_cascade_coeffs("lpf", SR, 1000.0, BUTTERWORTH_Q, slope)
-    assert len(a) == len(b) >= 2, "a real cascade has at least two sections"
-    for (ab, aa), (bb, ba) in zip(a, b):
-        np.testing.assert_allclose(ab, bb, rtol=0, atol=0)
-        np.testing.assert_allclose(aa, ba, rtol=0, atol=0)
+    assert hot > flat + 1.0, f"q changes nothing at slope {slope} ({hot} vs {flat})"
+    f = np.geomspace(200, 4000, 4000)
+    H = np.ones(len(f), complex)
+    for b, a in band_sections("lpf", SR, 1000.0, 8.0, 0.0, slope):
+        H *= freqz(b, a, f, fs=SR)[1]
+    order = slope // 6
+    top_q = min(8.0 / (2 * np.cos((order // 2 - 1 + 0.5) * np.pi / order)), 60.0)
+    one_section = 20 * np.log10(top_q / np.sqrt(1 - 1 / (4 * top_q * top_q)))
+    assert 20 * np.log10(np.abs(H).max()) < one_section + 1.0
 
 
 def test_a_single_section_still_resonates():
@@ -86,7 +90,7 @@ def test_a_single_section_still_resonates():
         "the bound was applied too widely"
     )
     # …and the 6 dB/oct legacy path never had a cascade to compound in the first place.
-    assert len(slope_cascade_coeffs("lpf", SR, 1000.0, 8.0, 6)) == 1
+    assert len(band_sections("lpf", SR, 1000.0, 8.0, 0.0, 6)) == 1
 
 
 def test_the_measurement_can_see_a_resonance_at_all():

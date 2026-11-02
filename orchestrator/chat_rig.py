@@ -373,7 +373,7 @@ def _invented(o: Outcome) -> list[str]:
 
 def _refused_at_the_door(needle: str) -> Callable[[Outcome], list[str]]:
     """A command turned away before its handler - by the app (unknown, a confirm answered
-    No, the master's safety) or by the brain (a routing command it refused itself) - is
+    No, the master's limiter) or by the brain (a routing command it refused itself) - is
     still something the engineer TRIED: one row, failed, with the reason under it. Until
     2026-10-12 it left no trace but whatever the model chose to say."""
     def check(o: Outcome) -> list[str]:
@@ -617,9 +617,9 @@ SCENARIOS: dict[str, Scenario] = {s.name: s for s in [
                                           say("I can't do that: the app has no such command.")],
                    results={"toolu_1": "error"})], _refused_at_the_door("unknown command")),
     Scenario("master_safety_refused", "the agent may not switch the master's limiter off: refused, and shown",
-             [Turn("turn the master limiter off",
-                   [ask(call("toolu_1", "master.limiter", on=False)),
-                    say("I can't do that: the master's safety limiter stays on.")],
+             [Turn("take the limiter off the master",
+                   [ask(call("toolu_1", "device.remove", track="master", device="limiter")),
+                    say("I can't do that: the master's limiter is yours to take off.")],
                    results={"toolu_1": "error"})], _refused_at_the_door("limiter")),
     Scenario("refused_by_the_brain", "a routing command the brain refuses itself is shown too",
              [Turn("route the vocalz into the Band bus",
@@ -1556,7 +1556,7 @@ EXAMPLES: list[Example] = [
     Example("return.set_level", {"id": "rv", "gain_db": -3.0}),
     Example("return.set_prefader", {"id": "rv", "pre_fader": True}),
     Example("return.rename", {"id": "rv", "new_name": "plate"}),
-    Example("duck.set_key", {"stem": "bass", "key": "drums", "threshold_db": -30.0, "depth_db": 6.0}),
+    Example("duck.set_key", {"stem": "bass", "key": "drums"}),
     Example("track.fold_toggle", {"track": "bus:rhythm", "folded": True}, _folded("rhythm")),
     Example("track.unfold_all"),
     Example("return.remove", {"id": "plate"}, leg=_YES),
@@ -1570,7 +1570,6 @@ EXAMPLES: list[Example] = [
     Example("device.add", {"track": "vocals", "type": "utility", "params": {"invert": True}},
             _has_device("vocals", "utility")),
     Example("device.remove", {"track": "vocals", "device": "utility"}),
-    Example("master.limiter", {"on": True}),
 ]
 
 
@@ -1591,6 +1590,7 @@ NO_EXAMPLE_YET: dict[str, str] = {
     "track.set_midi_input": "needs a MIDI input device", "track.set_monitor": "needs an audio input",
     "track.freeze": _RENDERS, "track.bounce": _RENDERS, "clip.consolidate": _RENDERS,
     "track.separate": _RENDERS,
+    "device.place": "needs a rack or a hosted plug-in on the track to place a device after",
     "track.add": "needs an audio file outside the project",
     "clip.match_key": _ERRAND, "clip.pitch_correct": _ERRAND, "clip.extract_groove": _ERRAND,
     "clip.set_groove": "needs a groove in the pool", "clip.auto_pitch": _ERRAND,

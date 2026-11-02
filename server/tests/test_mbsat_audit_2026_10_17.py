@@ -37,7 +37,10 @@ def _level_db(x: np.ndarray, y: np.ndarray) -> float:
 
 def test_driving_the_low_band_takes_a_bass_tone_down_as_the_daw_does():
     x = _tone(80.0)
-    assert abs(_level_db(x, dsp._multiband_saturate(x, _entry("low"), SR)) - (-12.32)) < 0.05
+    # -12.32 on the DAW of 2026-10-17 (1x); -12.39 since 2026-10-24 (at least 4x, and the DC blocker);
+    # -12.99 since 2026-10-26 (the soft character, sat_characters - the native's `--sat-characters`);
+    # -6.66 since the level law the same day (sat_characters.level_db: +8.1 dB at 24 dB of drive)
+    assert abs(_level_db(x, dsp._multiband_saturate(x, _entry("low"), SR)) - (-6.66)) < 0.05
 
 
 def test_driving_the_mid_band_leaves_a_bass_tone_alone():

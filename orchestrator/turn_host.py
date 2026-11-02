@@ -99,9 +99,15 @@ async def measured_command(command: str, res: Any, project_dir: Optional[Path] =
     And a command whose answer is a PICTURE the model is shown (`view.snapshot`, Phase 64):
     read through the one door, beside the text of the same result. Only where a model reads
     the result - the live tool passes its project; an approved plan's step reports to the app,
-    and a picture would mean nothing there."""
+    and a picture would mean nothing there.
+
+    And `session.export` (2026-11-02): the file it wrote, measured - its loudness and true peak,
+    and whether it is over the -1 dBTP ceiling - so the figures the engineer reports are the
+    file's (`daw_bridge.attach_export_figures`)."""
     if command in B.MEASURED_COMMANDS:
         return await anyio.to_thread.run_sync(B.attach_sound_profiles, res)
+    if command in B.EXPORT_MEASURED_COMMANDS:
+        return await anyio.to_thread.run_sync(B.attach_export_figures, res)
     if command in B.PICTURED_COMMANDS and project_dir is not None:
         return await anyio.to_thread.run_sync(B.attach_snapshot, res, project_dir)
     return res
@@ -130,11 +136,13 @@ async def propose_and_apply(engine_call, take_user_moves, req: dict,
     user pulled while the model thought - and that move, an absolute value, then overwrote
     it. And a full pass budget (stale run leftovers, a long turn, a plan with more proposal
     steps than one pass allows) is not the agent's fault: a fresh pass is opened and the same
-    proposal asked once more, instead of bouncing it back for ever."""
+    proposal asked once more, instead of bouncing it back for ever - whenever the cap is AMONG
+    the violations, so what comes back is judged in the fresh pass (`guardrails.pass_cap_among`)."""
+    from mix_engine.guardrails import pass_cap_among
+
     await take_queued_moves(take_user_moves)
     result = await engine_call("propose_actions", {"req": req})
-    if (result and not result.get("accepted") and result.get("violations")
-            and all(v.get("rule") == "proposals_per_pass" for v in result["violations"])):
+    if result and not result.get("accepted") and pass_cap_among(result.get("violations")):
         await engine_call("advance_pass", {})
         result = await engine_call("propose_actions", {"req": req})
     pid = (result or {}).get("proposal_id")
@@ -166,7 +174,7 @@ def with_stemless_hint(result: dict, req: dict, edit) -> dict:
 #: with the phase check of what it touched (2026-10-13): the agent widened a pad to 1.40 to
 #: clear masking, took its mids from +0.42 to +0.09 - below 0 a third of the time - and nothing
 #: it read said so, while the master's imager flashed PHASE at the user.
-STEREO_ACTION_TYPES = frozenset({"width", "imager", "band_width", "utility", "chorus", "flanger",
+STEREO_ACTION_TYPES = frozenset({"width", "utility", "chorus", "flanger",
                                  "auto_filter"})   # Phase 63: its stereo offset
 
 
@@ -226,6 +234,36 @@ async def with_phase_check(engine_call, req: dict, applied: Optional[dict]) -> O
     if not isinstance(reading, dict):
         return applied
     return {**applied, "phase": phase_check(reading, targets)}
+
+
+def duck_trigger_note(project_dir: Path, req: dict) -> Optional[str]:
+    """What a TRACK duck the proposal just landed hears of its trigger, when that is nothing to
+    act on: no hits at all, or the trigger heard live (the brain cannot hear it as the DAW plays
+    it). A duck keyed from a sustained part accepted, did nothing, and the reply said done (the
+    pre-merge review of 2026-10-28). None when every duck has hits."""
+    from mix_engine import duck_law
+    from mix_engine.session import Session
+    ducks = [a for a in req.get("actions") or []
+             if a.get("type") == "duck" and (a.get("key_stem_id") or "")
+             and duck_law.trigger_index(a.get("trigger", 1)) == 1]
+    if not ducks:
+        return None
+    try:
+        session = Session(project_dir, read_only=True)
+        tempo = B._tempo_for(session)
+        sr = session.project_sample_rate()
+        notes = []
+        for a in ducks:
+            stem, key = str(a.get("stem_id") or ""), str(a["key_stem_id"])
+            if stem not in session.stems:
+                continue
+            _, hits = B._duck_hits_of(session, stem, key, sr, tempo)
+            if hits is not None and not hits["hits_s"]:
+                notes.append(f"{key} fires no hits on its audio (a hit is a percussive onset): the duck on "
+                             f"{stem} does nothing - key it from a percussive part, or use trigger 'sync'")
+        return "; ".join(notes) or None
+    except Exception as exc:   # noqa: BLE001 - the move landed; only the reading of it did not
+        return f"the trigger's hits could not be read ({type(exc).__name__})"
 
 
 # ---------------------------------------------------------------- one turn
@@ -497,8 +535,12 @@ class LiveTurn:
                                      if k not in ("type", "stem_id")
                                      and v is not None},
                           "rationale": (req.get("rationale") or "").strip()})
-        return {"accepted": True, "proposal_id": pid,
-                "status": "applied — undoable", "result": applied}
+        out = {"accepted": True, "proposal_id": pid,
+               "status": "applied — undoable", "result": applied}
+        await anyio.to_thread.run_sync(self.chains_owed, True)   # warm it off the event loop
+        if (note := await anyio.to_thread.run_sync(duck_trigger_note, self.project_dir, req)):
+            out["duck"] = note
+        return out
 
     async def do_look(self, command: str, args: dict):
         """A picture of the window (`view.snapshot`, Phase 64): a LOOK, so it runs in Ask mode as in
@@ -572,8 +614,12 @@ class LiveTurn:
                 self._note_command(command)
             return peeked
         # routing the brain performs itself mid-turn (see perform_routing)
-        routed = await anyio.to_thread.run_sync(
-            B.perform_routing, command, args, self.routing_ops, self.daw_invoke, self.mirror_coedits)
+        in_turn = B.IN_AGENT_TURN.set(True)   # a reading made here is the turn's to make once
+        try:
+            routed = await anyio.to_thread.run_sync(
+                B.perform_routing, command, args, self.routing_ops, self.daw_invoke, self.mirror_coedits)
+        finally:
+            B.IN_AGENT_TURN.reset(in_turn)
         if routed is not None:
             if routed.get("ok") is not False:
                 self._note_command(command)
@@ -670,8 +716,32 @@ class LiveTurn:
         # sleeping share or a drive going away held the turn's event loop for as long as it took.
         return await anyio.to_thread.run_sync(B.folder_listing, path, query)
 
+    def chains_owed(self, refresh: bool = False) -> dict[str, list[str]]:
+        """The channels whose device rows in the live edit predate this turn's own mix moves
+        (`chains_not_yet_in_daw`): the DAW takes a turn's chains when the turn ends.
+
+        Kept on what it reads - the moves made and the snapshot's number - because the live
+        context asks for it on the turn's event loop every round, and it reads session.json
+        (the pre-merge review of 2026-10-29). A worker thread fills it after each move
+        (`do_propose`) and before a read (`do_read_track`); `refresh` asks again."""
+        if not self.moves:
+            return {}
+        edit = B._live_edit(self.edit_state)
+        key = (len(self.moves), (edit or {}).get("seq"), id(edit))
+        held = getattr(self, "_owed_memo", None)
+        if not refresh and held is not None and held[0] == key:
+            return held[1]
+        moved = {str(m.get("stem")) for m in self.moves if m.get("stem")}
+        out = B.chains_not_yet_in_daw(self.project_dir, edit, moved)
+        self._owed_memo = (key, out)
+        return out
+
     async def do_read_track(self, name: str, clip=None, from_note=None):
-        return B.read_track_entry(B._live_edit(self.edit_state), name, clip, from_note)
+        edit = B._live_edit(self.edit_state)
+        out = B.read_track_entry(edit, name, clip, from_note)
+        if clip is None and self.moves:
+            out = B.with_chain_pending(out, await anyio.to_thread.run_sync(self.chains_owed, True))
+        return out
 
     async def do_start_run(self, brief: str, gating: str, max_passes: int) -> str:
         if self.recorder is not None:
@@ -901,7 +971,8 @@ class LiveTurn:
                 self.message, tools=self.tools(),
                 context=stable,
                 live_context=lambda: B._chat_context_live(B._live_edit(self.edit_state),
-                                                        self.stale_picture.get("seq", 0)),
+                                                        self.stale_picture.get("seq", 0),
+                                                        self.chains_owed()),
                 emit=self.emit, should_cancel=self.should_cancel, **pictured)
 
     def note_failure(self, exc: BaseException) -> None:

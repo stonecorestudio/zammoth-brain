@@ -62,6 +62,11 @@ HPF_DEFAULT_HZ = 40          # untagged stems get a conservative rumble cut
 SUB_RUMBLE_FLOOR_DB = -25.0  # only HPF stems that actually hold sub energy
 MASKING_EXCESS_DB = 3.0      # corrective EQ kicks in above this excess
 MASKING_CUT_MAX_DB = 4.0
+# The EQ law's Q (eq_law, the cookbook meaning moved): Auto Mix's carve was cookbook 1.2 and its
+# warm-master shelves cookbook 0.7 - in this law 1.70 and 0.98 sound the same (eq_law.legacy_band),
+# as the rule agent's constants were rescaled (agents.COMPOSITE_CUTS).
+MASKING_CARVE_Q = 1.7
+WARM_SHELF_Q = 0.98
 COMP_SPREAD_DB = 12.0        # generic fallback; per-intent floors live in
                              # STEM_DYNAMICS_PROFILES["spread_at"] (see below)
 MAX_MASKING_PAIRS = 4        # bounded profiling, deterministic order
@@ -597,12 +602,12 @@ def _intent_actions(intent: Optional[str], tags: dict[str, list[str]],
     elif intent == "warm-master":
         actions += [
             ({"type": "eq", "stem_id": "master",
-              "band": {"freq_hz": 180, "gain_db": 1.5, "q": 0.7,
+              "band": {"freq_hz": 180, "gain_db": 1.5, "q": WARM_SHELF_Q,
                        "shape": "low_shelf"}},
              {"metric": "band_energy.low_mid",
               "predicted_delta": 0.8, "unit": "dB"}),
             ({"type": "eq", "stem_id": "master",
-              "band": {"freq_hz": 6500, "gain_db": -1.0, "q": 0.7,
+              "band": {"freq_hz": 6500, "gain_db": -1.0, "q": WARM_SHELF_Q,
                        "shape": "high_shelf"}},
              {"metric": "band_energy.brilliance",
               "predicted_delta": -0.5, "unit": "dB"}),
@@ -744,7 +749,7 @@ def build_bundles(tags: dict[str, list[str]], stems: dict[str, dict],
         center_hz = int((BAND_EDGES_HZ[index] * BAND_EDGES_HZ[index + 1]) ** 0.5)
         clarity.append((
             {"type": "eq", "stem_id": masking["stem_b"],
-             "band": {"freq_hz": center_hz, "gain_db": -cut_db, "q": 1.2,
+             "band": {"freq_hz": center_hz, "gain_db": -cut_db, "q": MASKING_CARVE_Q,
                       "shape": "peak"}},
             {"metric": f"masking({masking['stem_a']},{masking['stem_b']})"
                        ".worst_band_excess_db",

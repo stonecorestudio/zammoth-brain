@@ -351,8 +351,11 @@ def create_server(project_dir: Path | str) -> FastMCP:
         that cancel (below 0 over the song, or for 20 % of its time or more) and a channel with one
         side upside down, each with its cause (the file, the channel's own chain, the master's
         devices, the mix) and a fix. `conflicts`: pairs of stems that cancel EACH OTHER in
-        sub / bass / low_mid (opposite polarity, or one a few ms early). `clean` = nothing
-        cancels. `stem_ids` limits the channels read to the stems and groups it names; the
+        sub / bass / low_mid (opposite polarity, or one a few ms early). A stem's
+        `one_sided_clicks`: most of its centred, bright hits carry a low-mid tick on one
+        side - heard as a click in one ear; narrow it toward mono and give it no extra
+        attack or top end. `clean` = nothing cancels and nothing clicks on one side.
+        `stem_ids` limits the channels read to the stems and groups it names; the
         master is always read. Read-only."""
         return await to_thread.run_sync(_analyze_phase, session.probe_copy(), stem_ids)
 
@@ -770,7 +773,7 @@ def create_server(project_dir: Path | str) -> FastMCP:
     @mcp.tool()
     def add_stem_device(target: str, device_type: str) -> MasterDeviceState:
         """USER co-edit channel (Phase 40, per-track insert): append a stem-only
-        COLOR device (transient / deess / band_width — the processors the master
+        COLOR device (transient / deess — the processors the master
         can't host) to stem `target`'s chain with neutral defaults. Immediate, no
         proposals. The planning agent must NEVER call this (a user channel)."""
         d = session.add_stem_device(target, device_type)
@@ -817,20 +820,6 @@ def create_server(project_dir: Path | str) -> FastMCP:
         proposal instead — it must NEVER call this user channel."""
         session.set_device_channel(device_type, occurrence, channel, target)
         return MasterDeviceState(type=device_type, occurrence=occurrence)
-
-    @mcp.tool()
-    def set_device_band(occurrence: int = 0, band: str = "presence",
-                        lo_hz: float | None = None, hi_hz: float | None = None,
-                        target: str = "master") -> MasterDeviceState:
-        """USER co-edit channel (2026-07-05): pick a band_width device's band LABEL
-        (sub / bass / low_mid / mid / high_mid / presence / brilliance / air) from
-        the device UI — or (2026-07-19) explicit lo_hz/hi_hz to place the band
-        freely (they override the label). `target` = master or a stem/bus id. The
-        planning agent sets `band` in its proposal instead — it must NEVER call
-        this user channel."""
-        session.set_device_band(occurrence, band, lo_hz=lo_hz, hi_hz=hi_hz,
-                                target=target)
-        return MasterDeviceState(type="band_width", occurrence=occurrence)
 
     @mcp.tool()
     def set_sat_multiband(occurrence: int = 0, on: bool = True,

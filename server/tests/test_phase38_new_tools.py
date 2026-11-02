@@ -71,7 +71,6 @@ async def test_dynamic_eq_reduces_triggered_band_more_than_quiet_region(tmp_path
             "gain_db": -9.0,
             "q": 10.0,
             "threshold_db": -20.0,
-            "ratio": 6.0,
             "attack_ms": 2.0,
             "release_ms": 80.0,
         }], "clamp the 4 kHz flare")

@@ -20,8 +20,15 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from .models import BAND_EDGES_HZ, BAND_LABELS
+from .models import BAND_EDGES_HZ, BAND_LABELS, limiter_knobs
+from .od_characters import character_index as _od_character   # the overdrive's characters (2026-10-26)
+from .gate_characters import character_index as _gate_character   # the gate's characters (2026-10-27)
+from .deess_law import mode_index as _deess_mode   # the de-esser's modes (2026-10-27)
+from .clip_law import values as _clip_values   # the clipper's knobs, an old entry's read once (2026-10-28)
+from .ott_law import values as _ott_values   # OTT's knobs, an old entry's read once (2026-10-28)
 from .reference_monitor import auto_filter_values   # Phase 63: the Auto Filter as the law reads it
+from .reference_monitor import (_OD_OS_DEFAULT as OD_OVERSAMPLE_DEFAULT,
+                                _SAT_OS_DEFAULT as SAT_OVERSAMPLE_DEFAULT)
 
 # Actions the native real-time monitor mirrors. gain/eq/limiter/saturation are
 # bit-matched to the engine (saturation is a memoryless waveshaper); comp +
@@ -29,7 +36,7 @@ from .reference_monitor import auto_filter_values   # Phase 63: the Auto Filter 
 # processors (the offline export stays faithful).
 MONITOR_TYPES = frozenset({"gain", "eq", "comp", "limiter", "dynamic_eq",
                            "mb_comp", "match_eq", "saturation", "width", "utility",
-                           "deess", "transient", "band_width", "imager", "duck", "clip", "gate",
+                           "deess", "transient", "duck", "clip", "gate",
                            "tilt", "ott", "overdrive",   # 2026-07-07
                            "chorus", "flanger",   # 2026-09-06: modulation family
                            "auto_filter",         # Phase 63: the family's third
@@ -205,6 +212,7 @@ def monitor_chain_params(chain: list[dict],
     tune_cents = 0.0
     transpose_st = 0.0
     for e in chain:
+        _place_from = len(entries)   # Phase 66: what this entry emits carries its placement (below)
         t = e["type"]
         en = bool(e.get("enabled", True))    # Phase 40: per-device bypass — the
         # native monitor skips a disabled device's DSP but still shows its tile.
@@ -244,6 +252,8 @@ def monitor_chain_params(chain: list[dict],
                       "makeup_db": float(e.get("makeup_db", 0.0)),
                       "mix": float(e.get("mix", 1.0)),
                       "channel": e.get("channel", "stereo"),  # Phase 41 M/S
+                      "style": max(0, min(5, int(e.get("style") or 0))),   # the character (models.COMP_STYLES)
+                      "knee_db": float(e.get("knee_db") or 0.0),             # the knee's width
                       **_range(e),
                       "enabled": en}
             # True M/S comp: independent mid/side param sets (the native engine runs both).
@@ -252,14 +262,13 @@ def monitor_chain_params(chain: list[dict],
                 if isinstance(sub, dict):
                     comp_e[sc] = {k: float(sub[k]) for k in
                                   ("threshold_db", "ratio", "attack_ms",
-                                   "release_ms", "makeup_db", "mix") if k in sub}
+                                   "release_ms", "makeup_db", "mix", "knee_db") if k in sub}
             entries.append(comp_e)
         elif t == "dynamic_eq":
             entries.append({"type": "dynamic_eq",
                             "freq_hz": float(e["freq_hz"]),
                             "q": float(e["q"]),
                             "threshold_db": float(e["threshold_db"]),
-                            "ratio": float(e["ratio"]),
                             "attack_ms": float(e.get("attack_ms", 10.0)),
                             "release_ms": float(e.get("release_ms", 120.0)),
                             "gain_db": float(e["gain_db"]),
@@ -269,33 +278,17 @@ def monitor_chain_params(chain: list[dict],
                             "low": _mb_band(e["low"]),
                             "mid": _mb_band(e["mid"]),
                             "high": _mb_band(e["high"]),
-                            "attack_ms": float(e.get("attack_ms", 10.0)),
-                            "release_ms": float(e.get("release_ms", 150.0)),
+                            "attack_ms": float(e.get("attack_ms", 2.0)),     # the 2 / 85 ms defaults (25020448)
+                            "release_ms": float(e.get("release_ms", 85.0)),
                             # user-movable crossovers (default dsp.MB_CROSSOVERS_HZ) — must
                             # round-trip to the native editor or a drag snaps back on the poll
                             "crossover_lo_hz": float(e.get("crossover_lo_hz", 150.0)),
                             "crossover_hi_hz": float(e.get("crossover_hi_hz", 2000.0)),
                             "enabled": en})
         elif t == "ott":
-            # OTT-style 3-band up/down comp (dsp._ott). LR4 split + per-sample
-            # envelope natively — perceptual tier like mb_comp; the offline FFT
-            # split stays the deliverable.
-            def _ott_band(bd: dict) -> dict:
-                bd = bd or {}
-                return {"up": float(bd.get("up", 1.0)),
-                        "down": float(bd.get("down", 1.0)),
-                        "gain_db": float(bd.get("gain_db", 0.0))}
-            entries.append({"type": "ott",
-                            "depth": float(e.get("depth", 0.5)),
-                            "time": float(e.get("time", 1.0)),
-                            "in_gain_db": float(e.get("in_gain_db", 0.0)),
-                            "out_gain_db": float(e.get("out_gain_db", 0.0)),
-                            "low": _ott_band(e.get("low")),
-                            "mid": _ott_band(e.get("mid")),
-                            "high": _ott_band(e.get("high")),
-                            "crossover_lo_hz": float(e.get("crossover_lo_hz", 150.0)),
-                            "crossover_hi_hz": float(e.get("crossover_hi_hz", 2000.0)),
-                            "enabled": en})
+            # OTT (ott_law, 2026-10-28) - the same per-sample law natively (MonitorChain::applyOtt),
+            # the perceptual tier; an old entry goes out as the law's knobs (ott_law.values).
+            entries.append({"type": "ott", **_ott_values(e), "enabled": en})
         elif t == "overdrive":
             # Drive-pedal distortion (dsp._overdrive): band-pass pre-filter +
             # exponential soft-clip + one-pole tone tilt — the same biquad family
@@ -308,20 +301,18 @@ def monitor_chain_params(chain: list[dict],
                             "tone": float(e.get("tone", 0.5)),
                             "output_db": float(e.get("output_db", 0.0)),
                             "mix": float(e.get("mix", 1.0)),
-                            "oversample": int(e.get("oversample", 1) or 1),
+                            "oversample": int(e.get("oversample", OD_OVERSAMPLE_DEFAULT) or 1),
+                            # the character (od_characters, 2026-10-26): 0 pedal / 1 smooth / 2 crunchy / 3 power
+                            "character": _od_character(e.get("character", 0)),
                             "enabled": en})
         elif t == "chorus":
-            # Modulation (dsp._chorus): a delay swept by an LFO whose phase comes from the
-            # HOST TIMELINE, so the native monitor lands on the same point of the sweep as
-            # the offline render rather than wherever its own accumulator had drifted to.
-            entries.append({"type": "chorus",
-                            "rate_hz": float(e.get("rate_hz", 0.8)),
-                            "depth": float(e.get("depth", 0.25)),
-                            "delay_ms": float(e.get("delay_ms", 20.0)),
-                            "mix": float(e.get("mix", 0.5)),
-                            "voices": int(e.get("voices", 1) or 1),
-                            "stereo_deg": float(e.get("stereo_deg", 90.0)),
-                            "enabled": en})
+            # Modulation (chorus_law, 2026-10-28): two triangle-swept lines whose phase comes from the
+            # HOST TIMELINE, so the native monitor lands on the same point of the sweep as the
+            # offline render. An old entry (rate / depth / delay / voices) is read through the law.
+            from .chorus_law import values as chorus_values
+            cv = chorus_values(e)
+            entries.append({"type": "chorus", "mode": cv["mode"], "stereo": cv["stereo"],
+                            "mix": cv["mix"], "output_db": cv["output_db"], "enabled": en})
         elif t == "flanger":
             # Modulation (dsp._flanger): the chorus's swept read plus a return path, so the
             # native side runs a real per-sample recursion and this side runs it in blocks.
@@ -376,8 +367,8 @@ def monitor_chain_params(chain: list[dict],
                    "output_db": float(e.get("output_db", 0.0)),
                    "curve": _ci(e.get("curve", 0)),
                    "mix": float(e.get("mix", 1.0)),          # dry/wet (single-band + multiband)
-                   # single-band only: the multiband path is not oversampled (2026-09-06)
-                   "oversample": int(e.get("oversample", 1) or 1),
+                   # the multiband form runs its whole split at it too (2026-10-24)
+                   "oversample": int(e.get("oversample", SAT_OVERSAMPLE_DEFAULT) or 1),
                    "enabled": en}
             if isinstance(e.get("low"), dict):     # multiband saturator (top-level low/mid/high)
                 for b in ("low", "mid", "high"):
@@ -393,20 +384,16 @@ def monitor_chain_params(chain: list[dict],
                 sat["mix"] = float(e.get("mix", 1.0))
             entries.append(sat)
         elif t == "clip":
-            # Pre-limiter clipper (dsp._clip) — bit-exact native at oversample 1
-            # (memoryless, like saturation); v2's oversampled path is the perceptual
-            # tier (juce::dsp::Oversampling vs resample_poly). Master-only, sits
-            # just before the limiter.
-            entries.append({"type": "clip",
-                            "threshold_db": float(e["threshold_db"]),
-                            "hardness": float(e.get("hardness", 0.5)),
-                            "output_db": float(e.get("output_db", 0.0)),
-                            "oversample": int(e.get("oversample", 1) or 1),
-                            "enabled": en})
+            # The clipper (clip_law, 2026-10-28) - bit-exact native at oversample 1 (memoryless);
+            # 2x is the perceptual tier (juce::dsp::Oversampling vs resample_poly). An entry saved
+            # with the old knobs goes out as the law's (clip_law.values).
+            entries.append({"type": "clip", **_clip_values(e), "enabled": en})
         elif t == "width":
             # User channel-strip width (stem/bus M/S) — memoryless, bit-exact;
             # finally audible live (the user's own width move), not print-only.
             entries.append({"type": "width", "width": float(e["width"]),
+                            "stereoize": bool(e.get("stereoize", False)),
+                            "stereoize_ms": float(e.get("stereoize_ms", 6.0)),
                             "enabled": en})
         elif t == "utility":
             # Ableton-style Utility (dsp._utility / MonitorChain::applyUtility) — v2:
@@ -428,16 +415,14 @@ def monitor_chain_params(chain: list[dict],
                             "dc_filter": bool(e.get("dc_filter", False)),
                             "balance": float(e.get("balance", 0.0)), "enabled": en})
         elif t == "deess":
-            # Split-band de-esser (dsp._deess) — real-time approximation (1st-order
-            # split + the comp envelope), like comp/dyn-EQ. Stems/buses only. v2
-            # carries the freed dynamics + range floor + wide-band mode.
+            # The de-esser (deess_law, 2026-10-27): band FREQ..TOP, RANGE, MODE, split / wide, a 12 ms
+            # lookahead. Stems/buses only. A range saved deeper than the law's 24 dB is held to it.
             entries.append({"type": "deess",
                             "threshold_db": float(e["threshold_db"]),
                             "freq_hz": float(e["freq_hz"]),
-                            "ratio": float(e.get("ratio", 4.0)),
-                            "attack_ms": float(e.get("attack_ms", 1.0)),
-                            "release_ms": float(e.get("release_ms", 50.0)),
-                            "range_db": float(e.get("range_db", -80.0)),
+                            "top_hz": float(e.get("top_hz", 20000.0)),
+                            "range_db": max(float(e.get("range_db", -6.0)), -24.0),
+                            "mode": _deess_mode(e.get("mode", 0)),   # 0 allround / 1 vocal
                             "wide": bool(e.get("wide", False)),
                             **_range(e), "enabled": en})
         elif t == "gate":
@@ -454,6 +439,8 @@ def monitor_chain_params(chain: list[dict],
                             "hysteresis_db": float(e.get("hysteresis_db", 0.0)),
                             "sc_hpf_hz": float(e.get("sc_hpf_hz", 0.0)),
                             "sc_lpf_hz": float(e.get("sc_lpf_hz", 20000.0)),
+                            # the character (gate_characters, 2026-10-27): 0 classic / 1 clean / 2 vocal / 3 guitar
+                            "character": _gate_character(e.get("character", 0)),
                             **_range(e), "enabled": en})
         elif t == "transient":
             # Attack/sustain shaper (dsp._transient) — real-time approximation
@@ -472,47 +459,13 @@ def monitor_chain_params(chain: list[dict],
             # routes the host sidechain); in the DAW it is authoritative — wireDuckSidechains
             # (daw/Source/App.cpp) routes that key TRACK so the agent's duck is audible
             # (docs/10-daw.md Tier-1).
-            entries.append({"type": "duck",
-                            "threshold_db": float(e["threshold_db"]),
-                            "depth_db": float(e["depth_db"]),
-                            "attack_ms": float(e.get("attack_ms", 5.0)),
-                            "release_ms": float(e.get("release_ms", 150.0)),
+            # The law's knobs (duck_law, 2026-10-28), held as the law holds them.
+            from .duck_law import values as _duck_values
+            dv = _duck_values(e)
+            entries.append({"type": "duck", "trigger": dv["trigger"], "curve": dv["curve"],
+                            "length": dv["length"], "mix": dv["mix"], "band": dv["band"],
+                            "band_hz": dv["band_hz"],
                             "key_stem_id": e.get("key_stem_id"), "enabled": en})
-        elif t == "band_width":
-            # Per-band stereo width (dsp._band_width_scale) — the band's EDGES are what
-            # both engines split at (one LR8 law since 2026-10-21, the band width audit:
-            # bandwidthspec::edges reads lo_hz/hi_hz first); the label's centre + Q ride
-            # along for older readers. Stems/buses only. Custom `lo_hz`/`hi_hz` on the
-            # entry (the DAW's free band scrub) override the label.
-            b = e.get("band")
-            custom = e.get("lo_hz") and e.get("hi_hz")
-            if custom or b in _BAND_CENTER_HZ:
-                if custom:
-                    lo, hi = float(e["lo_hz"]), float(e["hi_hz"])
-                    fc = round((lo * hi) ** 0.5, 1)
-                else:
-                    i = BAND_LABELS.index(b)
-                    lo, hi = BAND_EDGES_HZ[i], BAND_EDGES_HZ[i + 1]
-                    fc = _BAND_CENTER_HZ[b]
-                q = fc / max(hi - lo, 1.0)
-                entries.append({"type": "band_width",
-                                "freq_hz": fc, "q": round(q, 4),
-                                # `band` + the edges: the native splits at the edges
-                                # (bandwidthspec::edges) and the dock draws them.
-                                "band": "custom" if custom else b,
-                                "lo_hz": lo, "hi_hz": hi,
-                                "width": float(e["width"]), "enabled": en})
-        elif t == "imager":
-            # 3-band stereo imager (dsp._imager) — the native monitor splits with
-            # an LR4 crossover (like mb_comp) vs the engine's zero-phase FFT split;
-            # per-band M/S width. Stems/buses/master.
-            entries.append({"type": "imager",
-                            "width_low": float(e.get("width_low", 1.0)),
-                            "width_mid": float(e.get("width_mid", 1.0)),
-                            "width_high": float(e.get("width_high", 1.0)),
-                            "crossover_lo_hz": float(e.get("crossover_lo_hz", 150.0)),
-                            "crossover_hi_hz": float(e.get("crossover_hi_hz", 2000.0)),
-                            "enabled": en})
         elif t == "return_delay":
             # A SPACE device at its chain position (the native MonitorChain parses it into a
             # send slot + a LinStep::SendFx step). Same flat keys the send_return return_entries
@@ -522,6 +475,7 @@ def monitor_chain_params(chain: list[dict],
                             "delay_ms": float(e["delay_ms"]),
                             "feedback": float(e["feedback"]),
                             "tone": float(e["tone"]),
+                            "ping_pong": 1.0 if float(e.get("ping_pong") or 0.0) >= 0.5 else 0.0,
                             "mix": float(e.get("mix", 1.0)), "enabled": en})
         elif t == "return_reverb":
             entries.append({"type": "return_reverb",
@@ -548,7 +502,8 @@ def monitor_chain_params(chain: list[dict],
                     ret.append({"type": "return_delay",
                                 "delay_ms": float(re["delay_ms"]),
                                 "feedback": float(re["feedback"]),
-                                "tone": float(re["tone"])})
+                                "tone": float(re["tone"]),
+                                "ping_pong": 1.0 if float(re.get("ping_pong") or 0.0) >= 0.5 else 0.0})
                 elif rt == "return_reverb":
                     ret.append({"type": "return_reverb",
                                 "decay_s": float(re["decay_s"]),
@@ -576,11 +531,13 @@ def monitor_chain_params(chain: list[dict],
             lim = {"type": "limiter",
                    "ceiling_dbtp": float(e["ceiling_dbtp"]),
                    "makeup_db": makeup,
-                   # Advanced (native VST): recovery / lookahead ramp / stereo-link / style.
-                   "release_ms": float(e.get("release_ms", 50.0)),
-                   "lookahead_ms": float(e.get("lookahead_ms", 3.0)),
+                   # the character (clean / loud / glue) and the knobs it plays at - an entry
+                   # without them plays its character's (models.limiter_knobs, both engines)
+                   "release_ms": limiter_knobs(e)[0],
+                   "lookahead_ms": limiter_knobs(e)[1],
                    "channel_link": float(e.get("channel_link", 1.0)),
-                   "style": int(e.get("style", 0)),
+                   "style": limiter_knobs(e)[2],
+                   "gain_db": float(e.get("gain_db", 0.0)),   # the GAIN knob: drive into the limiter
                    "enabled": en}
             # Carry the pre-limiter LUFS whenever we have it (even with no target yet)
             # so the native editor can resolve makeup = target - pre_lufs locally the
@@ -613,6 +570,12 @@ def monitor_chain_params(chain: list[dict],
             entries.append({"type": t, "enabled": en})
         else:
             print_only.append(t)
+        # A device placed AFTER a rack or a hosted plug-in (Phase 66) names it by the plug-in's
+        # item id; the DAW runs it in that plug-in's tail. Carried on every entry it emitted, so
+        # a push never takes a device back in front of the rack it was put behind.
+        if e.get("after"):
+            for out_e in entries[_place_from:]:
+                out_e["after"] = str(e["after"])
     return {"entries": entries, "rides": rides, "print_only": print_only,
             "tune_cents": round(tune_cents, 1),
             "transpose_semitones": round(transpose_st, 2)}

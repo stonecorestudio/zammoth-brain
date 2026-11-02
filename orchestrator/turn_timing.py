@@ -153,8 +153,11 @@ class TurnTimer:
             self.rounds[-1]["out"] = int(self.rounds[-1].get("out", 0)) + int(output_tokens)
 
     # ---- tools and the brain's own work ------------------------------------------------
-    def tool(self, name: str, seconds: float, key: str = "") -> None:
-        self.tools.append({"name": name, "key": key, "s": round(max(0.0, seconds), 2)})
+    def tool(self, name: str, seconds: float, key: str = "", chars: int = 0) -> None:
+        """One tool call: how long it ran and (2026-11-02) how long its reply is, in
+        characters - what it put into the context every later round reads."""
+        self.tools.append({"name": name, "key": key, "s": round(max(0.0, seconds), 2),
+                           "chars": max(0, int(chars))})
         now = self._clock()
         self._tool_spans.append((now - max(0.0, seconds), now))
         self._handled += 1
@@ -233,6 +236,7 @@ class TurnTimer:
             "tools": {k: {"n": len(v), "total_s": round(sum(v), 2), "max_s": round(max(v), 2)}
                       for k, v in by_tool.items()},
             "tool_rows": [[t["key"] or t["name"], t["s"]] for t in self.tools],
+            "tool_chars": self._tool_chars(),
             "overlap_s": self.overlap_s(),
         }
         if self.served_model:
@@ -240,6 +244,17 @@ class TurnTimer:
         if self.rate_limits:
             out["rate_limits"] = dict(self.rate_limits)
         out.update(self._tokens())
+        return out
+
+    def _tool_chars(self) -> dict:
+        """Per tool (its command key for a daw_command): calls, the characters their replies
+        put into the context, and the largest one."""
+        out: dict[str, dict] = {}
+        for t in self.tools:
+            row = out.setdefault(t["key"] or t["name"], {"n": 0, "chars": 0, "max": 0})
+            row["n"] += 1
+            row["chars"] += t.get("chars", 0)
+            row["max"] = max(row["max"], t.get("chars", 0))
         return out
 
     def _tokens(self) -> dict:

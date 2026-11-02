@@ -91,8 +91,8 @@ def test_devicespecs_parses():
 @pytest.mark.parametrize("scope", ["master", "stem"])
 @pytest.mark.parametrize("kind", ["comp", "limiter", "deess", "transient",
                                   "mb_comp", "gate", "dynamic_eq", "tilt",
-                                  "clip", "saturation", "overdrive", "imager",
-                                  "utility", "band_width", "duck", "ott",
+                                  "clip", "saturation", "overdrive",
+                                  "utility", "duck", "ott",
                                   "chorus", "flanger", "auto_filter"])
 def test_add_defaults_match_brain(kind, scope):
     """Every numeric seed the native shares with the brain must agree — against

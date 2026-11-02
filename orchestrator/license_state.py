@@ -66,16 +66,18 @@ FETCH_TIMEOUT_S = 8.0
 CLOCK_SKEW_S = 300.0
 
 # The sentences the DAW shows (docs/17-user-manual.md quotes them).
-#: The trial's length before the service has said (Phase 62: three days, `TRIAL_DAYS` on the
-#: control plane). Once it has, `state()["trial_days"]` is the service's own number.
-TRIAL_DAYS_DEFAULT = 3
-MSG_SIGN_IN = ("sign in to start your 3-day trial of the engineer — File ▸ Sign In "
-               "(the trial runs on your own Anthropic key)")
+#: The trial's length before the service has said (`TRIAL_DAYS` on the control plane: thirty
+#: days since the public launch, 2026-10-29). Once it has, `state()["trial_days"]` is the
+#: service's own number. Since the launch the licence is the WHOLE APP (the DAW and the
+#: engineer, one purchase): `none` and `expired` lock the app's windows, not only the agent.
+TRIAL_DAYS_DEFAULT = 30
+MSG_SIGN_IN = ("sign in to start your 30-day trial of Zammoth — File ▸ Sign In "
+               "(the engineer runs on your own Anthropic key)")
 MSG_EXPIRED = ("your trial has ended — buy Zammoth at zammoth.com/account, or enter a "
-               "product key in Preferences ▸ Account, to keep the engineer; everything "
-               "else in the app still works")
+               "product key in Preferences ▸ Account, to keep using Zammoth; your "
+               "projects are untouched")
 MSG_REFUNDED = ("this licence was refunded — buy Zammoth again at zammoth.com/account to "
-                "use the engineer")
+                "keep using it")
 MSG_UNREACHABLE = ("can't reach the licence service to confirm your trial or licence — "
                    "check your connection and try again")
 # The service answered, and the answer did not carry Zammoth's signature: something between this

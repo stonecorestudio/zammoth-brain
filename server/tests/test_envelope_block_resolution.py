@@ -65,23 +65,12 @@ def _ess_burst(sample_rate: int = 48000) -> np.ndarray:
     return sig
 
 
-def test_deesser_default_attack_is_not_silently_5ms():
-    """The shipped default is 1 ms; it used to render as a 5 ms de-esser."""
-    sig = _ess_burst()
-    de = dict(type="deess", threshold_db=-40.0, freq_hz=6000.0, ratio=8.0,
-              release_ms=50.0, range_db=-80.0)
-    fast = dsp._deess(np.ascontiguousarray(sig), 48000, dict(de, attack_ms=1.0))
-    slow = dsp._deess(np.ascontiguousarray(sig), 48000, dict(de, attack_ms=5.0))
-    assert not np.array_equal(fast, slow)
-
-
 def test_deesser_rejects_low_content_and_reaches_real_depth():
     """The 1st-order split leaked the ess band back through the low leg, so the
     device saturated at ~5 dB however hard `ratio`/`range_db` pushed."""
     sr = 48000
     ess = _ess_burst(sr)
-    de = dict(type="deess", threshold_db=-60.0, freq_hz=6000.0, ratio=20.0,
-              attack_ms=1.0, release_ms=50.0, range_db=-80.0)
+    de = dict(type="deess", threshold_db=-60.0, freq_hz=6000.0, range_db=-24.0)   # the law's deepest
     out = dsp._deess(np.ascontiguousarray(ess), sr, de)
     half = sr // 2
     depth = 20 * np.log10(np.sqrt(np.mean(out[0, half:] ** 2))
@@ -105,16 +94,8 @@ def test_transient_speed_changes_the_render():
     assert not np.array_equal(one, four)
 
 
-def test_duck_attack_below_the_block_is_audible():
-    sr = 48000
-    key = np.zeros((sr, 2))
-    key[sr // 2:, :] = 0.5
-    victim = np.ones((sr, 2)) * 0.2
-    e = dict(type="duck", key_stem_id="k", threshold_db=-30.0, depth_db=6.0,
-             release_ms=150.0)
-    fast = dsp._duck(victim.copy(), sr, key, dict(e, attack_ms=1.0))
-    slow = dsp._duck(victim.copy(), sr, key, dict(e, attack_ms=5.0))
-    assert not np.allclose(fast, slow)
+# (test_duck_attack_below_the_block_is_audible retired 2026-10-28: the Duck has no attack - it plays a
+# drawn curve, duck_law - and test_duck_law.py holds its timing to the sample.)
 
 
 def test_slow_constants_stay_on_the_5ms_block():

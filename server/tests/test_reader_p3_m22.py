@@ -107,12 +107,16 @@ def test_a_render_is_told_it_is_one_and_every_audition_asks():
     """C6.R10. What is held under a mouse to listen is not played into a render: the node hands
     the chain rc.isRendering each block, and the four auditions read the block's flag."""
     block = _code(_body(NODE, "    void applyToBuffer (const PluginRenderContext& rc) override", "\n        preFaderTrim->store"))
-    assert block.index("chain.setOfflineRender (rc.isRendering);") < block.index("chain.process (sub"), \
+    # the block is processed in runChunks (Phase 66: one helper for the node and its tails)
+    assert block.index("chain.setOfflineRender (rc.isRendering);") < block.index("runChunks ("), \
         "the chain is told before the block is processed"
+    assert "chain.process (sub" in _code(_body(NODE, "    void runChunks (", "\n    void processTail"))
+    tail = _code(_body(NODE, "    void processTail (const PluginRenderContext& rc, int part)", "\n    void setChainParts"))
+    assert tail.index("chain.setOfflineRender (rc.isRendering);") < tail.index("runChunks (")
     code = _code(CHAIN)
     assert "auditions = ! offlineRender.load" in code
     for needle in ("proc && auditions && soloOn.load", "c.delta && auditions", "de.listen && auditions",
-                   "active.wid.listenMid && auditions", "active.wid.listenSide && auditions"):
+                   "active.wid[(size_t) slot].listenMid && auditions", "active.wid[(size_t) slot].listenSide && auditions"):
         assert needle in code, f"an audition no longer asks whether this block is a render: {needle}"
     # ...and nothing reads the raw flags past those lines
     assert len(re.findall(r"\bc\.delta\b", code)) == 1 and len(re.findall(r"\bde\.listen\b", code)) == 1
@@ -125,8 +129,12 @@ def test_a_new_dsp_memory_is_cleared_in_both_resets():
     edge flag are cleared in prepare() AND in resetDspState()."""
     prepare = _body(CHAIN, "void MonitorChain::prepare (double sampleRate", "\n}\n")
     reset = _body(CHAIN, "void MonitorChain::resetDspState()", "\n}\n")
+    # (since Phase 65 the clipper's history lives in each instance's ClipMem: prepare makes every
+    # instance fresh, the reset puts every instance at rest, and rest() clears the history)
+    header = (ROOT / "native" / "Source" / "MonitorChain.h").read_text(encoding="utf-8")
+    assert "std::memset (tpHist, 0, sizeof (tpHist));" in header.split("struct ClipMem\n", 1)[1].split("\n    };", 1)[0]
+    assert "clipPool.clear();" in prepare and "clipPool.forEach" in reset
     for part in (prepare, reset):
-        assert "std::memset (clipTpHist, 0, sizeof (clipTpHist));" in part
         assert "soloWasOn = false;" in part
 
 
@@ -174,7 +182,7 @@ def test_the_face_and_the_agent_share_one_band_tilt():
 def test_the_overdrive_face_takes_the_nodes_rate():
     """E3.R6. odTiltDb / odBpDb drew analog prototypes; they evaluate the digital filters the
     chain builds, at the node's sample rate."""
-    assert re.search(r"inline float odTiltDb \(double f, float tone, double sr\)", GRAPHS)
+    assert re.search(r"inline float odTiltDb \(double f, float tone, double sr(, int character = 0)?\)", GRAPHS)   # + the character (2026-10-26)
     assert re.search(r"inline float odBpDb \(double f, float f0, float q, double sr\)", GRAPHS)
     assert not re.search(r"odTiltDb \([^()]*\(float\) tone\)\)", GRAPHS), "a call site draws the tilt without a rate"
     dock = (ROOT / "daw" / "Source" / "DeviceChainView.h").read_text(encoding="utf-8")

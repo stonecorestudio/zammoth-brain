@@ -45,7 +45,7 @@ def _rms(a):
 
 
 def _ott_entry(**over) -> dict:
-    e = {"type": "ott", "depth": 1.0, "time": 1.0,
+    e = {"type": "ott", "depth": 1.0, "time": 1.0, "upward_pct": 100.0, "downward_pct": 100.0,   # ott_law's stamp
          "low": {"up": 1.0, "down": 1.0, "gain_db": 0.0},
          "mid": {"up": 1.0, "down": 1.0, "gain_db": 0.0},
          "high": {"up": 1.0, "down": 1.0, "gain_db": 0.0}}
@@ -69,7 +69,7 @@ def test_ott_lifts_quiet_and_tames_loud():
 def _split_alone(x):
     """What the real 3-way LR4 split (2026-10-17, the DAW's) gives back with every band at unity:
     an ALLPASS of the input - flat in magnitude, not the same samples."""
-    return sum(dsp._lr4_three_way(x.astype(np.float64), SR, 150.0, 2000.0))
+    return sum(dsp._lr4_three_way(x.astype(np.float64), SR, 88.3, 2500.0))   # ott_law's split (2026-10-28)
 
 
 def test_ott_depth_zero_is_transparent():
@@ -81,11 +81,15 @@ def test_ott_depth_zero_is_transparent():
 
 
 def test_ott_band_sides_disable():
-    """up/down 0 on every band = no levelling at all → the split alone."""
+    """up/down 0 on every band = no levelling: each band keeps only its fixed makeup (ott_law,
+    2026-10-28 - the reference lifts a band with both sides off by its makeup too)."""
+    from mix_engine.ott_law import MAKEUP_DB
     x = _quiet_loud(seed=2)
     off = {"up": 0.0, "down": 0.0, "gain_db": 0.0}
-    out = dsp._ott(x, SR, _ott_entry(low=dict(off), mid=dict(off), high=dict(off)))
-    assert np.allclose(out, _split_alone(x), atol=1e-5)
+    out = dsp._ott(x, SR, _ott_entry(depth=0.5, low=dict(off), mid=dict(off), high=dict(off)))
+    bands = dsp._lr4_three_way(x.astype(np.float64), SR, 88.3, 2500.0)
+    want = sum(b * 10 ** (m * 0.5 / 20) for b, m in zip(bands, MAKEUP_DB))
+    assert np.allclose(out, want, atol=1e-5)
 
 
 def test_ott_gains_bracket():
@@ -104,7 +108,7 @@ def test_ott_model_validation():
     with pytest.raises(ValidationError):
         OttAction(stem_id="stem_a", depth=1.5)
     a = OttAction(stem_id="stem_a")             # defaults are a valid device
-    assert a.low.up == 1.0 and a.mid.down == 1.0 and a.depth == 0.5
+    assert a.low.up == 1.0 and a.mid.down == 1.0 and a.depth == 1.0   # the reference's default (ott_law)
 
 
 def test_ott_registration():
@@ -161,11 +165,11 @@ def test_ott_monitor_contract():
     params = monitor_chain_params([entry])
     assert params["entries"] == [{
         "type": "ott", "depth": 0.7, "time": 0.5,
-        "in_gain_db": 2.0, "out_gain_db": -1.0,
-        "low": {"up": 1.0, "down": 1.0, "gain_db": 0.0},
-        "mid": {"up": 1.0, "down": 1.0, "gain_db": 0.0},
-        "high": {"up": 1.0, "down": 1.0, "gain_db": 0.0},
-        "crossover_lo_hz": 150.0, "crossover_hi_hz": 2000.0,
+        "in_gain_db": 2.0, "out_gain_db": -1.0, "upward_pct": 100.0, "downward_pct": 100.0,
+        "low": {"up": 1.0, "down": 1.0, "gain_db": 0.0, "threshold_pct": 100.0},
+        "mid": {"up": 1.0, "down": 1.0, "gain_db": 0.0, "threshold_pct": 100.0},
+        "high": {"up": 1.0, "down": 1.0, "gain_db": 0.0, "threshold_pct": 100.0},
+        "crossover_lo_hz": 88.3, "crossover_hi_hz": 2500.0,
         "enabled": True}]
 
 
@@ -173,8 +177,7 @@ def test_ott_reference_direction():
     """Reference tier (LR4 split + per-sample envelope): direction only, never
     a null against the offline FFT/block path (the imager gotcha)."""
     x = _quiet_loud(seed=4).T.astype(np.float64)    # (frames, channels)
-    band = {"up": 1.0, "down": 1.0, "gain_db": 0.0}
-    out = rm._ott(x, SR, 1.0, 1.0, 0.0, 0.0, dict(band), dict(band), dict(band))
+    out = rm._ott(x, SR, _ott_entry())
     n = x.shape[0]
     settle = int(0.4 * SR)
     q = slice(settle, n // 2 - settle)
@@ -285,5 +288,5 @@ def test_overdrive_monitor_contract():
     assert params["entries"] == [{
         "type": "overdrive", "drive_db": 15.0, "filter_on": True,
         "freq_hz": 1200.0, "q": 2.0, "tone": 0.6, "output_db": 3.0,
-        # oversample 1 = off, the exact elementwise path (2026-09-06)
-        "mix": 0.9, "oversample": 1, "enabled": True}]
+        # the model's default factor, dsp.OD_OVERSAMPLE_DEFAULT (2026-10-24)
+        "mix": 0.9, "oversample": 8, "character": 0, "enabled": True}]   # the pedal (od_characters, 2026-10-26)

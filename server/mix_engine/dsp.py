@@ -30,8 +30,11 @@ from pedalboard import (
     PitchShift,
 )
 
+from . import sat_characters as _satc   # the saturation characters (2026-10-26)
+from . import od_characters as _odc     # the overdrive's characters (2026-10-26)
+from . import stereoize_law             # the Imager's stereoize (2026-10-28)
 from .tp_detector import TP_CENTRE, intersample_peak   # the limiter's detector: the native's table (reader E4·R7)
-from .models import BAND_EDGES_HZ, BAND_LABELS, imager_crossovers
+from .models import BAND_EDGES_HZ, BAND_LABELS, COMP_STYLES
 from .reference_monitor import biquad_coeffs, slope_cascade_coeffs
 from .reference_monitor import (auto_filter_modulation, auto_filter_outputs,   # Phase 63: one law
                                 auto_filter_qs, auto_filter_values)
@@ -39,9 +42,6 @@ from .session import (Session, effective_bus_chain, effective_chain,
                       effective_return_chain)
 
 # v1 de-esser: split-band compression with fixed dynamics (see audio-dsp skill).
-DEESS_RATIO = 4.0
-DEESS_ATTACK_MS = 1.0
-DEESS_RELEASE_MS = 50.0
 
 # Gain rides (Phase 5) + ranged processors (Phase 15): fixed raised-cosine
 # fades at the range edges.
@@ -57,21 +57,24 @@ MATCH_EQ_TAPS = 4097
 MB_CROSSOVERS_HZ = (150.0, 2000.0)
 MB_MAX_BOOST_DB = 12.0
 
-# OTT (2026-07-07): the device's fixed internal character (Xfer-style — the
-# thresholds/slopes are hidden; the user drives depth/time/band amounts).
-# Each band's smoothed envelope is levelled TOWARD OTT_TARGET_DB: cut above it
-# (DOWN_SLOPE dB per dB over), boosted below it (UP_SLOPE dB per dB under),
-# clamped so silence can't blow up the noise floor, then scaled by `depth`.
-OTT_TARGET_DB = -30.0
-OTT_UP_SLOPE = 0.6
-OTT_DOWN_SLOPE = 0.85
-OTT_MAX_BOOST_DB = 24.0
-OTT_MAX_CUT_DB = 36.0
-OTT_BASE_ATTACK_MS = 12.0    # × entry["time"]
-OTT_BASE_RELEASE_MS = 120.0  # × entry["time"]
+# OTT's law (the split, detector, makeup, both sides and their caps) is `ott_law` (2026-10-28).
 
 # Overdrive (2026-07-07): post-shaper tone-tilt pivot (one-pole LP blend).
 OD_TONE_HZ = 3000.0
+# Overdrive voicing (2026-10-24, James: "they sound awful"). The lows are driven OD_EMPHASIS_DB
+# less than the rest (a low shelf cut before the clipper, the same shelf boosted after it - the
+# pair cancels exactly where nothing clips), the curve is biased by OD_BIAS so it clips one side
+# sooner (even harmonics), a two-pole roll-off at OD_FIZZ_HZ takes the fizz, and a one-pole at
+# SHAPER_DC_HZ takes the DC the bias makes. MonitorChain.h holds the same five (kOd*), pinned.
+OD_EMPHASIS_HZ = 300.0
+OD_EMPHASIS_DB = 9.0
+OD_BIAS = 0.2
+OD_FIZZ_HZ = 6500.0
+SHAPER_DC_HZ = 10.0
+# What a new overdrive / saturation runs its shaper at (2026-10-24): at 1x a hard drive's
+# harmonics folded back as aliasing nearly as loud as the note. An entry's own `oversample` wins.
+OD_OVERSAMPLE_DEFAULT = 8
+SAT_OVERSAMPLE_DEFAULT = 4
 
 # Phase 7 envelope followers (transient shaper, sidechain duck) work on 5 ms
 # RMS blocks with asymmetric one-pole smoothing — deterministic and fast.
@@ -265,6 +268,7 @@ def _stem_cache_key(session: Session, stem_id: str,
         return {"path": stem["path"], "mtime_ns": path.stat().st_mtime_ns,
                 "gain_db": stem["gain_db"], "pan": stem["pan"],
                 "width": stem["width"], "width_on": stem.get("width_on", True), "chain": stem["chain"],
+                "stereoize": stem.get("stereoize", False), "stereoize_ms": stem.get("stereoize_ms", 6.0),
                 "rides": stem["rides"],
                 "capture_start_s": stem.get("capture_start_s", 0.0),   # duck alignment (2026-09-01)
                 "vca_db": stem.get("vca_db", 0.0),       # the engine's facts (D2·R4)
@@ -277,8 +281,10 @@ def _stem_cache_key(session: Session, stem_id: str,
                         for entry in session.stems[stem_id]["chain"]
                         if entry["type"] in ("duck", "auto_filter") and not exclude_ducks
                         and _duck_key_heard(session, entry.get("key_stem_id"))})
-    # A synced Auto Filter here or on a trigger reads the song's tempo map (Phase 63).
-    synced = any(e.get("type") == "auto_filter" and e.get("lfo_sync")
+    # A synced Auto Filter here or on a trigger reads the song's tempo map (Phase 63), and so does
+    # every Duck (2026-10-28: its curve runs on the song's quarters, synced or triggered).
+    synced = any((e.get("type") == "auto_filter" and e.get("lfo_sync"))
+                 or (e.get("type") == "duck" and sid == stem_id)
                  for sid in [stem_id, *duck_keys] for e in session.stems[sid]["chain"])
     return json.dumps({
         "project": str(session.project_dir),
@@ -343,164 +349,31 @@ def _rbj_band(audio: np.ndarray, sample_rate: int, band: dict) -> np.ndarray:
     return out.astype(np.asarray(audio).dtype, copy=False)
 
 
-def _eq_plugin(band: dict, sample_rate: int):
-    """One Pedalboard filter for an EQ band — peak/shelves, and hpf/lpf at the
-    legacy 1st-order slope (the sloped cascade goes through `_sloped_cut`).
-
-    `freq_hz`/`q` are clamped to the SAME range the native monitor uses
-    (`MonitorChain.cpp` `makeBiquad`: `jlimit (2.0, sr * 0.49, f)` and
-    `jmax (0.1, q)`), which `_notch`, `_bandpass_band` and
-    `reference_monitor.eq_band_coeffs` were each given for exactly this reason and
-    this path never was. `EqBand.freq_hz` allows 20 kHz and
-    `Session.project_sample_rate` is simply the highest stem rate with no floor, so
-    a 22.05 kHz project (an ordinary decoded mp3/ogg) plus a perfectly legal
-    `lpf @ 12 kHz` put the cutoff above Nyquist: the filter diverged and rendered
-    every sample of the stem AND the master as `inf` — nothing downstream sanitises
-    non-finite values, so it reached the exported wav and turned the analysis LUFS
-    into `nan`. The native monitor clamps, so the user heard a good mix and shipped
-    garbage (2026-09-08 device audit, P0)."""
-    shape = band["shape"]
-    freq_hz = min(max(float(band["freq_hz"]), 2.0), sample_rate * 0.49)
-    if shape == "hpf":
-        return HighpassFilter(cutoff_frequency_hz=freq_hz)
-    if shape == "lpf":
-        return LowpassFilter(cutoff_frequency_hz=freq_hz)
-    cls = {"peak": PeakFilter, "low_shelf": LowShelfFilter,
-           "high_shelf": HighShelfFilter}[shape]
-    return cls(cutoff_frequency_hz=freq_hz, gain_db=band["gain_db"],
-               q=max(0.1, float(band["q"])))
-
-
-def _notch(audio: np.ndarray, sample_rate: int, freq_hz: float, q: float) -> np.ndarray:
-    """RBJ-cookbook notch biquad (Pedalboard has no NotchFilter). `audio` is
-    (channels, frames) — filtered along the time axis. Same coefficient form as
-    the native MonitorChain / reference_monitor notch, so the offline render,
-    the monitor oracle, and the native engine agree within tolerance."""
-    from scipy.signal import lfilter
-    # Clamped to the native's range (MonitorChain makeBiquad: jlimit(2, sr*0.49, f),
-    # jmax(0.1, q)) — a band at/above Nyquist used to render all-NaN here while the
-    # native monitor, already clamped, sounded fine.
-    freq_hz = min(max(float(freq_hz), 2.0), sample_rate * 0.49)
-    q = max(0.1, float(q))
-    omega = 2.0 * np.pi * freq_hz / sample_rate
-    coso, sino = np.cos(omega), np.sin(omega)
-    alpha = sino / (2.0 * q)
-    c2 = -2.0 * coso
-    b = np.array([1.0, c2, 1.0])
-    a = np.array([1.0 + alpha, c2, 1.0 - alpha])
-    out = lfilter(b / a[0], a / a[0],
-                  np.asarray(audio, dtype=np.float64), axis=1)
-    return out.astype(audio.dtype, copy=False)
-
-
-def _bandpass_band(audio: np.ndarray, sample_rate: int, freq_hz: float,
-                   q: float) -> np.ndarray:
-    """Bandpass EQ shape (Phase 46): the same RBJ constant-skirt biquad
-    (`reference_monitor.biquad_coeffs`) the native monitor and the dynamic-EQ
-    detector already use — one source of coefficients for all three. `audio`
-    is (channels, frames); filtered along the time axis (like `_notch`)."""
-    from scipy.signal import lfilter
-    b, a = biquad_coeffs("bandpass", sample_rate, freq_hz, q, 0.0)
-    out = lfilter(b, a, np.asarray(audio, dtype=np.float64), axis=1)
-    return out.astype(audio.dtype, copy=False)
-
-
-def _tilt_shelf_band(audio: np.ndarray, sample_rate: int, band: dict) -> np.ndarray:
-    """tilt_shelf EQ shape (Phase 46): a matched low-shelf -gain_db/2 + high-shelf
-    +gain_db/2 pair at the band's own freq_hz/q — gain_db is the total tilt from
-    low to high end. Both stages reuse `_eq_plugin` (the same Pedalboard/JUCE
-    shelf makers as shape low_shelf/high_shelf), so it's bit-exact in the native
-    monitor, same as `_tilt`'s fixed-pivot tilt device."""
-    half = band["gain_db"] / 2.0
-    low = {"shape": "low_shelf", "freq_hz": band["freq_hz"], "gain_db": -half, "q": band["q"]}
-    high = {"shape": "high_shelf", "freq_hz": band["freq_hz"], "gain_db": half, "q": band["q"]}
-    return _rbj_band(_rbj_band(audio, sample_rate, low), sample_rate, high)
-
-
-def _sloped_cut(audio: np.ndarray, sample_rate: int, shape: str, freq_hz: float,
-                q: float, slope_db_oct: int) -> np.ndarray:
-    """Variable-slope hpf/lpf (Phase 46, `slope_db_oct` in {12, 24, 48, 96} — the
-    legacy 1st-order `slope_db_oct == 6` path never reaches here, see `_eq_band`):
-    a cascade of Butterworth-Q RBJ biquad sections
-    (`reference_monitor.slope_cascade_coeffs` — the same coefficients the native
-    monitor + oracle use), lfilter'd one at a time along the time axis of
-    (channels, frames) audio."""
-    from scipy.signal import lfilter
-    out = np.asarray(audio, dtype=np.float64)
-    for b, a in slope_cascade_coeffs(shape, sample_rate, freq_hz, q, slope_db_oct):
-        out = lfilter(b, a, out, axis=1)
-    return out.astype(audio.dtype, copy=False)
-
-
 def _eq_band(audio: np.ndarray, sample_rate: int, band: dict) -> np.ndarray:
-    """Apply one EQ band to (channels, frames) audio — notch/bandpass via numpy
-    biquads, sloped hpf/lpf via a biquad cascade, tilt_shelf via two Pedalboard
-    shelves, every other shape (incl. hpf/lpf at the legacy slope) via its plain
-    Pedalboard plugin (bit-identical to pre-Phase-46 behavior)."""
-    shape = band["shape"]
-    if shape == "notch":
-        return _notch(audio, sample_rate, band["freq_hz"], band["q"])
-    if shape == "bandpass":
-        return _bandpass_band(audio, sample_rate, band["freq_hz"], band["q"])
-    if shape == "tilt_shelf":
-        return _tilt_shelf_band(audio, sample_rate, band)
-    if shape in ("hpf", "lpf"):
-        slope = band.get("slope_db_oct", 6) or 6
-        if slope > 6:
-            return _sloped_cut(audio, sample_rate, shape, band["freq_hz"],
-                               band["q"], slope)
-    return _rbj_band(audio, sample_rate, band)
-
-
-GATE_DET_RELEASE_MS = 15.0     # MonitorChain::kGateDetReleaseMs
-GATE_REST_DB = -80.0           # MonitorChain::kGateRestDb: at rest a gate is shut
+    """Apply one EQ band to (channels, frames) audio: the EQ's law (`eq_law`, 2026-10-27 - a
+    reference EQ's shapes and Q, measured, as magnitude-matched biquads in float64; the native
+    bank runs the same sections, `native/Source/EqLaw.h`). Every shape, every slope."""
+    from scipy.signal import lfilter
+    from .eq_law import band_sections
+    out = np.asarray(audio, dtype=np.float64)
+    for b, a in band_sections(band["shape"], sample_rate, float(band["freq_hz"]),
+                              float(band.get("q", 1.0)), float(band.get("gain_db", 0.0)),
+                              int(band.get("slope_db_oct", 6) or 6)):
+        out = lfilter(b, a, out, axis=-1)
+    return out.astype(np.asarray(audio).dtype, copy=False)
 
 
 def gate_gain_db(peak: np.ndarray, sample_rate: float, threshold_db: float, ratio: float,
                  attack_ms: float, release_ms: float, hold_ms: float = 0.0,
-                 range_db: float = -80.0, hysteresis_db: float = 0.0) -> np.ndarray:
-    """THE GATE'S LAW (`MonitorChain::applyGate`, v3 2026-10-17), per sample: the gain in dB for
-    a detector `peak` (the linked |x| after the sidechain filters). Vectorised, no per-sample loop:
-
-    * the DETECTOR is a peak follower, instant up and released over GATE_DET_RELEASE_MS - the
-      recursion `det = max(|x|, det·a)` in closed form, det_db[i] = i·L + cummax(lx - j·L). The raw
-      |x| it replaced fell to nothing at every zero crossing, and the DAW's gate shut inside each
-      cycle of a tone (a 100 Hz note 10 dB over the threshold: THD -26 dB);
-    * OPEN / CLOSED is a Schmitt trigger on that level (open at the threshold, closed under
-      threshold - hysteresis) - it depends on the level alone, so it is the last event, filled on;
-    * the TARGET drops (ratio-1) dB per dB under the effective threshold, floored at range;
-    * HOLD is the running maximum of the target over the last hold samples (+ this one);
-    * the envelope is the one-pole on dB - attack toward a higher target, release toward a lower
-      - through `_gr_ballistics_db` with the sign mirrored (that function attacks DOWNWARD), from
-      rest: shut, at GATE_REST_DB."""
-    lx = 20.0 * np.log10(np.maximum(np.asarray(peak, dtype=np.float64), 1.0e-12))
-    n = lx.shape[0]
-    if n == 0 or ratio <= 1.0:
-        return np.zeros(n)
-    step_db = 20.0 * math.log10(math.exp(-1.0 / (sample_rate * GATE_DET_RELEASE_MS / 1000.0)))
-    j = np.arange(n, dtype=np.float64)
-    det_db = j * step_db + np.maximum.accumulate(lx - j * step_db)
-    thr, hyst = float(threshold_db), float(hysteresis_db)
-    event = np.where(det_db >= thr, 1, np.where(det_db < thr - hyst, 0, -1))
-    last = np.where(event >= 0, j.astype(np.int64), -1)
-    last = np.maximum.accumulate(last)
-    is_open = np.where(last >= 0, event[np.maximum(last, 0)] == 1, False)   # starts shut (at rest)
-    eff_thr = np.where(is_open, thr - hyst, thr)
-    target = np.clip((det_db - eff_thr) * (float(ratio) - 1.0), float(range_db), 0.0)
-    hold = int(sample_rate * float(hold_ms) / 1000.0)
-    if hold > 0:
-        from scipy.ndimage import maximum_filter1d
-        padded = np.concatenate([np.full(hold, float(range_db)), target])
-        target = maximum_filter1d(padded, size=hold + 1, origin=hold // 2)[hold:]   # [i - hold, i]
-    # the mirror: y = -env rises with ATTACK when the target rises - _gr_ballistics_db's attack
-    # is toward a LOWER value, so feed it -target shifted under 0, from a settled rest (shut, at
-    # GATE_REST_DB: silence came before the first sample - the DAW's render warms up on it)
-    k = -GATE_REST_DB + 1.0
-    a_att = math.exp(-1000.0 / (sample_rate * float(attack_ms)))
-    lead = int(math.ceil(18.0 / max(1.0 - a_att, 1.0e-6))) + 16
-    fed = np.concatenate([np.full(lead, -GATE_REST_DB - k), -target - k])
-    z = _gr_ballistics_db(fed, sample_rate, float(attack_ms), float(release_ms))[lead:]
-    return -(z + k)
+                 range_db: float = -80.0, hysteresis_db: float = 0.0,
+                 character: int = 0) -> np.ndarray:
+    """THE GATE'S LAW (v4, 2026-10-27: four characters fitted to a reference gate) - the gain in dB
+    for a detector `peak` (the linked |x| after the user's sidechain filters and the character's
+    own detector EQ, `gate_characters.detector_eq`). `gate_characters.gain_db` is the law and says
+    what each stage does; `MonitorChain::applyGate` runs it per sample."""
+    from . import gate_characters
+    return gate_characters.gain_db(peak, sample_rate, threshold_db, ratio, attack_ms, release_ms,
+                                   hold_ms, range_db, hysteresis_db, character)
 
 
 def _gate(audio: np.ndarray, sample_rate: int, entry: dict) -> np.ndarray:
@@ -533,13 +406,16 @@ def _gate(audio: np.ndarray, sample_rate: int, entry: dict) -> np.ndarray:
             b, a = biquad_coeffs("lpf2", sample_rate, min(sc_lpf_hz, 0.9 * nyq),
                                  0.0, 0.0)
             det = lfilter(b, a, det, axis=1)
-    # THE DAW'S LAW (gate_gain_db = MonitorChain::applyGate, 2026-10-17). It read a 5 ms block
-    # peak and ran per block, while the DAW read the raw per-sample |x| - up to 10 dB apart.
+    # THE DAW'S LAW (gate_gain_db = MonitorChain::applyGate). The character's own detector EQ
+    # comes after the user's filters, as natively.
+    from . import gate_characters
+    character = gate_characters.character_index(entry.get("character", gate_characters.DEFAULT))
+    det = gate_characters.detector_eq(det, sample_rate, character, axis=1)
     gain_db = gate_gain_db(np.max(np.abs(det), axis=0), sample_rate,
                            float(entry["threshold_db"]), ratio,
                            float(entry["attack_ms"]), float(entry["release_ms"]),
                            float(entry.get("hold_ms", 0.0)), float(entry.get("range_db", -80.0)),
-                           float(entry.get("hysteresis_db", 0.0)))
+                           float(entry.get("hysteresis_db", 0.0)), character)
     gain = 10.0 ** (gain_db / 20.0)
     return (x * gain[np.newaxis, :]).astype(np.float32)
 
@@ -565,36 +441,13 @@ def _lr4_split(audio: np.ndarray, sample_rate: int, freq_hz: float) -> tuple:
 
 
 def _deess(audio: np.ndarray, sample_rate: int, entry: dict) -> np.ndarray:
-    """Split-band de-esser on (channels, frames) float32 - the DAW's law, transcribed
-    (`MonitorChain::applyDeess`), as `_native_comp` is the compressor's: a Linkwitz-Riley
-    4th-order LP/HP split at freq_hz; the high band's PER-SAMPLE peak, linked across the
-    channels, in dB; over `threshold_db` it asks for `-(over)(1 - 1/ratio)`, floored at
-    `range_db`; that target runs through the native one-pole on the dB value (`attack_ms`
-    toward more reduction, `release_ms` back - `_gr_ballistics_db`, the comp's recursion).
-    The gain applies to the high band (split, default) or the WHOLE signal (`wide` - the
-    detector stays the high band).
-
-    Until 2026-10-17 this read a linked block PEAK (blocks of attack/2, at least 0.25 ms) and
-    smoothed per block. On noise-like sibilance that read several dB more reduction than the
-    DAW plays and exports - 9.7 against 6.5 dB at a 1 ms attack, 10.1 against 3.0 at 20 ms -
-    and the attack knob moved the two engines in opposite directions; below 0.25 ms it did
-    nothing at all here (audit 02 F4 / F6)."""
-    ratio = float(entry.get("ratio", DEESS_RATIO))
-    if ratio <= 1.0:
-        return audio                       # not reducing: EXACTLY transparent, no split at all
-    low, high = _lr4_split(audio, sample_rate, entry["freq_hz"])
-    peak = np.max(np.abs(high.astype(np.float32)), axis=0)
-    level_db = 20.0 * np.log10(np.maximum(peak.astype(np.float64), 1.0e-12))
-    over = level_db - float(entry["threshold_db"])
-    target = np.maximum(np.where(over > 0.0, -over * (1.0 - 1.0 / ratio), 0.0),
-                        float(entry.get("range_db", -80.0)))
-    env_db = _gr_ballistics_db(target, sample_rate,
-                               float(entry.get("attack_ms", DEESS_ATTACK_MS)),
-                               float(entry.get("release_ms", DEESS_RELEASE_MS)))
-    gain = (10.0 ** (env_db / 20.0)).astype(np.float32)[np.newaxis, :]
-    if entry.get("wide"):
-        return (audio * gain).astype(np.float32)   # wide-band: dip the whole signal
-    return (low + high * gain).astype(np.float32)
+    """The de-esser on (channels, frames) float32: `deess_law.apply` - the DAW's law
+    (`MonitorChain::applyDeess`), fitted to a reference de-esser (2026-10-27; the module says how).
+    No ratio, attack or release: a RANGE reached at 0 dBFS on the detector, a band FREQ..TOP, a
+    MODE (allround / vocal), split (a linear-phase shelf) or WIDE, a 12 ms lookahead - aligned
+    here, the latency the native chain reports."""
+    from . import deess_law
+    return deess_law.apply(audio, sample_rate, entry)
 
 
 def _pan(audio: np.ndarray, pan: float) -> np.ndarray:
@@ -745,7 +598,8 @@ def _gr_ballistics_db(target_db: np.ndarray, sample_rate: float,
 def _native_comp(audio: np.ndarray, sample_rate: int, threshold_db: float,
                  ratio: float, attack_ms: float, release_ms: float,
                  makeup_db: float = 0.0) -> np.ndarray:
-    """The compressor the DAW runs (`MonitorChain::processOneComp`), on
+    """The multiband compressor's band law (`MonitorChain::mbBandGain`; the `comp` device ran it
+    too until 2026-10-25 and now runs `_character_comp`), on
     (channels, frames): a feed-forward PEAK detector LINKED across the channels
     (one gain for all of them — the stereo image holds still), hard knee, and
     the ballistics on the gain reduction in dB. Returns the wet signal, makeup
@@ -766,6 +620,134 @@ def _native_comp(audio: np.ndarray, sample_rate: int, threshold_db: float,
         return audio if makeup == 1.0 else (audio * audio.dtype.type(makeup))
     target = np.where(over > 0.0, -over * slope, 0.0)
     env = _gr_ballistics_db(target, sample_rate, attack_ms, release_ms)
+    gain = (10.0 ** (env / 20.0)) * makeup
+    return (audio * gain[np.newaxis, :]).astype(audio.dtype)
+
+
+# The compressor's CHARACTERS (2026-10-25, the black-box pass against a reference compressor; James
+# picked CLEAN, then PUNCH, SMOOTH, GLUE, VOCAL and MASTERING). Each is a row of one law, fitted to
+# the reference's measured gain on step tests and a dry vocal (docs/10-daw.md has the record). Every
+# stage is a fixed-coefficient branching one-pole, so `_gr_ballistics_db` runs each at compiled
+# speed - a law whose coefficient depends on its own state cannot be run fast here (that is why
+# CLEAN's first fit, whose attack slowed on small gaps, was refitted into this form):
+#   fast stage:  two followers of the static target, both releasing over release / RELEASE_DIV -
+#                one attacking over attack x ATTACK_K, one ATTACK_SLOW_X times slower (or faster);
+#                the reduction is the slower one, held to within ATTACK_GAP_DB of the quicker. With a
+#                slow follower and a gap of about a dB a jump is taken fast down to its last dB and
+#                that last dB slowly, so the ripple of a held note is not chased.
+#   slow stage:  the BODY follows the fast stage, charging over BODY_ATTACK_MS and letting go over
+#                BODY_RELEASE_MS + BODY_RELEASE_K x release.
+#   gain:        the deeper of the two - a short hit lets go at the fast stage's speed, a long
+#                squash at the body's.
+# A stage runs on the reduction in dB, or (LIN_*) on the linear gain minus one - a release on the
+# linear gain is faster in dB the deeper it starts, as a reference's MASTERING style measured.
+# The static target is the textbook law, or (STATIC) one of comp_tables' measured laws.
+# MonitorChain::processOneComp (kCompCharacters in MonitorChain.h) runs the same law per sample and
+# reference_monitor._compress is its float64 loop; test_comp_characters.py holds the tables equal
+# and server/tests/data/comp_clean_parity.json the samples.
+COMP_DEFAULT_STYLE = 0   # names: models.COMP_STYLES
+#: index -> (attack_k, attack_slow_x, attack_gap_db, release_div, body_attack_ms, body_release_ms,
+#:           body_release_k, lin_fast, lin_body, static, hold_ms) - static: None textbook (with
+#:           the quadratic knee), "clean_knee" textbook with CLEAN's measured knee, else a
+#:           comp_tables name; hold_ms: a PEAK-HOLD detector in front (instant up, a straight line
+#:           down in dB over hold_ms; 0 = the raw peak) - MASTERING's: the reference reads a sine
+#:           at its peak with no ripple at all, which only a held detector does
+COMP_CHARACTERS = {
+    0: (0.333, 6.73, 0.956, 2.36, 2172.0, 42.6, 0.211, 0, 0, "clean_knee", 0.0),   # CLEAN
+    1: (0.860, 0.464, 2.44, 2.11, 0.01, 7.92, 0.0, 0, 1, None, 0.0),           # PUNCH
+    2: (0.294, 50.2, 0.0, 6.24, 117.0, 0.01, 0.686, 1, 1, "smooth", 0.0),      # SMOOTH
+    3: (0.192, 5.36, 0.855, 4.27, 21.6, 0.597, 0.0229, 0, 1, "glue", 0.0),     # GLUE
+    4: (5.17, 0.0961, 0.0, 2.66, 136.0, 101.0, 0.0, 1, 0, "vocal", 0.0),       # VOCAL
+    5: (0.405, 1.735, 1.069, 2.349, 27.0, 410.7, 0.0, 1, 1, None, 27.1),       # MASTERING
+}
+
+
+def comp_style(entry: dict) -> int:
+    """A stored comp entry's character index (absent = CLEAN), held to the table."""
+    try:
+        st = int(entry.get("style", COMP_DEFAULT_STYLE) or 0)
+    except (TypeError, ValueError):
+        st = COMP_DEFAULT_STYLE
+    return min(len(COMP_STYLES) - 1, max(0, st))
+
+
+def _lin_db(x: np.ndarray) -> np.ndarray:
+    return 20.0 * np.log10(np.maximum(1.0 + x, 1.0e-9))
+
+
+def comp_character_gain_db(target_db: np.ndarray, sample_rate: float, attack_ms: float,
+                           release_ms: float, style: int = 0) -> np.ndarray:
+    """A character's reduction (dB, <= 0) for a static target (dB, <= 0), from rest."""
+    ka, kq, gap, kf, sa, s0, s1, lin_fast, lin_body, _, _ = COMP_CHARACTERS[style]
+    target = np.asarray(target_db, dtype=np.float64)
+    fast_release = float(release_ms) / kf
+    attack = float(attack_ms) * ka
+    fed = (10.0 ** (target / 20.0) - 1.0) if lin_fast else target
+    held = _gr_ballistics_db(fed, sample_rate, attack * kq, fast_release)
+    quick = _gr_ballistics_db(fed, sample_rate, attack, fast_release)
+    if lin_fast:
+        held, quick = _lin_db(held), _lin_db(quick)
+    fast = np.minimum(held, quick + gap)
+    fed = (10.0 ** (fast / 20.0) - 1.0) if lin_body else fast
+    body = _gr_ballistics_db(fed, sample_rate, sa, s0 + s1 * float(release_ms))
+    if lin_body:
+        body = _lin_db(body)
+    return np.minimum(fast, body)
+
+
+def comp_detector_db(peak: np.ndarray, sample_rate: float, style: int = 0) -> np.ndarray:
+    """The level a character's static law reads (dB): the linked peak, or - with a hold - the
+    recursion `det = max(|x|, det * a)` from rest, in closed form as the gate's detector is:
+    det_db[i] = i*L + cummax(lx - i*L)."""
+    lx = 20.0 * np.log10(np.maximum(np.asarray(peak, dtype=np.float64), 1.0e-12))
+    hold_ms = COMP_CHARACTERS[style][10]
+    if hold_ms <= 0.0 or lx.shape[0] == 0:
+        return lx
+    step_db = 20.0 * math.log10(math.exp(-1.0 / (sample_rate * hold_ms / 1000.0)))
+    j = np.arange(lx.shape[0], dtype=np.float64)
+    return j * step_db + np.maximum.accumulate(lx - j * step_db)
+
+
+def comp_static_db(over_db: np.ndarray, threshold_db: float, ratio: float,
+                   style: int = 0, knee_db: float = 0.0) -> np.ndarray:
+    """The reduction a character asks for at each level over the threshold (dB, <= 0). The KNEE
+    (2026-10-25, measured): on a textbook character the exact quadratic knee W wide, centred on the
+    threshold - the hard curve averaged over a W-wide window of level, which is what the reference
+    does there; CLEAN its own measured knee (comp_tables.clean_knee: the reference's default style
+    bends otherwise); a table character reads it off its table's knee axis (VOCAL has none)."""
+    over = np.asarray(over_db, dtype=np.float64)
+    table = COMP_CHARACTERS[style][9]
+    from . import comp_tables
+    if table is None or table == "clean_knee":
+        slope = 1.0 - 1.0 / max(float(ratio), 1.0)
+        w = max(float(knee_db), 0.0)
+        if w <= 0.0:
+            return np.where(over > 0.0, -over * slope, 0.0)
+        if table == "clean_knee":
+            return -comp_tables.clean_knee(over, w) * slope
+        knee = np.where(over <= -w / 2.0, 0.0,
+                        np.where(over >= w / 2.0, over, (over + w / 2.0) ** 2 / (2.0 * w)))
+        return -knee * slope
+    return comp_tables.row_gain_db(comp_tables.static_row(table, threshold_db, ratio, knee_db), over)
+
+
+def _character_comp(audio: np.ndarray, sample_rate: int, threshold_db: float,
+                    ratio: float, attack_ms: float, release_ms: float,
+                    makeup_db: float = 0.0, style: int = 0, knee_db: float = 0.0) -> np.ndarray:
+    """The compressor device (`comp`), on (channels, frames): a PEAK detector linked across the
+    channels, the character's static law and its ballistics. Returns the wet signal, makeup
+    included, in the input's dtype; a signal the law asks nothing of comes back untouched, bit for
+    bit - and so does a ratio of 1 in EVERY character (the knob's bottom is off: VOCAL's measured
+    law ignores the ratio, and the Mid / Side half nobody picked is seeded at 1:1 to pass through)."""
+    makeup = 10.0 ** (float(makeup_db) / 20.0)
+    if float(ratio) <= 1.0:
+        return audio if makeup == 1.0 else (audio * audio.dtype.type(makeup))
+    detector = np.max(np.abs(audio), axis=0).astype(np.float64)
+    over = comp_detector_db(detector, sample_rate, style) - float(threshold_db)
+    target = comp_static_db(over, threshold_db, ratio, style, knee_db)
+    if not np.any(target < 0.0):
+        return audio if makeup == 1.0 else (audio * audio.dtype.type(makeup))
+    env = comp_character_gain_db(target, sample_rate, attack_ms, release_ms, style)
     gain = (10.0 ** (env / 20.0)) * makeup
     return (audio * gain[np.newaxis, :]).astype(audio.dtype)
 
@@ -815,37 +797,22 @@ def _block_peak_db(audio: np.ndarray, sample_rate: int,
 
 
 # Saturation models (Phase 45) — all MEMORYLESS + deterministic, each normalized so the
-# small-signal slope is ~1 (drive 0 = unity) and the output is bounded. `tanh` is the
-# original. Shared by the single-band and the multiband (Saturn-style) saturator.
-SAT_TYPES = ("tanh", "warm", "tube", "hard")   # curve index 0..3 -> name
+# small-signal slope is 1 (drive 0 = unity) and the output is bounded. Since 2026-10-26 the four are
+# CHARACTERS fitted to a reference saturator (`sat_characters`: soft / tape / tube / heavy under the
+# stored words tanh / warm / tube / hard); tape and tube add a linear tone after the curve. Shared by
+# the single-band and the multiband (Saturn-style) saturator.
+SAT_TYPES = _satc.NAMES   # curve index 0..3 -> name
 
 
 def _curve_index(curve) -> int:
     """Saturation curve as an int index (0 tanh/1 warm/2 tube/3 hard); accepts the name too."""
-    if isinstance(curve, str):
-        return {"tanh": 0, "warm": 1, "tube": 2, "hard": 3}.get(curve, 0)
-    try:
-        return max(0, min(3, int(curve)))
-    except (TypeError, ValueError):
-        return 0
+    return _satc.curve_index(curve)
 
 
 def _waveshape(x: np.ndarray, drive_db: float, curve=0) -> np.ndarray:
-    """One saturation curve at `drive_db` (k = 10^(drive/20)), bounded + unity at 0.
-    `curve` is an int index 0..3 (or the name)."""
-    c = _curve_index(curve)
-    k = 10.0 ** (drive_db / 20.0)
-    if k <= 0.0:
-        return np.asarray(x, dtype=np.float64)
-    u = k * x
-    if c == 1:                                    # warm — arctan, softer/slower than tanh
-        return np.arctan(u) / k
-    if c == 2:   # tube — asymmetric (+ tanh, − atan: the NEGATIVE half is softer and LOUDER) → even harmonics + a DC offset
-        return np.where(u >= 0.0, np.tanh(u), np.arctan(u)) / k
-    if c == 3:                                     # hard — cubic soft-clip, ±1 beyond
-        cc = np.clip(u, -1.0, 1.0)
-        return (1.5 * cc - 0.5 * cc ** 3) / (1.5 * k)
-    return np.tanh(u) / k                          # tanh (default)
+    """One character's curve at `drive_db` (sat_characters.shape), bounded, its level law after it. The
+    tape and tube tones are NOT in here - they are linear, and run after it (`_satc.apply_tone`)."""
+    return _satc.shape(x, drive_db, curve)
 
 def _oversampled(x, os_n: int, shape):
     """Run a MEMORYLESS shaper at ``os_n``x (2/4/8) the sample rate and come back down.
@@ -873,16 +840,20 @@ def _saturate(audio: np.ndarray, entry: dict, sample_rate: int = 48000) -> np.nd
     has no `bands`; otherwise a 3-band (Saturn-style) saturator (needs sample_rate for the
     FFT split). `output_db` trims the output post-shaper; `type` selects the curve.
     `oversample` (2/4/8) runs the curve at N x the sample rate so its harmonics stop
-    folding back as aliasing (2026-09-06); 1 (default) is the original elementwise path,
-    bit-identical to every earlier render."""
+    folding back as aliasing (2026-09-06); the default is SAT_OVERSAMPLE_DEFAULT (2026-10-24,
+    it was 1), and 1 is the original elementwise path. The multiband form runs its whole split
+    at that rate."""
     if isinstance(entry.get("low"), dict):    # multiband: top-level low/mid/high (like mb_comp)
         return _multiband_saturate(audio, entry, sample_rate)
     # held to the table and the oversample snapped down to 1/2/4/8, as the native's parse does
     # (2026-10-17, the saturation audit: a mix outside 0..1 or an oversample of 3 rendered otherwise)
-    os_req = int(entry.get("oversample", 1) or 1)
+    os_req = int(entry.get("oversample", SAT_OVERSAMPLE_DEFAULT) or 1)
     os_n = 8 if os_req >= 8 else 4 if os_req >= 4 else 2 if os_req >= 2 else 1
-    drive = float(np.clip(entry.get("drive_db", 3.0), 1.0, 12.0))
-    out = _oversampled(audio, os_n, lambda v: _waveshape(v, drive, entry.get("curve", 0)))
+    drive = float(np.clip(entry.get("drive_db", _satc.DRIVE_DEFAULT_DB), *_satc.DRIVE_RANGE_DB))
+    curve = entry.get("curve", 0)
+    out = _oversampled(audio, os_n, lambda v: _waveshape(v, drive, curve))
+    # the character's tone (tape / tube), linear, at the base rate the shaper came back down to
+    out = _satc.apply_tone(out, curve, sample_rate, axis=0)
     output_db = float(np.clip(entry.get("output_db", 0.0), -12.0, 12.0))
     if output_db:
         out = out * 10.0 ** (output_db / 20.0)
@@ -892,6 +863,14 @@ def _saturate(audio: np.ndarray, entry: dict, sample_rate: int = 48000) -> np.nd
     return out
 
 
+def mb_sat_oversample(entry: dict) -> int:
+    """The factor a multiband saturation runs at: its `oversample` snapped to 1/2/4/8, never below
+    SAT_OVERSAMPLE_DEFAULT (2026-10-24)."""
+    os_req = int(entry.get("oversample", SAT_OVERSAMPLE_DEFAULT) or 1)
+    os_n = 8 if os_req >= 8 else 4 if os_req >= 4 else 2 if os_req >= 2 else 1
+    return max(os_n, SAT_OVERSAMPLE_DEFAULT)
+
+
 def _multiband_saturate(audio: np.ndarray, entry: dict, sample_rate: int) -> np.ndarray:
     """3-band saturator (Phase 45): the real 3-way LR4 split at movable crossovers (since 2026-10-17),
     a per-band waveshaper (drive / output / mix / optional per-band type), summed back,
@@ -899,7 +878,16 @@ def _multiband_saturate(audio: np.ndarray, entry: dict, sample_rate: int) -> np.
     its OWN drive; per-band mix < 1 keeps that band partly dry (parallel saturation)."""
     # _saturate works on (frames, channels) float64; the split works on (channels, frames).
     x = np.ascontiguousarray(audio.T)            # (channels, frames)
-    sr = sample_rate
+    frames = x.shape[-1]
+    # THE WHOLE DEVICE RUNS AT `oversample` x (2026-10-24): the split and the three shapers. At 1x
+    # a hard-driven high band folded its harmonics back as aliasing nearly as loud as the band.
+    # Never below SAT_OVERSAMPLE_DEFAULT: the form has no OS control on its face, and every one
+    # made before this stored 1 (MonitorChain's parse holds the same floor).
+    os_n = mb_sat_oversample(entry)
+    if os_n > 1:
+        from scipy.signal import resample_poly
+        x = resample_poly(x, os_n, 1, axis=-1)
+    sr = sample_rate * os_n
     default_lo, default_hi = MB_CROSSOVERS_HZ
     lo_x = float(np.clip(entry.get("crossover_lo_hz", default_lo), 30.0, 4000.0))
     hi_x = float(np.clip(entry.get("crossover_hi_hz", default_hi), 200.0, 16000.0))
@@ -912,7 +900,7 @@ def _multiband_saturate(audio: np.ndarray, entry: dict, sample_rate: int) -> np.
     # (`monitor_chain_params` fills the gaps). Read the same way here — a missing band
     # inherits the entry's flat drive, exactly what `set_sat_multiband` seeds it from — so a
     # half-written entry renders like the monitor instead of raising KeyError mid-render.
-    flat_drive = float(entry.get("drive_db", 3.0))   # the native's default too (the multiband saturation audit)
+    flat_drive = float(entry.get("drive_db", _satc.DRIVE_DEFAULT_DB))   # the native's default too (the multiband saturation audit)
     # The same tapered + zero-padded split mb_comp and OTT moved to on 2026-09-08 (audit
     # 03-F1). The hard rectangular mask this replaces summed back perfectly but each band
     # ALONE carried audible content inside bit-exact digital silence, and the leakage only
@@ -925,12 +913,19 @@ def _multiband_saturate(audio: np.ndarray, entry: dict, sample_rate: int) -> np.
                                        ("high", hi_x, None)), split):
         p = entry.get(name) or {}
         pc = p.get("curve")                                      # per-band curve, else the global one
-        drive = float(np.clip(p.get("drive_db", flat_drive), 0.0, 24.0))   # held as the native's parse holds it
-        shaped = _waveshape(band, drive, gcurve if pc is None else pc)
+        drive = float(np.clip(p.get("drive_db", flat_drive), *_satc.BAND_DRIVE_RANGE_DB))   # held as the native's parse holds it
+        bc = gcurve if pc is None else pc
+        # the band's character, then its tone at the rate the band runs at (the oversampled one)
+        shaped = _satc.apply_tone(_waveshape(band, drive, bc), bc, sr, axis=-1)
         if p.get("output_db"):
             shaped = shaped * 10.0 ** (float(np.clip(p["output_db"], -12.0, 12.0)) / 20.0)
         mix = float(np.clip(p.get("mix", 1.0), 0.0, 1.0))
         out += shaped * mix + band * (1.0 - mix)                 # per-band parallel mix
+    if os_n > 1:
+        from scipy.signal import resample_poly
+        out = resample_poly(out, 1, os_n, axis=-1)[:, :frames]
+    # NO DC blocker after the sum (2026-10-26, measured on the reference's multiband form: it has
+    # none): the one asymmetric curve, the tube, takes its own DC out in its tone, band by band.
     wet = out.T                                                  # (frames, channels)
     gmix = float(np.clip(entry.get("mix", 1.0), 0.0, 1.0))
     return wet * gmix + audio * (1.0 - gmix) if gmix < 1.0 else wet
@@ -1020,72 +1015,11 @@ def _lagrange3_taps(x: np.ndarray, delay: np.ndarray, offset: int = 0) -> np.nda
 
 
 def _chorus(audio: np.ndarray, sample_rate: int, entry: dict) -> np.ndarray:
-    """Chorus / ensemble (2026-09-06) on (frames, channels) float64.
-
-    One to three voices read the SAME dry signal at a delay swept around `delay_ms` by
-    `depth` (`delay_ms * (1 + depth*sin)`), the voices spread evenly around the LFO cycle and
-    the right channel offset by `stereo_deg` — that offset is what makes it wide rather than
-    merely detuned. The voices are summed and scaled by sqrt(voices) (NOT averaged — see the
-    note at the sum: decorrelated voices add in POWER, so dividing by the count would cost
-    6 dB between one voice and three), then blended against the dry by `mix`.
-
-    Deliberately has NO feedback: feedback through a short swept delay is a FLANGER, which is
-    its own device. Without it every read is of the dry input, so the whole thing is one
-    gather — vectorised, deterministic, and with no recursion to make a render slow."""
-    x = np.asarray(audio, dtype=np.float64)
-    if x.ndim == 1:
-        x = x[:, np.newaxis]
-    n, nch = x.shape
-    if n == 0:
-        return x
-    # every parameter held to the native parse's range (MonitorChain.cpp, "chorus"), and the line to
-    # the one ceiling both engines size (audit 2026-10-17: rate, delay and width were read raw here)
-    rate = float(np.clip(entry.get("rate_hz", 0.8), 0.01, 10.0))
-    depth = float(np.clip(entry.get("depth", 0.25), 0.0, 1.0))
-    centre = float(np.clip(entry.get("delay_ms", 20.0), 1.0, 50.0))
-    voices = int(np.clip(int(entry.get("voices", 1) or 1), 1, 3))
-    # stereo_deg is applied per VOICE SPACING, not per cycle — see the note in the loop.
-    spread = float(np.clip(entry.get("stereo_deg", 90.0), 0.0, 180.0)) / 360.0
-    mix = float(np.clip(entry.get("mix", 0.5), 0.0, 1.0))
-
-    max_d = min((centre * (1.0 + depth) / 1000.0) * sample_rate + 4.0,
-                float(int(MODULATION_LINE_SECONDS * sample_rate) + 8 - 1))
-    wet = np.zeros_like(x)
-    # CHUNKED (2026-09-06 review). The gather is right; doing it whole-file was not. Unchunked,
-    # `_lagrange3_taps` holds idx / d_int / f / base plus j, clip(j) and the gathered result for
-    # each of four taps, all full-length float64 and all live at once — measured 2894 MB of
-    # temporaries on a 5-minute stereo stem, 12.6x the input, on `render_stem`'s normal path (a
-    # ten-minute stem is ~5.8 GB on top of the render cache). There is no feedback, so each
-    # output sample depends only on the INPUT: chunking the output range and gathering from the
-    # whole channel at absolute indices is sample-for-sample what the unchunked version produced.
-    chunk = 1 << 19          # ~11 s at 48 kHz; per-chunk temporaries are ~40 MB regardless of length
-    for ch in range(nch):
-        # the stereo offset is a fraction of the VOICE SPACING, not of the whole cycle.
-        # The voices sit on a uniform lattice of spacing 1/voices, and a uniform lattice is
-        # INVARIANT under a shift of its own spacing — so a whole-cycle offset that happened to be
-        # a multiple of 1/voices gave the right channel the SAME set of phases as the left and the
-        # summed output came out bit-identical mono. Measured: 1-corr(L,R) = 0.000 at
-        # (180 deg, 2 voices) — the top of the Width knob on the default voice count — and at
-        # (120 deg, 3 voices) (2026-09-06 review). Scaling by 1/voices maps the user's 0..180 onto
-        # 0..half the voice spacing, which is exactly where decorrelation peaks: monotonic, never
-        # degenerate, and identical to the old behaviour at voices = 1.
-        ch_off = (spread / voices) if ch == 1 else 0.0
-        col = x[:, ch]
-        # sqrt(voices), not voices: the voices are decorrelated (that is the whole point of
-        # spreading them around the LFO cycle), so they sum in POWER. Dividing by the count
-        # cost 6 dB between one voice and three — an ensemble would be a hidden gain move.
-        norm = np.sqrt(voices)
-        for start in range(0, n, chunk):
-            stop = min(start + chunk, n)
-            acc = np.zeros(stop - start, dtype=np.float64)
-            for v in range(voices):
-                ph = _lfo_phase(stop - start, sample_rate, rate, ch_off + (v / voices),
-                                offset=start)
-                d_ms = centre * (1.0 + depth * np.sin(ph))
-                d = np.clip(d_ms / 1000.0 * sample_rate, CHORUS_MIN_DELAY_SAMPLES, max_d)
-                acc += _lagrange3_taps(col, d, offset=start)
-            wet[start:stop, ch] = acc / norm
-    return wet * mix + x * (1.0 - mix) if mix < 1.0 else wet
+    """Chorus (2026-10-28: fitted to a reference two-line chorus, with its knob set): MODE I / II /
+    I+II, STEREO, MIX, VOLUME - `chorus_law.apply`, which says how it was measured. It reads its
+    lines through `_lagrange3_taps` on the host timeline, as the flanger does."""
+    from .chorus_law import apply
+    return apply(audio, sample_rate, entry)
 
 
 FLANGER_MIN_DELAY_SAMPLES = 4.0   # the same stencil floor the chorus keeps, for the same reason
@@ -1331,7 +1265,7 @@ def _auto_filter(audio: np.ndarray, sample_rate: int, entry: dict, tempo=None,
                                 follower=_rising_follower)
     g = np.tan(np.pi * fc / float(sample_rate))
     y = x
-    for q in auto_filter_qs(v["resonance"], v["slope_db_oct"]):
+    for q in auto_filter_qs(v["filter_type"], v["slope_db_oct"], v["resonance"]):
         k = 1.0 / q
         y = _svf_sweep(y, g, k, auto_filter_outputs(v["filter_type"], k))
     mix = v["mix"]
@@ -1346,18 +1280,25 @@ def _tempo_of(session: Session):
     return TempoMap.from_fact(fact) if fact else None
 
 
+def od_shape(v, k: float):
+    """The overdrive's clipper: the exponential soft-clip sign(u)(1 - e^-|u|) at u = k·v + OD_BIAS,
+    the bias's own output taken back out and the slope at 0 scaled to 1 - bounded, zero at zero,
+    unity small-signal gain, and one side clipping sooner than the other (even harmonics)."""
+    b = OD_BIAS
+    u = k * np.asarray(v, dtype=np.float64) + b
+    f0 = 1.0 - np.exp(-b)
+    return (np.sign(u) * (1.0 - np.exp(-np.abs(u))) - f0) * np.exp(b) / k
+
+
 def _overdrive(audio: np.ndarray, sample_rate: int, entry: dict) -> np.ndarray:
-    """Overdrive distortion (2026-07-07): the classic drive-pedal topology on
-    (frames, channels) float64 — an optional resonant band-pass pre-filter
-    (`filter_on`; the JUCE-transcribed `biquad_coeffs("bandpass")`, so the
-    native transcription is coefficient-identical), an exponential soft-clipper
-    y = sign(x)·(1 − e^(−|k·x|))/k at k = 10^(drive/20) (memoryless, unity
-    small-signal slope, bounded — peaks compressed, no loudness cheat), a
-    one-pole `tone` tilt around OD_TONE_HZ (0 dark / 0.5 = exact passthrough /
-    1 bright), a post `output_db` trim, then dry/wet `mix` against the
-    UNfiltered input. `oversample` (2/4/8) runs the soft-clipper at N x the sample
-    rate so its harmonics stop folding back as aliasing (2026-09-06); 1 (default) is
-    the original path, bit-identical to every earlier render.
+    """Overdrive distortion (2026-07-07; voiced 2026-10-24) on (frames, channels) float64: an
+    optional resonant band-pass pre-filter (`filter_on`; the JUCE-transcribed
+    `biquad_coeffs("bandpass")`, so the native transcription is coefficient-identical), a low
+    shelf at OD_EMPHASIS_HZ cutting OD_EMPHASIS_DB (the lows clip less), the biased exponential
+    soft-clipper `od_shape` at k = 10^(drive/20), run at `oversample` x (default
+    OD_OVERSAMPLE_DEFAULT), the shelf given back, a two-pole roll-off at OD_FIZZ_HZ, a DC blocker
+    at SHAPER_DC_HZ, a one-pole `tone` tilt around OD_TONE_HZ (0 dark / 0.5 = exact passthrough /
+    1 bright), a post `output_db` trim, then dry/wet `mix` against the UNfiltered input.
     Deterministic (fresh filter state per render)."""
     from scipy.signal import lfilter
     # Every value held to the table as the native's parse holds it (2026-10-17, the overdrive audit)
@@ -1367,13 +1308,33 @@ def _overdrive(audio: np.ndarray, sample_rate: int, entry: dict) -> np.ndarray:
         b, a = biquad_coeffs("bandpass", sample_rate, freq,
                              float(np.clip(entry.get("q", 0.7), 0.3, 8.0)), 0.0)
         x = lfilter(b, a, x, axis=0)
-    k = 10.0 ** (float(np.clip(entry.get("drive_db", 12.0), 0.0, 36.0)) / 20.0)
-    # Only the SHAPER is oversampled: the band-pass and the tone tilt are linear and
-    # alias nothing, and running them at the base rate keeps them coefficient-identical
-    # to the native transcription (the whole point of biquad_coeffs).
-    shaped = _oversampled(x, int(entry.get("oversample", 1) or 1),
-                          lambda v: (np.sign(v) * (1.0 - np.exp(-np.abs(k * v))) / k
-                                     if k > 0.0 else v))
+    drive_db = float(np.clip(entry.get("drive_db", 12.0), 0.0, 36.0))
+    # Only the SHAPER is oversampled: the filters are linear and alias nothing, and running
+    # them at the base rate keeps them coefficient-identical to the native transcription
+    # (the whole point of biquad_coeffs).
+    os_req = int(entry.get("oversample", OD_OVERSAMPLE_DEFAULT) or 1)
+    os_n = 8 if os_req >= 8 else 4 if os_req >= 4 else 2 if os_req >= 2 else 1
+    character = _odc.character_index(entry.get("character", _odc.DEFAULT))
+    if character == 0:
+        # the PEDAL, as it always was
+        k = 10.0 ** (drive_db / 20.0)
+        x = lfilter(*biquad_coeffs("low_shelf", sample_rate, OD_EMPHASIS_HZ, 0.707, -OD_EMPHASIS_DB), x, axis=0)
+        shaped = _oversampled(x, os_n, lambda v: od_shape(v, k))
+        shaped = lfilter(*biquad_coeffs("low_shelf", sample_rate, OD_EMPHASIS_HZ, 0.707, OD_EMPHASIS_DB), shaped, axis=0)
+        shaped = lfilter(*biquad_coeffs("lpf2", sample_rate, OD_FIZZ_HZ, 0.707, 0.0), shaped, axis=0)
+        shaped = lfilter(*biquad_coeffs("hpf", sample_rate, SHAPER_DC_HZ, 0.707, 0.0), shaped, axis=0)
+    else:
+        # an AMP (od_characters, 2026-10-26): its pre filters, its curve at s, its post filters,
+        # its cabinet's reflections, its trim - the post high-passes take the curve's DC out
+        for kind, f, q, g in _odc.pre_sections(character, sample_rate):
+            x = lfilter(*biquad_coeffs(kind, sample_rate, f, q, g), x, axis=0)
+        amp = _odc.AMPS[character]
+        s = 10.0 ** ((drive_db + amp["s0_db"]) / 20.0)
+        lev = 10.0 ** (_odc.level_db(drive_db, character) / 20.0)   # its level law (2026-10-26)
+        shaped = _oversampled(x, os_n, lambda v: _odc.amp_curve(v, s, character) * lev)
+        for kind, f, q, g in _odc.post_sections(character, sample_rate):
+            shaped = lfilter(*biquad_coeffs(kind, sample_rate, f, q, g), shaped, axis=0)
+        shaped = _odc.cab(shaped, character, sample_rate, axis=0) * 10.0 ** (_odc.TRIMS_DB[character] / 20.0)
     tone = float(np.clip(entry.get("tone", 0.5), 0.0, 1.0))
     if tone != 0.5:
         lp = _one_pole_lp(shaped, sample_rate, OD_TONE_HZ)
@@ -1419,33 +1380,14 @@ def _eq_entry(audio: np.ndarray, sample_rate: int, entry: dict) -> np.ndarray:
 
 
 def _clip(audio: np.ndarray, entry: dict) -> np.ndarray:
-    """Pre-limiter clipper (Phase 41; v2 2026-07-05 adds oversampling) on
-    (frames, channels): blend a soft tanh knee (`hardness` 0) and a hard brickwall
-    (`hardness` 1) at the linear `threshold_db`. `oversample` (2/4/8) resamples up
-    (resample_poly — deterministic, delay-compensated linear phase), shapes at the
-    high rate, and resamples back — far less inter-sample overshoot and aliasing, NOT a
-    true-peak ceiling: the decimation filter rings, and a drum train clipped at 4x comes
-    out ~3 dB over the threshold (the limiter holds the ceiling). 1 (default) is the original memoryless elementwise path,
-    bit-identical to pre-v2 renders. Never adds gain (before `output_db`); the
-    master clipper sits right before the limiter."""
-    # held to the table, as the native's parse holds them (2026-10-17, the clipper audit)
-    t = 10.0 ** (float(np.clip(entry["threshold_db"], -12.0, 0.0)) / 20.0)
-    hardness = float(np.clip(entry.get("hardness", 0.5), 0.0, 1.0))
-    os_n = int(entry.get("oversample", 1) or 1)
-    x = audio
-    if os_n > 1:
-        from scipy.signal import resample_poly
-        x = resample_poly(np.asarray(audio, dtype=np.float64), os_n, 1, axis=0)
-    soft = t * np.tanh(x / t)
-    hard = np.clip(x, -t, t)
-    out = (1.0 - hardness) * soft + hardness * hard
-    if os_n > 1:
-        from scipy.signal import resample_poly
-        out = resample_poly(out, 1, os_n, axis=0)[: audio.shape[0]]
-    output_db = float(np.clip(entry.get("output_db", 0.0), -12.0, 12.0))
-    if output_db:
-        out = out * 10.0 ** (output_db / 20.0)
-    return out
+    """The clipper (2026-10-28, `clip_law`: fitted to a reference clipper) on (frames, channels):
+    GAIN, then a quadratic knee of SOFTNESS centred on the CLIP ceiling, each channel on its own; at
+    OVERSAMPLE 2 the knee runs at 2x (resample_poly) and the output is held under 0 dBFS. An entry
+    saved with the old knobs (threshold / hardness / output) is read through `clip_law.from_legacy`.
+    Not a ceiling below full scale when oversampled: the resampling rings past CLIP, and on the
+    master the limiter after it holds the true peak."""
+    from .clip_law import apply
+    return apply(audio, entry)
 
 
 def _transient(audio: np.ndarray, sample_rate: int, entry: dict) -> np.ndarray:
@@ -1489,57 +1431,45 @@ def _duck_key_heard(session, key) -> bool:
     return rec is not None and not rec.get("excluded")
 
 
-def _duck(audio: np.ndarray, sample_rate: int, key_audio: np.ndarray,
-          entry: dict, key_offset_s: float = 0.0) -> np.ndarray:
-    """Sidechain duck: full depth_db reduction while the key's per-sample level is
-    above threshold_db, smoothed by attack/release one-poles. The key arrives
-    already rendered (duck-free — see render_stem).
+def _key_audio(key_audio: np.ndarray, n: int, sample_rate: int,
+               key_offset_s: float = 0.0) -> np.ndarray:
+    """A trigger's audio (frames, channels) laid on the keyed stem's timeline, as `_key_level`
+    lays its level: `key_offset_s` = the key stem's `capture_start_s` minus this one's."""
+    key = np.asarray(key_audio, dtype=np.float64)
+    if key.ndim == 1:
+        key = key[:, np.newaxis]
+    shift = int(round(float(key_offset_s) * sample_rate))
+    if shift > 0:
+        key = np.concatenate([np.zeros((shift, key.shape[1])), key])
+    elif shift < 0:
+        key = key[-shift:]
+    out = np.zeros((n, key.shape[1]), dtype=np.float64)
+    m = min(n, key.shape[0])
+    out[:m] = key[:m]
+    return out
 
-    `key_offset_s` = the key stem's `capture_start_s` minus the ducked stem's: two
-    stems captured separately in the VST start at different host times, and the key's
-    sample 0 is that many seconds into the ducked stem's timeline. `set_stem_capture_start`
-    promised this alignment for years while nothing in the render read the field — the
-    plugin's live duck was host-aligned and the export ducked early (2026-09-01 sweep, P1)."""
-    # THE DAW'S LAW, transcribed (`MonitorChain::applyDuck`, 2026-10-17): the key's PER-SAMPLE
-    # level - the louder channel's |x| - over threshold_db asks for depth_db, and the reduction
-    # follows the native one-pole (attack toward more, release back; `_gr_ballistics_db`, the
-    # comp's recursion, from no reduction). It read the key's 5 ms block RMS, linked by the louder
-    # channel, against a native that averaged the channels per sample: a tonal key within ~3 dB of
-    # the threshold ducked in the DAW and its export and not here, and a key panned hard to one
-    # side ducked here and not in the DAW.
-    lev = _key_level(key_audio, audio.shape[0], sample_rate, key_offset_s)
-    level_db = 20.0 * np.log10(np.maximum(lev.astype(np.float64), 1.0e-12))
-    target = np.where(level_db > float(entry["threshold_db"]), float(entry["depth_db"]), 0.0)
-    gain_db = _gr_ballistics_db(-target, sample_rate,
-                                float(entry["attack_ms"]), float(entry["release_ms"]))
-    return audio * (10.0 ** (gain_db / 20.0))[:, np.newaxis]
+
+def _duck(audio: np.ndarray, sample_rate: int, entry: dict, tempo=None,
+          key_audio: Optional[np.ndarray] = None, key_offset_s: float = 0.0) -> np.ndarray:
+    """Duck (2026-10-28): the law in `duck_law` - a drawn curve on the song's grid (SYNC) or
+    restarted by each hit of the trigger track (TRACK; `key_audio` = the trigger rendered without
+    its own keyed devices, None when no trigger is heard: the duck then rests at unity), scaled by
+    the mix, the low band alone with BAND. The native runs the same law (`MonitorChain::applyDuck`).
+    (Until 2026-10-28: full depth_db while the key was over threshold_db, attack / release one-poles.)"""
+    from . import duck_law
+    key = None if key_audio is None else _key_audio(key_audio, audio.shape[0], sample_rate,
+                                                    key_offset_s)
+    return duck_law.apply(audio, sample_rate, entry, tempo=tempo, key=key).astype(audio.dtype)
 
 
 def _dynamic_eq(audio: np.ndarray, sample_rate: int, entry: dict) -> np.ndarray:
-    """Dynamic EQ (Phase 38) on (channels, frames) float32 - since 2026-10-17 the DAW's law
-    (`MonitorChain::applyDynamicEq`): the band is isolated by the native's own band-pass
-    (`biquad_coeffs`, float64), its linked per-sample peak is followed LINEARLY from rest
-    (`_rising_follower`: attack when it rises), and over the threshold the band moves by
-    over x (1 - 1/ratio), held to gain_db; only the band's delta is recombined (x + band x (g - 1)).
-    The SIGN of gain_db sets direction: negative = downward cut, positive = upward boost (the user
-    co-edit can choose either; the agent stays a cut - its action model caps gain_db <= 0).
-    (Until 2026-10-17: a zero-phase Gaussian FFT band and a 5 ms block RMS in dB here, against a
-    band-pass and a per-sample dB follower there - a 6 kHz band's threshold sat 6.5 dB off.)"""
-    if audio.shape[1] == 0 or entry.get("ratio", 1.0) <= 1.0 or not float(entry.get("gain_db", 0.0)):
-        return audio
-    from scipy.signal import lfilter
-    x = audio.astype(np.float64)
-    b, a = biquad_coeffs("bandpass", sample_rate, float(entry["freq_hz"]), float(entry["q"]), 0.0)
-    band = lfilter(b, a, x, axis=-1)
-    peak = np.max(np.abs(band.astype(np.float32)), axis=0).astype(np.float64)
-    env = _rising_follower(peak, sample_rate, float(entry["attack_ms"]), float(entry["release_ms"]))
-    level_db = 20.0 * np.log10(np.maximum(env, 1.0e-6))
-    move_db = np.maximum(level_db - float(entry["threshold_db"]), 0.0) \
-        * (1.0 - 1.0 / float(entry["ratio"]))                # magnitude over threshold (>= 0)
-    target = float(entry["gain_db"])                          # signed: - cut / + boost
-    gain_db = np.clip(np.sign(target) * move_db, min(0.0, target), max(0.0, target))
-    out = x + band * (10.0 ** (gain_db / 20.0) - 1.0)[np.newaxis, :]
-    return np.ascontiguousarray(out).astype(np.float32)
+    """Dynamic EQ (Phase 38) on (channels, frames) float32: the law fitted to a reference EQ's dynamic
+    band (`dyneq_law`, 2026-10-27; the native runs the same, `MonitorChain::applyDynamicEq`). The
+    SIGN of gain_db (the RANGE) sets direction: negative = downward cut, positive = upward boost (the
+    user co-edit can choose either; the agent stays a cut). 0 is off, bit for bit. (Until 2026-10-27:
+    a ratio over the threshold, and the band's delta added back as x + band x (g - 1).)"""
+    from .dyneq_law import apply
+    return apply(audio, sample_rate, entry)
 
 
 def _range_shape(n_frames: int, sample_rate: int, start_s: float,
@@ -1623,15 +1553,26 @@ def _channel_apply(audio: np.ndarray, channel: str, fn) -> np.ndarray:
     return _ms_apply(audio, channel, fn)
 
 
-def _width(audio: np.ndarray, width: float) -> np.ndarray:
-    """Mid/side width scaling on stereo; no-op on mono (no side signal). Held to 0..2, as the
-    native holds it (the stereo width audit, SW7: a stored 5 played 5, a -1 swapped L and R)."""
+def _width(audio: np.ndarray, width: float, stereoize: bool = False,
+           stereoize_ms: float = 6.0, sample_rate: float = 48000.0) -> np.ndarray:
+    """The Imager: mid/side width scaling on stereo, plus STEREOIZE above unity (side made from
+    the mid through `stereoize_law`'s velvet taps - the mid is never touched). No-op on mono (no
+    side signal). Held to 0..2, as the native holds it (the stereo width audit, SW7: a stored 5
+    played 5, a -1 swapped L and R)."""
     width = min(2.0, max(0.0, float(width))) if math.isfinite(float(width)) else 1.0
     if width == 1.0 or audio.shape[1] != 2:
         return audio
+    if stereoize and width > 1.0:
+        return stereoize_law.apply(audio, sample_rate, width, True, stereoize_ms)
     mid = (audio[:, 0] + audio[:, 1]) / 2.0
     side = (audio[:, 0] - audio[:, 1]) / 2.0 * width
     return np.stack([mid + side, mid - side], axis=1)
+
+
+def _width_entry(audio: np.ndarray, entry: dict, sample_rate: float) -> np.ndarray:
+    """A `width` chain entry (a bus strip's, the master's): its width and its stereoize."""
+    return _width(audio, entry["width"], bool(entry.get("stereoize", False)),
+                  float(entry.get("stereoize_ms", 6.0)), sample_rate)
 
 
 def match_eq_fir(band_gains_db: dict, sample_rate: int) -> np.ndarray:
@@ -1787,53 +1728,23 @@ def _multiband_comp(audio: np.ndarray, sample_rate: int, entry: dict,
 
 def _ott(audio: np.ndarray, sample_rate: int, entry: dict,
          telemetry: Optional[list] = None) -> np.ndarray:
-    """OTT-style 3-band upward+downward compressor (2026-07-07) - since 2026-10-17 the DAW's
-    law (`MonitorChain::applyOtt`): the real 3-way LR4 split at the movable crossovers
-    (`_lr4_three_way`, the multiband compressor's), each band's linked per-sample peak followed
-    LINEARLY from rest (`_rising_follower`: attack when it rises, release when it falls) and
-    levelled TOWARD the fixed internal target - cut above it (scaled by the band's `down`),
-    boosted below it (scaled by `up`) - the whole gain curve scaled by `depth`. `time` scales
-    the shared attack/release; `in_gain_db`/`out_gain_db` bracket the device; per-band
-    `gain_db` is a post gain (makeup - excluded from telemetry). (channels, frames) float32
-    in/out, deterministic. (Until 2026-10-17: a tapered FFT split and a 5 ms block RMS
-    smoothed in dB, against the DAW's complement split and peak follower.)"""
-    in_gain_db = float(np.clip(entry.get("in_gain_db", 0.0), -12.0, 12.0))   # the native's parse
-    x = audio.astype(np.float64)
-    if in_gain_db:
-        x = x * 10.0 ** (in_gain_db / 20.0)
-    depth = float(np.clip(entry.get("depth", 0.5), 0.0, 1.0))
-    tscale = float(np.clip(entry.get("time", 1.0), 0.1, 4.0))
-    default_lo, default_hi = MB_CROSSOVERS_HZ
-    lo_x = float(np.clip(entry.get("crossover_lo_hz", default_lo), 30.0, 4000.0))
-    hi_x = float(np.clip(entry.get("crossover_hi_hz", default_hi), 200.0, 16000.0))
-    if hi_x <= lo_x:                       # keep the mid band non-empty (the UI clamps too)
-        hi_x = lo_x * 1.5
-    out = np.zeros(x.shape, dtype=np.float64)
-    pre_makeup = np.zeros(x.shape, dtype=np.float64) \
-        if telemetry is not None else None
-    atk_ms, rel_ms = OTT_BASE_ATTACK_MS * tscale, OTT_BASE_RELEASE_MS * tscale
-    for name, band in zip(("low", "mid", "high"),
-                          _lr4_three_way(x, sample_rate, lo_x, hi_x)):
-        p = entry.get(name) or {}
-        up = float(np.clip(p.get("up", 1.0), 0.0, 1.0))
-        down = float(np.clip(p.get("down", 1.0), 0.0, 1.0))
-        env = _rising_follower(np.max(np.abs(band), axis=0), sample_rate, atk_ms, rel_ms)
-        delta = OTT_TARGET_DB - 20.0 * np.log10(np.maximum(env, 1.0e-6))   # + quiet, - loud
-        boost = np.minimum(np.maximum(delta, 0.0) * OTT_UP_SLOPE, OTT_MAX_BOOST_DB) * up
-        cut = np.maximum(np.minimum(delta, 0.0) * OTT_DOWN_SLOPE, -OTT_MAX_CUT_DB) * down
-        levelled = band * (10.0 ** (depth * (boost + cut) / 20.0))[np.newaxis, :]
-        if pre_makeup is not None:
-            pre_makeup += levelled
-        band_gain_db = float(np.clip(p.get("gain_db", 0.0), -12.0, 12.0))
-        out += levelled * 10.0 ** (band_gain_db / 20.0) if band_gain_db \
-            else levelled
+    """OTT, three-band upward + downward compression - since 2026-10-28 the law fitted to a reference
+    OTT (`ott_law`, which says how it was measured; `MonitorChain::applyOtt` plays the same law): the
+    DAW's LR4 split at 88.3 Hz / 2.5 kHz, each band's linked RMS detector, a fixed makeup, an upward
+    side below one threshold and a downward side above another, scaled by `depth`. `time` scales the
+    release; `in_gain_db` / `out_gain_db` bracket the device; per-band `gain_db` is a post gain
+    (makeup - excluded from telemetry). (channels, frames) float32 in/out, deterministic. (Until
+    2026-10-28: one fixed -30 dB target, a peak follower, 12 / 120 ms, crossovers at 150 Hz / 2 kHz.)"""
+    from .ott_law import process as ott_process
+    pre = [] if telemetry is not None else None
+    out = ott_process(audio.astype(np.float64), sample_rate, entry, telemetry_pre=pre)
     if telemetry is not None:
-        stats = _gr_telemetry("ott", x.T, pre_makeup.T, sample_rate)
+        from .ott_law import values as ott_values
+        g = ott_values(entry)["in_gain_db"]
+        x = audio.astype(np.float64) * (10.0 ** (g / 20.0) if g else 1.0)
+        stats = _gr_telemetry("ott", x.T, pre[0].T, sample_rate)
         if stats is not None:
             telemetry.append(stats)
-    out_gain_db = float(np.clip(entry.get("out_gain_db", 0.0), -12.0, 12.0))
-    if out_gain_db:
-        out = out * 10.0 ** (out_gain_db / 20.0)
     return out.astype(np.float32)
 
 
@@ -1857,118 +1768,6 @@ def _utility(audio: np.ndarray, sample_rate: int, entry: dict) -> np.ndarray:
     return one_law(audio, sample_rate, entry)
 
 
-# A 4th-order Butterworth's two sections (Q = 1/(2cos(pi/8)), 1/(2cos(3pi/8))); run twice it is a
-# Linkwitz-Riley 8th-order (48 dB/oct) crossover. MonitorChain's band_width parse uses these Qs.
-_LR8_Q = (0.54119610014619701, 1.3065629648763766)
-
-
-def _band_width_edges(entry: dict, sample_rate: float) -> tuple[float, float]:
-    """The band an entry names, as the native resolves it (`bandwidthspec::edges`, DeviceSpecs.h):
-    lo_hz + hi_hz (a free scrub), else the Phase 15 label, else a legacy freq_hz + q, else presence;
-    held to 20 Hz .. 0.45 x the rate (20 kHz at most), the top 1.05x to 100x the bottom."""
-    e_lo, e_hi = float(entry.get("lo_hz") or 0.0), float(entry.get("hi_hz") or 0.0)
-    fc, q = float(entry.get("freq_hz") or 0.0), float(entry.get("q") or 0.0)
-    band = entry.get("band")
-    if math.isfinite(e_lo) and math.isfinite(e_hi) and e_lo > 0.0 and e_hi > e_lo:
-        lo, hi = e_lo, e_hi
-    elif band in BAND_LABELS:
-        i = BAND_LABELS.index(band)
-        lo, hi = float(BAND_EDGES_HZ[i]), float(BAND_EDGES_HZ[i + 1])
-    elif math.isfinite(fc) and math.isfinite(q) and fc > 0.0 and q > 0.0:
-        lo = fc * (math.sqrt(1.0 + 1.0 / (4.0 * q * q)) - 1.0 / (2.0 * q))
-        hi = lo + fc / q
-    else:
-        lo, hi = 2000.0, 4000.0
-    top = min(20000.0, 0.45 * (sample_rate if sample_rate > 0 else 48000.0))
-    lo = max(20.0, min(lo, top / 1.05))
-    hi = max(lo * 1.05, min(min(hi, lo * 100.0), top))
-    return lo, hi
-
-
-def _lr8_three_way(x: np.ndarray, sample_rate: int, lo_hz: float, hi_hz: float) -> tuple:
-    """The band width's split (MonitorChain::applyBandWidth), on (channels, frames) float64: the
-    3-way LR4 split of `_lr4_three_way` at 48 dB/oct - each crossover the Butterworth's two sections
-    run twice. low = AP@hi(LP@lo x), mid = LP@hi(HP@lo x), high = HP@hi(HP@lo x)."""
-    from scipy.signal import lfilter
-
-    def lr8(v, shape, f):
-        for q in _LR8_Q + _LR8_Q:
-            b, a = biquad_coeffs(shape, sample_rate, f, q, 0.0)
-            v = lfilter(b, a, v, axis=-1)
-        return v
-    low_raw = lr8(x, "lpf2", lo_hz)
-    rest = lr8(x, "hpf2", lo_hz)
-    low = lr8(low_raw, "lpf2", hi_hz) + lr8(low_raw, "hpf2", hi_hz)   # the allpass
-    return low, lr8(rest, "lpf2", hi_hz), lr8(rest, "hpf2", hi_hz)
-
-
-def _band_width_scale(audio: np.ndarray, sample_rate: int, entry: dict) -> np.ndarray:
-    """Per-band width on (frames, channels) float64 - the DAW's law (2026-10-21, the band width
-    audit; James's pick): a real 3-way LR8 split at the band's edges, the band's SIDE scaled by the
-    width, low + high + band summed. Causal and one law with MonitorChain::applyBandWidth; the
-    whole signal passes the split's allpass, width 1 included. Until then this was a whole-file
-    FFT mask: the band's side gone at width 0 here and only ~6.5 dB down in the DAW's export, and
-    non-causal (a hit leaked into the silence before it and wrapped to the file's start).
-    Mono-sum preserving in magnitude; no-op on mono."""
-    if audio.shape[1] != 2:
-        return audio
-    lo, hi = _band_width_edges(entry, sample_rate)
-    w = float(entry.get("width", 1.0))
-    w = min(2.0, max(0.0, w if math.isfinite(w) else 1.0))
-    low, mid, high = _lr8_three_way(np.asarray(audio, dtype=np.float64).T, sample_rate, lo, hi)
-    m = 0.5 * (mid[0] + mid[1])
-    sd = 0.5 * (mid[0] - mid[1]) * w
-    out = np.stack([(low[0] + high[0]) + (m + sd), (low[1] + high[1]) + (m - sd)], axis=1)
-    return out
-
-
-def _imager(audio: np.ndarray, sample_rate: int, entry: dict) -> np.ndarray:
-    """3-band stereo imager on (frames, channels) float64 - the DAW's law (2026-10-21, the imager
-    audit; James's picks: LR8, and always split): the band width's real 3-way LR8 split at the
-    crossovers (`_lr8_three_way`), each band's SIDE scaled by its own width, the bands summed in
-    order. Causal, one law with MonitorChain::applyImager; at all widths 1 it is the split's
-    allpass (every level the input's), never a skip. Until then this was a hard whole-file FFT mask
-    (the low side gone at width_low 0, -23.6 dB in the DAW's LR4 export; and non-causal: a hit
-    leaked into the silence before it). No-op on mono."""
-    if audio.shape[1] != 2:
-        return audio
-
-    def held(key):
-        w = float(entry.get(key, 1.0))
-        return min(2.0, max(0.0, w if math.isfinite(w) else 1.0))
-    widths = (held("width_low"), held("width_mid"), held("width_high"))
-    lo, hi = imager_crossovers(entry.get("crossover_lo_hz", 150.0), entry.get("crossover_hi_hz", 2000.0))
-    bands = _lr8_three_way(np.asarray(audio, dtype=np.float64).T, sample_rate, lo, hi)
-    out_l = np.zeros(audio.shape[0])
-    out_r = np.zeros(audio.shape[0])
-    for band, w in zip(bands, widths):
-        m = 0.5 * (band[0] + band[1])
-        sd = 0.5 * (band[0] - band[1]) * w
-        out_l = out_l + (m + sd)
-        out_r = out_r + (m - sd)
-    return np.stack([out_l, out_r], axis=1)
-
-
-def _feedback_comb(x: np.ndarray, delay: int, feedback: float) -> np.ndarray:
-    """y[n] = x[n-delay] + feedback·y[n-delay] on (frames, channels), float64.
-
-    The same recurrence a per-sample loop would compute, but evaluated one
-    delay-sized block at a time: every sample in a block depends only on the
-    block `delay` samples earlier, so each block is a single vector op. That
-    turns the cost from one Python step per sample (~10M on a full master)
-    into ~frames/delay steps while staying bit-for-bit deterministic."""
-    n = x.shape[0]
-    out = np.zeros_like(x, dtype=np.float64)
-    if delay >= n:
-        return out
-    for start in range(delay, n, delay):
-        prev = start - delay
-        width = min(delay, n - start)
-        out[start:start + width] = (x[prev:prev + width]
-                                    + feedback * out[prev:prev + width])
-    return out
-
-
 def _tone_filter(audio: np.ndarray, sample_rate: int, tone: float) -> np.ndarray:
     """One-pole wet-return tone control on (frames, channels): tone=0 is dark,
     tone=1 is mostly open. Deterministic, no lookahead or state across calls."""
@@ -1986,44 +1785,27 @@ def _tone_filter(audio: np.ndarray, sample_rate: int, tone: float) -> np.ndarray
     return out
 
 
+# The delay is mix_engine.delay_law (2026-10-27): fitted to a reference delay - every pass through a
+# 200 Hz high-pass and a Linkwitz-Riley low-pass at the tone's corner, a slow wow on the time, the right
+# side 1 % longer. It replaced a one-pole tone and a 100 Hz low cut in the loop (2026-10-25), which was a
+# tone filter after a comb before that. The native chain runs the same law (DelayLaw.h, generated), held
+# together by test_delay_law.py and --delay-law.
 def _return_delay(audio: np.ndarray, sample_rate: int, entry: dict) -> np.ndarray:
-    """Wet-only feedback delay for an agent-owned return bus (Phase 38)."""
-    n_frames = audio.shape[0]
-    # Held to the table (20..2000 ms) as every door holds it - the DAW's ring is two seconds
-    # (2026-10-18, the delay audit: a stored 5 s rendered a 5 s echo here).
-    delay_ms = float(np.clip(float(entry["delay_ms"]), 20.0, 2000.0))
-    delay = max(1, int(delay_ms * sample_rate / 1000.0))
-    if n_frames == 0 or delay >= n_frames:
-        return np.zeros_like(audio, dtype=np.float64)
-    feedback = float(np.clip(entry["feedback"], 0.0, 0.85))
-    out = _feedback_comb(audio.astype(np.float64), delay, feedback)
-    return _tone_filter(out, sample_rate, float(entry["tone"]))
+    """Wet-only feedback delay - delay_law.apply. One law with MonitorChain::applySendReturns
+    (reference_monitor calls this)."""
+    from . import delay_law
+    return delay_law.apply(audio, sample_rate, entry)
 
 
+# The algorithmic reverb is mix_engine.reverb_law (2026-10-27): a sixteen-line modulated feedback-delay
+# network fitted to a reference reverb - its decay by band, its build, its colour and its brightness.
+# It replaced an eight-line network (2026-10-24) that replaced four parallel combs. The native chain
+# runs the same law (ReverbLaw.h, generated), held together by test_reverb_law.py and --reverb-law.
 def _return_reverb(audio: np.ndarray, sample_rate: int, entry: dict) -> np.ndarray:
-    """Wet-only deterministic Schroeder-style return reverb (Phase 38).
-    Multiple feedback combs create a dense enough offline tail without
-    randomness, IR files, or hidden plugin state."""
-    n_frames = audio.shape[0]
-    if n_frames == 0:
-        return np.zeros_like(audio, dtype=np.float64)
-    # held to the table (decay 0.2..12 s, pre 0..250 ms) as the native and every door hold them
-    # (2026-10-20, the reverb audit: a stored 1000 ms rendered 1 s here, 250 ms in the DAW, and a
-    # negative one raised); truncated, as the native truncates
-    pre_delay = int(min(250.0, max(0.0, float(entry.get("pre_delay_ms", 20.0)))) * sample_rate / 1000.0)
-    fed = np.zeros_like(audio, dtype=np.float64)
-    if pre_delay < n_frames:
-        fed[pre_delay:] = audio[: n_frames - pre_delay]
-    decay_s = min(12.0, max(float(entry.get("decay_s", 1.8)), 0.2))
-    wet = np.zeros_like(audio, dtype=np.float64)
-    for delay_ms in (29.7, 37.1, 41.1, 43.7):
-        delay = max(1, int(delay_ms * sample_rate / 1000.0))
-        if delay >= n_frames:
-            continue
-        feedback = min(0.985, 10.0 ** (-3.0 * (delay / sample_rate) / decay_s))
-        wet += _feedback_comb(fed, delay, feedback)
-    wet *= 0.35 / 4.0
-    return _tone_filter(wet, sample_rate, float(entry["tone"]))
+    """Wet-only reverb on (frames, channels) - reverb_law.apply. One law with MonitorChain::applySendReturns
+    (reference_monitor calls this)."""
+    from . import reverb_law
+    return reverb_law.apply(audio, sample_rate, entry)
 
 
 # Procedural impulse responses for the convolution reverb (Tier-1). A deterministic decaying-noise
@@ -2209,13 +1991,14 @@ def _apply_comp(audio: np.ndarray, sample_rate: int, entry: dict) -> np.ndarray:
     """Compressor on (channels, frames) float32 — stereo / single-channel M/S
     (Phase 41) via _ms_apply, OR true M/S (independent mid + side param sets) when
     the entry carries `mid`/`side` sub-objects. The law is the native one
-    (`_native_comp`): the M/S paths hand it the target as two identical channels,
+    (`_character_comp`, the entry's `style`): the M/S paths hand it the target as two identical channels,
     so its linked detector reads |mid| or |side| exactly as `processOneComp` does."""
     def comp_fn(params):
         def _fn(a):
-            wet = _native_comp(a, sample_rate, params["threshold_db"], params["ratio"],
-                               params["attack_ms"], params["release_ms"],
-                               params.get("makeup_db") or 0.0)
+            wet = _character_comp(a, sample_rate, params["threshold_db"], params["ratio"],
+                                  params["attack_ms"], params["release_ms"],
+                                  params.get("makeup_db") or 0.0, comp_style(params),
+                                  float(params.get("knee_db") or 0.0))
             return _comp_mix(a, wet, params.get("mix", 1.0))
         return _fn
     channel = entry.get("channel", "stereo")
@@ -2522,16 +2305,19 @@ def render_stem(session: Session, stem_id: str, exclude_ducks: bool = False,
                                key_level=key_level)
         elif t == "transient":
             out = _transient(out, sample_rate, entry)
-        elif (t == "duck" and not exclude_ducks
-              and _duck_key_heard(session, entry.get("key_stem_id"))):
-            # An UNKEYED duck (user-added from the browser, key not picked yet) skips —
-            # a render no-op, the same filter the render fingerprint applies to duck_keys.
-            key_audio, _ = render_stem(session, entry["key_stem_id"],
-                                       exclude_ducks=True, _cache=_cache)
-            key_stem = session.stems[entry["key_stem_id"]]
-            ducked = _duck(out, sample_rate, key_audio, entry,
-                           key_offset_s=float(key_stem.get("capture_start_s", 0.0))
-                                        - float(session.stems[stem_id].get("capture_start_s", 0.0)))
+        elif t == "duck" and not exclude_ducks:
+            # SYNC needs no trigger. TRACK reads the trigger rendered without its own keyed devices;
+            # a trigger this render cannot hear (none picked, an instrument track, a deleted one)
+            # leaves the duck at unity - the native's sidechain is silent there too.
+            from .duck_law import trigger_index
+            key_audio, key_off = None, 0.0
+            if trigger_index(entry.get("trigger", 0)) == 1 and _duck_key_heard(session, entry.get("key_stem_id")):
+                key_audio, _ = render_stem(session, entry["key_stem_id"],
+                                           exclude_ducks=True, _cache=_cache)
+                key_off = (float(session.stems[entry["key_stem_id"]].get("capture_start_s", 0.0))
+                           - float(session.stems[stem_id].get("capture_start_s", 0.0)))
+            ducked = _duck(out, sample_rate, entry, tempo=_tempo_of(session),
+                           key_audio=key_audio, key_offset_s=key_off)
             if collect is not None:
                 stats = _gr_telemetry("duck", out, ducked, sample_rate)
                 if stats is not None:
@@ -2539,17 +2325,10 @@ def render_stem(session: Session, stem_id: str, exclude_ducks: bool = False,
             out = ducked
         elif t == "utility":   # Ableton Utility: gain/width/mono/phase, freely placeable
             out = _utility(out, sample_rate, entry)
-        elif t == "imager":    # 3-band stereo imager (per-band M/S width)
-            out = _imager(out, sample_rate, entry)
         elif t == "clip":      # Phase 43 device freedom: peak clipper on a stem
             out = _clip(out, entry)
         elif t == "limiter":   # peak ceiling on a stem (brickwall — no loudness makeup)
             out = _brickwall(out, sample_rate, entry)
-        elif t == "band_width":
-            # In-list like master/bus (and pre-pan like the native chain, where
-            # track pan applies after the plugin) — was a pinned post-pan loop
-            # that also skipped the enabled bypass.
-            out = _band_width_scale(out, sample_rate, entry)
         elif t in _RETURN_WET_KINDS:
             # Space devices as plain INSERTS (2026-07-20): reverb / delay / IR reverb
             # on a track, dry/wet blended. Off a return they are ordinary inserts.
@@ -2564,7 +2343,8 @@ def render_stem(session: Session, stem_id: str, exclude_ducks: bool = False,
     # (2026-09-05 review). The pan LAW is matched from the other side: daw/patches/0007 adds
     # PanLawBalance so the native gains equal _pan's.
     if stem.get("width_on", True):   # a bypassed strip Width plays 1.0 (the stereo width audit, SW1)
-        out = _width(out, stem["width"])
+        out = _width(out, stem["width"], bool(stem.get("stereoize", False)),
+                     float(stem.get("stereoize_ms", 6.0)), sample_rate)
     # The delay the track's node RUNS (its dial summed along its path, plus the compensation a
     # negative dial forces on everyone — the DAW works it out and reports it, D2·R4). Last in
     # the node, so in front of the pan stage and inside a pre-fader tap.
@@ -2625,59 +2405,97 @@ def _silenced_by_destination(session: Session) -> tuple[set[str], set[str]]:
 
 
 LIMITER_DELAY_S = 0.003        # MonitorChain::lookaheadSamples: the fixed delay (= the reported latency)
-LIMITER_ATTACK_CONSTANTS = 6.0 # kLimAttackConstants: the ramp is finished across lookahead_ms
+LIMITER_ATTACK_CONSTANTS = 6.0 # kLimAttackConstants: the fast stage's ramp is finished across the window
 LIMITER_FLOOR_HALF = 2         # kLimFloorHalf: the gain floor's half-width (samples)
+LIMITER_SMOOTH_HALF = 2        # kLimSmoothHalf: the gain's min-then-average half-width (samples)
 
 
-def _brickwall(audio: np.ndarray, sample_rate: int, entry: dict) -> np.ndarray:
-    """THE DAW'S LIMITER (`MonitorChain::applyLookaheadLimiter`, v2 2026-10-17) on (frames,
-    channels) float64 that already carries its makeup; the output is aligned on the input (the
-    native's fixed delay is its reported latency, compensated). Per sample:
+def limiter_window(sample_rate: int, lookahead_ms: float) -> int:
+    """The lookahead window in samples (`MonitorChain::limWindow`): the knob, at least one sample,
+    and no longer than the fixed delay leaves after the detector's own lag (TP_CENTRE) and the
+    smoothing's reach (2 x LIMITER_SMOOTH_HALF) - ~2.5 ms."""
+    ring = max(1, int(sample_rate * LIMITER_DELAY_S))
+    return min(max(1, round(sample_rate * lookahead_ms / 1000.0)),
+               max(1, ring - TP_CENTRE - 2 * LIMITER_SMOOTH_HALF))
 
-    * the detector is the native's own 4x estimate (`tp_detector.intersample_peak`, the same
-      table); the target is ceiling / peak where the peak is over, blended between each channel's
-      and the loudest's by `channel_link`;
-    * HOLD is the running MINIMUM of the target over the lookahead (the fixed delay, R samples +
-      1), the envelope a one-pole toward it - attack DOWN over `lookahead_ms` (six constants,
-      `_gr_ballistics_db` at lookahead/6), release UP with time constant `release_ms`;
-    * the gain a sample leaves with is never above the least target within LIMITER_FLOOR_HALF of
-      it (the floor that holds a crest between samples), and the sample is clamped at the ceiling.
 
-    Until 2026-10-17 this was another law - a symmetric max-filter, then a centred moving average
-    `release_ms` long - and the release knob moved the DAW's export by up to ~3 dB LUFS and this
-    render by a few hundredths (the limiter audit)."""
+def limiter_stages(audio: np.ndarray, sample_rate: int, entry: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """THE DAW'S LIMITER LAW (`MonitorChain::applyLookaheadLimiter`, v3 2026-10-25: two stages) on
+    (frames, channels) float64 that already carries its makeup. Returns ``(gain, slow, target)``,
+    each (frames, channels), aligned on the input (the native's fixed delay is its reported
+    latency, compensated). Per output sample m:
+
+    * the TARGET is ceiling / peak where the native's own 4x detector (`tp_detector`, the same
+      table) reads over, blended between each channel's and the loudest's by `channel_link`;
+    * the WINDOW is its minimum over [m, m + L], L = `limiter_window` - the lookahead knob is how
+      early a peak starts being pulled down (it was the whole fixed delay, whatever the knob said);
+    * the FAST stage follows the window: attack across L (six constants), release the character's
+      fast release - it catches each peak and lets go in milliseconds;
+    * the SLOW stage follows the window's minimum over the last H samples (the character's hold:
+      steady through a low note): the character's attack, release `release_ms` - the held level;
+    * the gain is the lower of the two, never above the least target within LIMITER_FLOOR_HALF of
+      the sample (the floor that holds a crest between samples);
+    * and it is SMOOTHED without being raised: the minimum over 2h + 1 samples, then the average
+      over 2h + 1 (h = LIMITER_SMOOTH_HALF), so it is never above what it was at any sample. A
+      0.5 ms window ramps the fast stage within a few samples of a crest, and that steep a change
+      sharpened the crest between samples - up to 0.03 dB past the ceiling on a song at +18 dB
+      (an exact FFT meter; 0.007 after). The old law's 3 ms ramp was gentle enough not to.
+
+    The characters (models.LIMITER_CHARACTERS) were sized by measurement against a reference
+    limiter; the record is docs/10-daw.md. `slow` is what the face draws as the BODY."""
     from scipy.ndimage import minimum_filter1d
+    from .models import LIMITER_CHARACTERS, limiter_knobs
 
     x = np.asarray(audio, dtype=np.float64)
     n, nch = x.shape
     ceiling = 10.0 ** (float(entry["ceiling_dbtp"]) / 20.0)
-    ring = max(1, int(sample_rate * LIMITER_DELAY_S))
-    atk_ms = min(max(float(entry.get("lookahead_ms", 3.0)), 0.1), ring * 1000.0 / sample_rate)
-    rel_ms = max(1.0, float(entry.get("release_ms", 50.0)))
+    rel_ms, look_ms, style = limiter_knobs(entry)
+    fast_rel_ms, slow_att_ms, hold_ms = LIMITER_CHARACTERS[style]
+    rel_ms = max(1.0, rel_ms)
+    L = limiter_window(sample_rate, look_ms)
+    H = int(round(sample_rate * hold_ms / 1000.0))
     link = min(1.0, max(0.0, float(entry.get("channel_link", 1.0))))
     peak = intersample_peak(x)                                       # (frames, channels)
-    if n == 0 or float(np.max(peak, initial=0.0)) <= ceiling:
-        return np.clip(x, -ceiling, ceiling)                         # nothing over: the backstop alone
     own = np.where(peak > ceiling, ceiling / np.maximum(peak, 1e-30), 1.0)
     loud = np.max(peak, axis=1, keepdims=True)
     linked = np.where(loud > ceiling, ceiling / np.maximum(loud, 1e-30), 1.0)
-    target = own * (1.0 - link) + linked * link                      # T[m], aligned on the sample
-    centre = TP_CENTRE
-    lead = ring + centre                                             # steps before sample 0
-    out = np.empty_like(x)
+    target = own * (1.0 - link) + linked * link                      # aligned on the sample
+    gain = np.ones_like(x)
+    slow_out = np.ones_like(x)
+    if n == 0 or float(np.max(peak, initial=0.0)) <= ceiling:
+        return gain, slow_out, target                                # nothing over: no reduction
+    atk_ms = L * 1000.0 / sample_rate / LIMITER_ATTACK_CONSTANTS
+    h = LIMITER_SMOOTH_HALF
+    lead, tail = L + 2 * h, L + 2 * h          # the stages run from 2h + L samples before the first output
     for ch in range(nch):
-        t_ext = np.concatenate([np.ones(lead), target[:, ch], np.ones(ring + 1)])
-        # hold at step s = min T over samples [s - centre - ring, s - centre] = t_ext[s .. s + ring]
-        cmin = minimum_filter1d(t_ext, size=ring + 1, origin=ring // 2)       # min t_ext[j - ring .. j]
-        steps = n + ring
-        hold = cmin[ring:ring + steps]
-        env = 1.0 + _gr_ballistics_db(hold - 1.0, sample_rate,
-                                      atk_ms / LIMITER_ATTACK_CONSTANTS, rel_ms)
-        floor = minimum_filter1d(target[:, ch], size=2 * LIMITER_FLOOR_HALF + 1,
-                                 mode="constant", cval=1.0)
-        gain = np.minimum(env[ring:ring + n], floor)
-        out[:, ch] = np.clip(x[:, ch] * gain, -ceiling, ceiling)
-    return out
+        t_ext = np.concatenate([np.ones(lead), target[:, ch], np.ones(tail)])
+        fwd = minimum_filter1d(t_ext, size=L + 1, origin=-((L + 1) // 2), mode="constant", cval=1.0)
+        fast = 1.0 + _gr_ballistics_db(fwd - 1.0, sample_rate, atk_ms, fast_rel_ms)
+        held = (minimum_filter1d(fwd, size=H + 1, origin=H // 2, mode="constant", cval=1.0)
+                if H > 0 else fwd)
+        slow = 1.0 + _gr_ballistics_db(held - 1.0, sample_rate, slow_att_ms, rel_ms)
+        floor = minimum_filter1d(t_ext, size=2 * LIMITER_FLOOR_HALF + 1, mode="constant", cval=1.0)
+        raw = np.minimum(np.minimum(fast, slow), floor)
+        # min, then average, over 2h + 1 - at output sample m these read raw[m - 2h .. m + 2h]
+        lo = lead - 2 * h
+        mf = minimum_filter1d(raw[lo:lead + n + 2 * h], size=2 * h + 1, mode="constant", cval=1.0)
+        sm = np.convolve(mf, np.ones(2 * h + 1) / (2 * h + 1), mode="valid")   # aligned: sm[k] <-> m = k
+        gain[:, ch] = sm[h:h + n]
+        slow_out[:, ch] = slow[lead:lead + n]
+    return gain, slow_out, target
+
+
+def _brickwall(audio: np.ndarray, sample_rate: int, entry: dict) -> np.ndarray:
+    """The DAW's limiter on (frames, channels): the GAIN knob (`gain_db`, the drive into it - on
+    the master it adds to the LOUD target's make-up, applied before this), then `limiter_stages`'
+    gain, then the ceiling clamp (the backstop the native applies to every sample)."""
+    x = np.asarray(audio, dtype=np.float64)
+    drive_db = float(entry.get("gain_db", 0.0) or 0.0)
+    if drive_db:
+        x = x * 10.0 ** (min(24.0, max(0.0, drive_db)) / 20.0)
+    ceiling = 10.0 ** (float(entry["ceiling_dbtp"]) / 20.0)
+    gain, _, _ = limiter_stages(x, sample_rate, entry)
+    return np.clip(x * gain, -ceiling, ceiling)
 
 
 def _master_limiter(audio: np.ndarray, sample_rate: int, entry: dict,
@@ -2816,12 +2634,8 @@ def _apply_master_chain(mix: np.ndarray, sample_rate: int, chain: list[dict],
             mix = wet.T.astype(np.float64)
         elif entry["type"] == "transient":   # transient shaper on the master
             mix = _transient(mix, sample_rate, entry)
-        elif entry["type"] == "band_width":  # per-band stereo width on the master
-            mix = _band_width_scale(mix, sample_rate, entry)
-        elif entry["type"] == "imager":      # 3-band stereo imager on the master
-            mix = _imager(mix, sample_rate, entry)
         elif entry["type"] == "width":         # Phase 40: master-bus M/S width
-            mix = _width(mix, entry["width"])
+            mix = _width_entry(mix, entry, sample_rate)
         elif entry["type"] == "utility":       # Ableton Utility: gain/width/mono/phase, freely placeable
             mix = _utility(mix, sample_rate, entry)         # (float64 (frames, channels) in place — linear)
         elif entry["type"] == "clip":          # Phase 41: pre-limiter peak clipper
@@ -2896,10 +2710,6 @@ def _apply_bus_chain(mix: np.ndarray, sample_rate: int, chain: list[dict],
             mix = _auto_filter(mix, sample_rate, entry, tempo=tempo)
         elif kind == "transient":
             mix = _transient(mix, sample_rate, entry)
-        elif kind == "band_width":
-            mix = _band_width_scale(mix, sample_rate, entry)
-        elif kind == "imager":    # 3-band stereo imager on the bus
-            mix = _imager(mix, sample_rate, entry)
         elif kind == "utility":   # Ableton Utility: gain/width/mono/phase, freely placeable
             mix = _utility(mix, sample_rate, entry)
         elif kind == "clip":      # Phase 43 device freedom: peak clipper on a bus
@@ -2911,7 +2721,7 @@ def _apply_bus_chain(mix: np.ndarray, sample_rate: int, chain: list[dict],
         elif kind == "pan":       # the bus strip's pan (trailing scalar, as on a stem)
             mix = _pan(mix, entry["pan"])
         elif kind == "width":     # the bus strip's M/S width (trailing scalar, as on a stem)
-            mix = _width(mix, entry["width"])
+            mix = _width_entry(mix, entry, sample_rate)
     return mix
 
 

@@ -75,8 +75,7 @@ async def test_bus_target_rules(demo_project):
         # the bus palette is the stem palette minus duck, whole-file only,
         # under the same guardrails as a stem
         assert "bus_action_type" in await violations(
-            {"type": "duck", "stem_id": "drums", "key_stem_id": "stem_b",
-             "threshold_db": -30.0, "depth_db": 4.0})
+            {"type": "duck", "stem_id": "drums", "key_stem_id": "stem_b", "trigger": "track", "mix": 0.5})
         assert "bus_action_type" in await violations(
             {"type": "limiter", "stem_id": "drums"})
         # …but a CLIPPER is allowed on a bus since 2026-09-08 (device audit 05-F3): it was
@@ -86,7 +85,7 @@ async def test_bus_target_rules(demo_project):
         clip_result = await call(client, "propose_actions", {"req": {
             "rationale": "bus clipper", "predicted_impact": [],
             "actions": [{"type": "clip", "stem_id": "drums",
-                         "threshold_db": -3.0, "hardness": 0.5}]}})
+                         "clip_pct": 71.0, "softness": 0.5}]}})
         assert clip_result["accepted"], (
             "a bus clipper must be accepted: "
             + str([v["rule"] for v in clip_result["violations"]]))

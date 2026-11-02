@@ -25,7 +25,7 @@ Four outcomes, and the two middle ones are where the damage lives:
   wrong for an instruction).
 
 The DAW the agent drives here is a fake (`fake_daw`), and it REFUSES what the real
-one refuses, in the real order: an unknown key, the master's safety limiter, a
+one refuses, in the real order: an unknown key, the master's limiter, a
 confirm-gated key before the yes, a path or a number the command door turns away.
 A refused call is not a command the turn made. The refusals are transcribed in
 `command_door.py` and pinned against the C++ (test_command_door_parity.py); a new
@@ -323,6 +323,11 @@ def _fixture_tracks() -> list[dict]:
     by["gtr_l"]["plugins"] = [
         {"index": 0, "name": "Guitar Rack", "kind": "rack",
          "rack": "Guitar Rack"}]
+    # ...and an EQ ahead of it, the way the snapshot reports a chain device (Phase 66: a
+    # built-in device can be placed AFTER the rack - `after_plugin` on its row when it is).
+    by["gtr_l"].update(device_count=1, devices=[
+        {"type": "eq", "occ": 0, "enabled": True, "in_db": -16.0, "out_db": -15.8,
+         "delta_db": 0.2, "out_peak_db": -9.0}])
     by["gtr_l"]["clips"][1].update(
         warp=True, length_beats=32.0, source_length_beats=32.0,
         warp_markers=[{"index": 0, "source_s": 4.0, "warp_s": 4.25}],
@@ -351,6 +356,15 @@ def _fixture_tracks() -> list[dict]:
                                 {"t_s": 48.0, "value": 0.8}]}],
         automatable_targets=["volume", "pan", "eq.gain_db", "eq.freq_hz",
                              "comp.threshold_db", "comp.ratio"])
+    # Phase 65: a chain may hold as many of a device as the user likes. bass_di carries TWO
+    # compressors (a leveller, then a peak catcher), so "the second compressor" has a referent
+    # and "the compressor" does not say which.
+    by["bass_di"].update(
+        device_count=2,
+        devices=[{"type": "comp", "in_db": -16.0, "out_db": -17.2,
+                  "delta_db": -1.2, "out_peak_db": -9.0, "gr_db": 1.8},
+                 {"type": "comp", "in_db": -17.2, "out_db": -17.9,
+                  "delta_db": -0.7, "out_peak_db": -10.5, "gr_db": 3.1}])
     by["lead_vox"]["clips"][0]["takes"] = {
         "count": 3, "current": 2, "is_comp": True, "showing": False,
         "list": [{"index": 0, "name": "take 1"},
@@ -862,10 +876,11 @@ CORPUS: list[OpCase] = [
            ("return.add", "send.set"), max_commands=6,
            sequence=("return.add", "send.set"),
            also=("device.set", "device.enable", "return.*"), section="technique"),
-    OpCase("duck the piano under lead_vox so the vocal stays on top",
+    OpCase("duck the bass_di under kick_in so the low end stops fighting",
            ("duck.set_key",), max_commands=1,
-           args_contain=("piano", "lead_vox"),
-           note="sidechain ducking IS a command here — the Duck user device",
+           args_contain=("bass_di", "kick_in"),
+           note="sidechain ducking IS a command here — the Duck user device; its trigger is a "
+                "percussive part (a sustained lead fires few hits)",
            section="technique"),
     OpCase("that reverb return is too loud, bring it down 4 dB",
            ("return.set_level",), max_commands=1,
@@ -894,11 +909,11 @@ CORPUS: list[OpCase] = [
            (), wants_propose=("saturation",), propose_stem="bass_di",
            section="technique"),
     OpCase("widen the piano but keep its low end mono",
-           (), wants_propose=("imager", "band_width", "width"),
+           (), wants_propose=("width", "utility"),
            propose_stem="piano",
-           note="imager / band_width are the band-selective forms; plain "
-                "width only counts because the plan grader cannot see a "
-                "low-end guard in one proposal",
+           note="the Imager widening it (width, stereoize optional) with a Utility's "
+                "bass_mono under it; either alone counts because the plan grader "
+                "cannot see both halves in one proposal",
            section="technique"),
     OpCase("tame the harsh 3k on lead_vox only when it gets loud",
            (), wants_propose=("dynamic_eq", "deess", "mb_comp"),
@@ -1089,7 +1104,7 @@ CORPUS: list[OpCase] = [
            note="the channel strip's W field / the head's WID cell, one "
                 "command: width is a mid/side SCALAR (0 = mono, 1 = "
                 "unchanged, 2 = 2x), so 60% is 0.6. NOT a width DEVICE added "
-                "to the chain (that is the agent's separate imager) and not a "
+                "to the chain (the Imager device is the same width) and not a "
                 "mix run. It had no command key at all until 2026-09-05 — the "
                 "agent could reach a width only through the device dock's "
                 "co-edit URL, so the one user-operable channel control "
@@ -1230,6 +1245,19 @@ CORPUS: list[OpCase] = [
     # not a proposal or a run.
     OpCase("take the compressor off the keys track", ("device.remove",),
            args_contain=("comp",), section="routing2"),
+    # device.place (Phase 66, James 2026-10-24: "i cant put devices after the rack"): a built-in
+    # device moves past a rack, as dragging its box does - not a re-add, not a rack.group.
+    OpCase("on gtr_l, move the EQ so it comes after the Guitar Rack", ("device.place",),
+           args_contain=("gtr_l", "eq"), section="routing2"),
+    # Phase 65 step 4: a stack of one kind. bass_di holds two compressors: the second is reached
+    # by its occurrence (comp#1), the bare "the compressor" is a question, and a second
+    # compressor can be added to a track that holds one.
+    OpCase("on bass_di, set the second compressor's threshold to -24", ("device.set",),
+           args_contain=("comp#1", "-24"), section="routing2"),
+    OpCase("set the compressor threshold on bass_di to -20", (), wants_ask=True,
+           section="routing2"),
+    OpCase("add a second compressor to lead_vox, after the one that's there", ("device.add",),
+           args_contain=("lead_vox", "comp"), section="routing2"),
     # The per-device bypass (2026-09-10). `enabled` is not a co-edit param, so `device.set` is
     # refused on it by name — this is its own key, and the natural phrasing must not escalate
     # a one-command switch into a billed mix run.
@@ -1239,15 +1267,17 @@ CORPUS: list[OpCase] = [
     OpCase("put the Pro-Q before the compressor plug-in on lead_vox", ("plugin.move",),
            section="routing2"),
     OpCase("turn lead_vox's compressor back on", ("device.enable",), section="routing2"),
-    # The master SAFETY limiter (2026-09-04): its own command, not a device.set — a ceiling-only
-    # limiter the user toggles from the CLIP lamp / ⌥⌘L, and the agent by the same key.
-    OpCase("put a safety limiter on the master", ("master.limiter",), section="routing2"),
-    # The agent may not switch the master's safety limiter off (dawcmd::agentMasterSafetyRefusal,
-    # and the prompt says so). Until 2026-10-06 the only answer graded correct here was the
-    # reach the app refuses - against a fake app that answered it ok (reader E7·R1).
-    OpCase("take the limiter off the master", ("master.limiter",), section="routing2",
+    # A limiter on the master is a device the agent adds like any other (the safety limiter and
+    # its master.limiter switch went 2026-10-25: James, "we will just leave it to the user to add
+    # a limiter").
+    OpCase("put a limiter on the master", ("device.add",), section="routing2"),
+    # The agent may not switch the master's limiter off, remove it or move it
+    # (dawcmd::agentMasterSafetyRefusal, and the prompt says so). Until 2026-10-06 the only answer
+    # graded correct here was the reach the app refuses - against a fake app that answered it ok
+    # (reader E7·R1).
+    OpCase("take the limiter off the master", ("device.remove",), section="routing2",
            wants_decline=True,
-           note="only the user switches it off (Opt-Cmd-L); the honest reply says so"),
+           note="only the user switches it off or removes it; the honest reply says so"),
 
     # ---- racks ----
     OpCase("build an empty rack on the piano track", ("rack.create",),
@@ -1709,19 +1739,20 @@ CORPUS: list[OpCase] = [
            section="view2"),
     OpCase("open the loudness history view", ("view.meter_history",),
            section="view2"),
-    OpCase("show the comp scope", ("view.comp_scope",), section="view2"),
-    OpCase("switch the gate to its tape view", ("view.gate_tape",), section="view2"),
-    OpCase("show the multiband compressor's tapes", ("view.mb_tapes",), section="view2"),
-    OpCase("show the multiband saturation's waveshaper cards", ("view.sat_cards",), section="view2"),
-    OpCase("switch the stereo width to its spectral field view", ("view.width_field",), section="view2"),
+    OpCase("set the compressor view flag to scope", ("view.comp_scope",), section="view2"),
+    OpCase("set the gate's tape view flag on", ("view.gate_tape",), section="view2"),
+    OpCase("set the multiband compressor's tapes view flag on", ("view.mb_tapes",), section="view2"),
+    OpCase("set the multiband saturation's cards view flag on", ("view.sat_cards",), section="view2"),
+    OpCase("switch the imager's scope to the lissajous view", ("view.width_field",), args_contain=("lissa",),
+           section="view2"),
     OpCase("switch the OTT to its tapes", ("view.ott_tapes",), section="view2"),
     OpCase("put the spectrogram on its ridge view", ("view.spectrogram_view",), section="view2"),
     OpCase("show the band lanes under the spectrogram", ("view.spectrogram_view",), section="view2"),
-    OpCase("show the clipper's shave scope", ("view.clip_scope",), section="view2"),
-    OpCase("switch the overdrive to its bend scope", ("view.od_scope",), section="view2"),
-    OpCase("switch the saturator to its heat tape", ("view.sat_tape",), section="view2"),
-    OpCase("switch the delay to its echo tape", ("view.delay_tape",), section="view2"),
-    OpCase("switch the reverb to its ring tape", ("view.rev_tape",), section="view2"),
+    OpCase("set the clipper's scope view flag on", ("view.clip_scope",), section="view2"),
+    OpCase("set the overdrive's scope view flag on", ("view.od_scope",), section="view2"),
+    OpCase("set the saturator's tape view flag on", ("view.sat_tape",), section="view2"),
+    OpCase("set the delay's tape view flag on", ("view.delay_tape",), section="view2"),
+    OpCase("set the reverb's tape view flag on", ("view.rev_tape",), section="view2"),
     OpCase("show the IR reverb's room print", ("view.ir_print",), section="view2"),
     OpCase("open the tempo lane", ("view.tempo_lane",), section="view2"),
     OpCase("turn off the hover tooltips", ("view.tooltips",), section="view2"),
@@ -2578,6 +2609,9 @@ CANNED_WRITE_REPLIES: dict[str, dict | Callable[[dict], dict]] = {
     # the address of the device it added (what device.set / device.enable then take)
     "device.add": lambda a: {"track": str(a.get("track") or ""), "type": str(a.get("type") or ""),
                              "device": str(a.get("type") or ""), "occ": 0},
+    # where it plays now (Phase 66)
+    "device.place": lambda a: {"track": str(a.get("track") or ""), "device": str(a.get("device") or ""),
+                               "after_plugin": a.get("after_plugin", -1), "changed": True},
     # a save answers with the id the preset now has (what instrument.set_patch then takes)
     "instrument.preset_save": lambda a: {
         "preset": (str(a.get("category") or "").strip() + "/" if a.get("category") else "")
@@ -2754,9 +2788,6 @@ CANNED_READ_REPLIES: dict[str, dict | Callable[[dict], dict]] = {
 _REGISTRY_KEYS = frozenset(key for key, _u, _c in _registry_commands())
 _USER_ONLY_KEYS = frozenset(key for key, user_only, _c in _registry_commands() if user_only)
 
-#: The fixture's master carries no safety limiter ("put a safety limiter on the master" has
-#: one to add): a bare `master.limiter` is a toggle that turns it ON, which the app allows.
-FIXTURE_MASTER_LIMITER_ON = False
 
 
 def _fixture_project(edit: dict) -> tuple[str, list]:
@@ -2774,7 +2805,7 @@ def fake_daw(case: OpCase, command: str, args, *, confirm_granted: bool,
 
     It refuses what they refuse. Until 2026-10-06 it mirrored ONE refusal (confirm) and
     answered ok to the rest, so the gate rewarded a reach the app turns away: switching the
-    master's safety limiter off graded `correct` (reader E7·R1), and so did a path the door
+    master's limiter off graded `correct` (reader E7·R1), and so did a path the door
     refuses, a number that is not one, and a key that does not exist (E7·R2). A refused call
     is recorded as `refused`, never as a command: the turn did not make it.
 
@@ -2784,7 +2815,7 @@ def fake_daw(case: OpCase, command: str, args, *, confirm_granted: bool,
        (a relative path is read against the project folder: the product's behaviour, so a
        relative path is NOT a refusal here), then `daw_server.implausible_integer`;
     2. the app's choke point (App.cpp `onDawRequest`) - an unknown key, a user-only key, the
-       master safety limiter (`command_door.master_safety_refusal`, pinned against
+       master's limiter (`command_door.master_safety_refusal`, pinned against
        `dawcmd::agentMasterSafetyRefusal`), then confirm;
     3. `invokeCommand`'s own door, in front of every handler - `command_door.bad_path_arg`,
        `bad_numeric_arg`, `bad_scalar_arg` (pinned against `dawcmd::badPathArg` / `badNumericArg` / `badScalarArg`);
@@ -2817,8 +2848,7 @@ def fake_daw(case: OpCase, command: str, args, *, confirm_granted: bool,
         return refuse(f"unknown command: {command}")
     if command in _USER_ONLY_KEYS:
         return refuse(f"'{command}' is a user-only control")
-    if (why := command_door.master_safety_refusal(
-            command, sent, FIXTURE_MASTER_LIMITER_ON)) is not None:
+    if (why := command_door.master_safety_refusal(command, sent)) is not None:
         return refuse(why)
     # The production choke point REFUSES a confirm-gated key until the user says yes
     # (App.cpp: "'x' needs the user to confirm it"; chat.py documents the contract).
@@ -2833,6 +2863,11 @@ def fake_daw(case: OpCase, command: str, args, *, confirm_granted: bool,
         return refuse(why)
     if (why := command_door.bad_scalar_arg(sent)) is not None:
         return refuse(why)
+    if command == "device.add" and isinstance(sent, dict):
+        row = next((t for t in edit.get("tracks", ()) if t.get("name") == sent.get("track")), {})
+        if (why := command_door.device_add_refusal(
+                command, sent, [d.get("type") for d in row.get("devices", ())])) is not None:
+            return refuse(why)
 
     if case.fail_with and command in case.expect:
         # the reach is recorded (it was right) and the DAW refuses it the

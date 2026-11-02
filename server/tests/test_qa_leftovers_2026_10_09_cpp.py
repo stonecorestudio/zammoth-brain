@@ -165,7 +165,15 @@ def test_every_text_a_device_face_draws_can_be_recorded():
     """The dock names a face's readouts from what the face PRINTS: a text drawn past faceText()
     is a readout no screen reader hears."""
     assert not re.search(r"\bg\.drawText \(", GRAPHS_H.split("inline void faceText", 1)[1].split("}", 1)[1])
-    assert GRAPHS_H.count("faceText (g, ") > 350
+    # a floor, not a rule: it says the faces still go through faceText. It came down from 350 when the
+    # saturation's and the overdrive's faces were rebuilt with fewer readouts (2026-10-26), and from 320
+    # when the de-esser's face A dropped its readout cells for GR and the law (2026-10-27), and from 300 when
+    # the delay's face A replaced the time dial, its scope and its tape with one ladder (2026-10-27), and from
+    # 280 when the clipper's face A replaced the crest tape, its bars and its cells with the knee (2026-10-28).
+    # 260 -> 250: OTT's face A (2026-10-28) draws fewer texts than the R21 face it replaced; 250 -> 240: the Imager's face
+    # (2026-10-28) draws fewer than the R25 stage it replaced (no opening line, no floor, no field labels);
+    # 240 -> 230: the chorus's ORBIT face was retired with its old knobs (2026-10-28), its texts with it
+    assert GRAPHS_H.count("faceText (g, ") > 230
 
 
 def test_every_face_with_a_zone_map_says_what_is_at_a_point():

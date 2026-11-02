@@ -121,6 +121,52 @@ def test_a_full_pass_budget_self_heals_instead_of_bouncing(demo_project, scripte
     assert _session_state(demo_project)["pass_number"] > pass_before
 
 
+def _three_gain_moves(target: str, deltas_db: tuple) -> list:
+    """Three proposals: a whole pass's budget, made inside the turn (a turn opens its own).
+    Three different moves: an identical one is skipped as the model looping."""
+    return [("propose", {"rationale": f"filler {i}", "predicted_impact": [],
+                         "actions": [{"type": "gain", "stem_id": target, "delta_db": d}]})
+            for i, d in enumerate(deltas_db)]
+
+
+def test_a_full_pass_heals_even_when_the_move_breaks_another_per_pass_rule(demo_project, scripted):
+    """2026-11-02 (before/after round 5): the self-heal ran only when the pass cap was the
+    ONLY violation. A move that also broke a per-pass budget came back "too many proposals
+    this pass" first; the engineer read it as a cap, said so to the user, and made the same
+    +5 dB with track.set_gain, outside every guardrail. A full pass is opened afresh whenever
+    the cap is among the violations, and the move is judged in that pass."""
+    stems = _register(demo_project)
+    target = stems[0]
+    pass_before = _session_state(demo_project).get("pass_number", 0)
+    turn = scripted(demo_project, _three_gain_moves(target, (-2.0, -1.5, -2.5)) + [   # -6 dB: the gain budget too
+        ("propose", {"rationale": "still too loud", "predicted_impact": [],
+                     "actions": [{"type": "gain", "stem_id": target, "delta_db": -3.0}]})])
+    out = daw_bridge.chat_turn(demo_project, "bring it down", mode="agent")
+
+    text = turn.results[-1].text
+    assert "too many proposals" not in text, text
+    assert '"accepted": false' not in text, text
+    assert len(out["moves"]) == 4, "the fourth move must land in the fresh pass"
+    assert _session_state(demo_project)["pass_number"] > pass_before
+
+
+def test_a_full_pass_never_hides_the_violation_that_stands(demo_project, scripted):
+    """The other half: a move that breaks a rule a fresh pass does not lift (an HPF past its
+    cap) is refused for THAT rule alone, never for the pass cap the brain heals."""
+    stems = _register(demo_project)
+    target = stems[0]
+    turn = scripted(demo_project, _three_gain_moves(target, (-0.5, -0.4, -0.6)) + [
+        ("propose", {"rationale": "thin the lows", "predicted_impact": [],
+                     "actions": [{"type": "eq", "stem_id": target,
+                                  "band": {"freq_hz": 150, "gain_db": 0.0, "q": 0.7,
+                                           "shape": "hpf"}}]})])
+    daw_bridge.chat_turn(demo_project, "thin it", mode="agent")
+
+    text = turn.results[-1].text
+    assert "too many proposals" not in text, text
+    assert "hpf_max_hz" in text, text
+
+
 def test_an_identical_move_is_not_applied_twice_in_one_turn(demo_project, scripted):
     """2026-08-09: within one turn nothing is re-measured, so an identical
     re-propose is the model looping — tonight it applied the same duck/tune/eq

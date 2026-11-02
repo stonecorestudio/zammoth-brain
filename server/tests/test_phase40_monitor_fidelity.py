@@ -32,8 +32,15 @@ def _err_db(ref, test):
 def _pedalboard_band(sig, band):
     """Run one EQ band exactly as dsp._apply_master_chain does: (channels,
     frames) float32 through Pedalboard, back to (frames, channels)."""
+    # the cookbook filters (reference_monitor.apply_eq_band) the tilt and match-EQ devices still run
+    from pedalboard import HighpassFilter, HighShelfFilter, LowpassFilter, LowShelfFilter, PeakFilter
     dry = np.ascontiguousarray(sig.T.astype(np.float32))
-    wet = Pedalboard([dsp._eq_plugin(band, SR)])(dry, SR)
+    if band["shape"] in ("hpf", "lpf"):
+        plug = (HighpassFilter if band["shape"] == "hpf" else LowpassFilter)(cutoff_frequency_hz=band["freq_hz"])
+    else:
+        cls = {"peak": PeakFilter, "low_shelf": LowShelfFilter, "high_shelf": HighShelfFilter}[band["shape"]]
+        plug = cls(cutoff_frequency_hz=band["freq_hz"], gain_db=band["gain_db"], q=band["q"])
+    wet = Pedalboard([plug])(dry, SR)
     return wet.T.astype(np.float64)
 
 
@@ -75,23 +82,22 @@ def test_eq_band_matches_pedalboard(shape, freq, gain, q):
     ("lpf", 5000.0, 0.0, 0.9, 96),
 ])
 def test_phase46_eq_band_dsp_matches_reference(shape, freq, gain, q, slope):
-    """dsp._eq_band ((channels, frames)) vs reference_monitor.apply_eq_band
-    ((frames, channels)) — same coefficients (dsp imports them from
-    reference_monitor), so this should null far tighter than the float32
-    Pedalboard comparison above."""
+    """dsp._eq_band ((channels, frames)) vs reference_monitor.apply_eq_entry_band
+    ((frames, channels)) — one law (eq_law, 2026-10-27), so this should null far tighter
+    than the float32 Pedalboard comparison above."""
     sig = _sig()
     band = {"shape": shape, "freq_hz": freq, "gain_db": gain, "q": q,
             "slope_db_oct": slope}
     dry32 = np.ascontiguousarray(sig.T.astype(np.float32))
     wet = dsp._eq_band(dry32, SR, band).T.astype(np.float64)
-    ref = rm.apply_eq_band(sig, SR, shape, freq, q, gain, slope)
+    ref = rm.apply_eq_entry_band(sig, SR, band)
     err = _err_db(ref, wet)
     assert err < -50.0, f"{shape} @ {freq}Hz slope={slope}: {err:.1f} dB"
 
 
-def test_gain_then_eq_chain_matches_sequential_pedalboard():
-    """A realistic master EQ chain: float64 gain (like render_master) then each
-    band via Pedalboard float32 (like _apply_master_chain), vs render_monitor."""
+def test_gain_then_eq_chain_matches_sequential_bands():
+    """A realistic master EQ chain: float64 gain (like render_master) then each band through
+    the EQ's law (`dsp._eq_band`, as the render runs it), vs render_monitor."""
     sig = _sig()
     gain_db = -1.5
     bands = [
@@ -101,7 +107,7 @@ def test_gain_then_eq_chain_matches_sequential_pedalboard():
     ]
     oracle = sig * 10.0 ** (gain_db / 20.0)
     for b in bands:
-        oracle = _pedalboard_band(oracle, b)
+        oracle = dsp._eq_band(np.ascontiguousarray(oracle.T.astype(np.float32)), SR, b).T.astype(np.float64)
 
     entries = [{"type": "gain", "gain_db": gain_db}]
     entries += [{"type": "eq", **b} for b in bands]
@@ -119,15 +125,16 @@ def test_notch_offline_matches_oracle_and_cuts_centre():
     f0, q = 1000.0, 4.0
     sig = _sig()
     # dsp render path is (channels, frames); the oracle is (frames, channels)
-    off = dsp._notch(np.ascontiguousarray(sig.T), SR, f0, q).T
-    ref = rm.apply_eq_band(sig, SR, "notch", f0, q, 0.0)
+    notch = {"shape": "notch", "freq_hz": f0, "gain_db": 0.0, "q": q}
+    off = dsp._eq_band(np.ascontiguousarray(sig.T), SR, notch).T
+    ref = rm.apply_eq_entry_band(sig, SR, notch)
     assert _err_db(off, ref) < -100.0, "dsp notch must match the oracle notch"
 
     t = np.arange(int(SR * 0.5)) / SR
 
     def cut_db(freq):
         x = (np.sin(2 * np.pi * freq * t)[:, None] * np.ones((1, 2)))
-        y = rm.apply_eq_band(x, SR, "notch", f0, q, 0.0)
+        y = rm.apply_eq_entry_band(x, SR, notch)
         rms = lambda a: np.sqrt(np.mean(a[SR // 10:] ** 2))   # drop the settling tail
         return 20.0 * np.log10(rms(y) / rms(x) + 1e-12)
 
@@ -136,13 +143,15 @@ def test_notch_offline_matches_oracle_and_cuts_centre():
 
 
 def test_eq_band_dispatch_routes_notch():
-    """dsp._eq_band sends notch to the numpy biquad and everything else to
-    Pedalboard — the path the render loop actually calls."""
+    """dsp._eq_band runs a notch through the EQ's law - the path the render loop calls."""
+    from scipy.signal import lfilter
+    from mix_engine.eq_law import band_sections
     sig = np.ascontiguousarray(_sig().T)   # (channels, frames)
     band = {"shape": "notch", "freq_hz": 2000.0, "gain_db": 0.0, "q": 3.0}
     out = dsp._eq_band(sig, SR, band)
     assert out.shape == sig.shape
-    assert _err_db(out, dsp._notch(sig, SR, 2000.0, 3.0)) < -120.0
+    (b, a), = band_sections("notch", SR, 2000.0, 3.0, 0.0, 12)
+    assert _err_db(out, lfilter(b, a, sig, axis=-1)) < -120.0
 
 
 def test_eqband_model_accepts_notch():
@@ -252,7 +261,7 @@ def test_dynamic_eq_cuts_a_loud_band_only_downward():
     tone = (0.5 * np.sin(2 * np.pi * 3000.0 * t)).astype(np.float64)
     sig = np.stack([tone, tone], axis=1)
     out = rm._dynamic_eq(sig, SR, freq_hz=3000.0, q=4.0, threshold_db=-30.0,
-                         ratio=4.0, attack_ms=5.0, release_ms=80.0, gain_db=-12.0)
+                         attack_ms=5.0, release_ms=80.0, gain_db=-12.0)
     assert np.all(np.isfinite(out))
     assert float(np.max(np.abs(out))) <= float(np.max(np.abs(sig))) + 1e-6
     rms = lambda a: float(np.sqrt(np.mean(a ** 2)))
@@ -326,8 +335,8 @@ def test_saturation_in_monitor_contract():
                                  "drive_db": 6.0}])
     assert out["entries"] == [{"type": "saturation", "drive_db": 6.0,
                                "output_db": 0.0, "curve": 0, "mix": 1.0,
-                               # oversample 1 = off, the exact elementwise path (2026-09-06)
-                               "oversample": 1, "enabled": True}]
+                               # an unkeyed entry: the default factor, dsp.SAT_OVERSAMPLE_DEFAULT (2026-10-24)
+                               "oversample": 4, "enabled": True}]
     assert out["print_only"] == []
 
 
@@ -462,54 +471,41 @@ def _band_rms_db(a, lo, hi):
     return 20.0 * np.log10(float(np.sqrt(np.mean(np.abs(spec[m]) ** 2))) + 1e-12)
 
 
-def test_deess_v2_range_caps_and_wide_dips_the_whole_signal():
-    """De-ess v2 offline: split mode cuts only the sibilant band (the low bed is
-    untouched); wide mode dips the bed too; range_db caps the reduction depth;
-    the render is deterministic."""
+def test_deess_range_caps_and_wide_dips_the_whole_signal():
+    """The de-esser (2026-10-27, deess_law) offline: split mode cuts the sibilant band and leaves the
+    low bed all but untouched (its shelf is gentle: a few tenths at most); wide mode dips the bed too;
+    range_db caps the depth; the render is deterministic."""
     from mix_engine import dsp
     audio = _deess_test_sig()
-    base = {"type": "deess", "threshold_db": -30.0, "freq_hz": 5000.0}
+    base = {"type": "deess", "threshold_db": -30.0, "freq_hz": 5000.0, "range_db": -12.0}
     split = dsp._deess(audio, SR, base)
     assert _band_rms_db(split, 6e3, 10e3) - _band_rms_db(audio, 6e3, 10e3) < -3.0
-    assert abs(_band_rms_db(split, 150, 300) - _band_rms_db(audio, 150, 300)) < 0.1
+    assert abs(_band_rms_db(split, 150, 300) - _band_rms_db(audio, 150, 300)) < 0.3
     wide = dsp._deess(audio, SR, {**base, "wide": True})
-    assert _band_rms_db(wide, 150, 300) - _band_rms_db(audio, 150, 300) < -1.5
+    assert _band_rms_db(wide, 150, 300) - _band_rms_db(audio, 150, 300) < -1.0
     ranged = dsp._deess(audio, SR, {**base, "range_db": -3.0})
     assert (_band_rms_db(ranged, 6e3, 10e3) - _band_rms_db(audio, 6e3, 10e3)
             > -3.5)                                        # depth capped near -3
     assert np.array_equal(split, dsp._deess(audio, SR, base))   # deterministic
 
 
-def test_deess_v2_contract_carries_new_fields_and_reference_renders():
-    """monitor_chain_params passes the freed dynamics + range/wide through (with
-    back-compat defaults for pre-v2 entries); reference_monitor renders them."""
+def test_deess_contract_carries_its_fields_and_reference_renders():
+    """monitor_chain_params passes the band, the range, the mode and wide through - a range saved
+    deeper than 24 dB held to it, an entry saved before 2026-10-27 read with the new defaults - and
+    reference_monitor renders them."""
     out = monitor_chain_params(
-        [{"type": "deess", "stem_id": "v", "threshold_db": -24.0, "freq_hz": 6000.0,
-          "ratio": 8.0, "attack_ms": 2.0, "release_ms": 80.0,
-          "range_db": -9.0, "wide": True}])
+        [{"type": "deess", "stem_id": "v", "threshold_db": -24.0, "freq_hz": 6000.0, "top_hz": 12000.0,
+          "range_db": -9.0, "mode": "vocal", "wide": True}])
     d = next(e for e in out["entries"] if e["type"] == "deess")
-    assert d["ratio"] == 8.0 and d["range_db"] == -9.0 and d["wide"] is True
+    assert d["top_hz"] == 12000.0 and d["range_db"] == -9.0 and d["mode"] == 1 and d["wide"] is True
+    assert "ratio" not in d and "attack_ms" not in d and "release_ms" not in d
     legacy = monitor_chain_params(
-        [{"type": "deess", "stem_id": "v", "threshold_db": -24.0,
-          "freq_hz": 6000.0}])                             # a pre-v2 session entry
+        [{"type": "deess", "stem_id": "v", "threshold_db": -24.0, "freq_hz": 6000.0,
+          "ratio": 4.0, "attack_ms": 1.0, "release_ms": 50.0, "range_db": -80.0}])   # saved before
     ld = next(e for e in legacy["entries"] if e["type"] == "deess")
-    assert ld["ratio"] == 4.0 and ld["range_db"] == -80.0 and ld["wide"] is False
+    assert ld["range_db"] == -24.0 and ld["mode"] == 0 and ld["top_hz"] == 20000.0 and ld["wide"] is False
     ref = rm.render_monitor(_deess_test_sig().T.astype(np.float64), SR, out)
     assert np.all(np.isfinite(ref))
-
-
-def test_deess_ratio_guardrailed_for_agent():
-    """De-ess v2: the agent's ratio obeys the comp dynamics ceiling (10:1); the
-    schema still allows up to 20 for the user's hand knob."""
-    from mix_engine.guardrails import validate_proposal
-    from mix_engine.models import DeessAction, ProposalRequest
-    mk = lambda r: ProposalRequest(
-        rationale="x", predicted_impact=[],
-        actions=[DeessAction(stem_id="vox", threshold_db=-24.0, freq_hz=6000.0,
-                             ratio=r)])
-    assert validate_proposal(mk(8.0), {}) == []
-    hot = validate_proposal(mk(16.0), {})
-    assert any(v.rule == "comp_ratio_max" for v in hot)
 
 
 def test_transient_shapes_attack_and_is_bounded():
@@ -531,122 +527,6 @@ def test_transient_shapes_attack_and_is_bounded():
     assert float(np.max(np.abs(boosted[onset]))) > sig_pk      # onset emphasised
     assert float(np.max(np.abs(cut[onset]))) < sig_pk          # onset softened
     assert float(np.max(np.abs(boosted))) <= float(np.max(np.abs(sig))) * 2.05  # ~+6 dB cap
-
-
-# ---------- band_width (perceptual; min-phase bandpass approximation) ------
-
-def test_band_width_widens_and_narrows_its_band():
-    """Per-band width: widening a band raises its side-channel energy in that band,
-    narrowing toward mono lowers it; output finite (perceptual approximation of
-    dsp._band_width_scale)."""
-    from numpy.fft import rfft, rfftfreq
-    sig = _sig(seed=11, amp=0.3)
-    common = {"freq_hz": 2828.0, "q": 1.41}   # presence band (2–4 kHz)
-    wide = rm.render_monitor(sig, SR, {
-        "entries": [{"type": "band_width", "width": 2.0, **common}], "print_only": []})
-    narrow = rm.render_monitor(sig, SR, {
-        "entries": [{"type": "band_width", "width": 0.0, **common}], "print_only": []})
-    assert np.all(np.isfinite(wide)) and np.all(np.isfinite(narrow))
-    freqs = rfftfreq(sig.shape[0], 1.0 / SR)
-    band = (freqs > 2000.0) & (freqs < 4000.0)
-    side = lambda a: float(np.mean(np.abs(rfft(a[:, 0] - a[:, 1])[band])))
-    assert side(wide) > side(sig)        # widened band -> more side energy
-    assert side(narrow) < side(sig)      # mono'd band -> less
-
-
-def test_imager_isolates_bands_and_reference_mirrors():
-    """Imager: ONE LR8 law in both engines since 2026-10-21 (the imager audit; it was an offline
-    FFT split against a native LR4) - mono'd lows lose their side below the low crossover (about
-    40 dB, not all of it: a causal split), widened highs gain it above the high one, the mids keep
-    theirs; all-unity widths keep every level (the split's allpass, not a bit-identical pass). The
-    reference monitor runs the same numbers."""
-    from mix_engine import dsp
-    rng = np.random.default_rng(21)
-    sig = rng.standard_normal((SR, 2)) * 0.2
-    e = {"type": "imager", "width_low": 0.0, "width_mid": 1.0, "width_high": 1.5,
-         "crossover_lo_hz": 150.0, "crossover_hi_hz": 2000.0}
-
-    def side_energy(a, lo, hi):
-        s = np.asarray(a[:, 0] - a[:, 1], np.float64)
-        spec = np.fft.rfft(s)
-        f = np.fft.rfftfreq(s.size, 1.0 / SR)
-        m = (f >= lo) & (f < hi)
-        return float(np.sqrt(np.mean(np.abs(spec[m]) ** 2)))
-
-    out = dsp._imager(sig, SR, e)
-    assert side_energy(out, 30, 100) < side_energy(sig, 30, 100) * 10 ** (-30 / 20)   # lows mono'd
-    assert side_energy(out, 400, 1000) == pytest.approx(side_energy(sig, 400, 1000), rel=0.03)
-    assert side_energy(out, 4000, 10000) == pytest.approx(side_energy(sig, 4000, 10000) * 1.5, rel=0.03)
-    unity = dsp._imager(sig, SR, {"type": "imager"})
-    for lo, hi in ((30, 150), (150, 2000), (2000, 20000)):
-        assert side_energy(unity, lo, hi) == pytest.approx(side_energy(sig, lo, hi), rel=0.01)
-
-    resolved = monitor_chain_params([{**e, "stem_id": "m"}])
-    ie = next(x for x in resolved["entries"] if x["type"] == "imager")
-    assert ie["width_low"] == 0.0 and ie["crossover_hi_hz"] == 2000.0
-    ref = rm.render_monitor(sig, SR, resolved)
-    assert np.all(np.isfinite(ref))
-    np.testing.assert_allclose(ref, dsp._imager(sig, SR, e), rtol=0, atol=1e-12)   # one law
-
-
-def test_imager_crossed_crossovers_stay_complementary():
-    """Crossed crossovers (lo >= hi — reachable via the per-param co-edit clamps,
-    which don't cross-check the pair) must NOT double-count the overlap into two
-    bands: the guard re-orders hi to lo*1.5 (the _multiband_comp convention), so
-    total energy stays bounded and the reference LR4 mirror agrees."""
-    from mix_engine import dsp
-    rng = np.random.default_rng(22)
-    sig = rng.standard_normal((SR, 2)) * 0.2
-    e = {"type": "imager", "width_low": 1.0, "width_mid": 1.0, "width_high": 1.2,
-         "crossover_lo_hz": 3000.0, "crossover_hi_hz": 250.0}   # crossed on purpose
-    out = dsp._imager(sig, SR, e)
-    assert np.all(np.isfinite(out))
-    # Without the guard the 250-3000 Hz bins land in BOTH the low and high band
-    # (~2x amplitude: 1.36x total RMS on this signal). With it, ~1.08x (the 1.2
-    # width's share) — assert well under the unguarded figure.
-    assert float(np.sqrt(np.mean(out**2))) < float(np.sqrt(np.mean(sig**2))) * 1.2
-    ref = rm._imager(sig, SR, e)
-    assert np.all(np.isfinite(ref))
-    assert float(np.sqrt(np.mean(ref**2))) < float(np.sqrt(np.mean(sig**2))) * 1.2
-
-
-def test_imager_session_roundtrip_and_replace(demo_project):
-    """The imager is user-addable on stems + master, DEVICE_PARAMS edits its flat
-    width/crossover keys, and an agent re-proposal REPLACES the existing one."""
-    from mix_engine.session import Session
-    s = Session(demo_project)
-    stem = next(iter(s._state["stems"]))
-    s.add_stem_device(stem, "imager")
-    assert any(e["type"] == "imager" for e in s._state["stems"][stem]["chain"])
-    s.add_master_device("imager")
-    assert any(e["type"] == "imager" for e in s._state["master_chain"])
-    out = s.set_master_device_param("imager", 0, "width_low", 0.2, target=stem)
-    assert out["value"] == 0.2
-    entry = next(e for e in s._state["stems"][stem]["chain"] if e["type"] == "imager")
-    assert entry["width_low"] == 0.2 and "low" not in entry   # FLAT key, no nesting
-    from mix_engine.models import ImagerAction
-    s._mutate(ImagerAction(stem_id=stem, width_high=1.4))
-    imagers = [e for e in s._state["stems"][stem]["chain"] if e["type"] == "imager"]
-    assert len(imagers) == 1 and imagers[0]["width_high"] == 1.4   # replaced, not stacked
-
-
-def test_band_width_mono_is_noop():
-    sig = _sig(seed=12, amp=0.3, ch=1)
-    out = rm.render_monitor(sig, SR, {
-        "entries": [{"type": "band_width", "freq_hz": 2828.0, "q": 1.41, "width": 1.8}],
-        "print_only": []})
-    assert _err_db(sig, out) < -120.0
-
-
-def test_band_width_contract_resolves_label_to_bandpass():
-    """Contract: the band LABEL resolves to a bandpass center+Q the native engine
-    consumes (it has no band names), heard live (not print_only)."""
-    out = monitor_chain_params([{"type": "band_width", "stem_id": "vox",
-                                 "band": "presence", "width": 1.5}])
-    (e,) = out["entries"]
-    assert e["type"] == "band_width" and e["width"] == 1.5 and e["enabled"] is True
-    assert 2000 < e["freq_hz"] < 4000 and e["q"] > 0    # presence geometric center
-    assert out["print_only"] == []
 
 
 # ---------- master-bus saturation + width (Piece A) -----------------------
@@ -704,7 +584,7 @@ def test_master_color_devices_add_edit_and_order(demo_project):
 
 
 def test_add_stem_color_device(demo_project):
-    """Piece C: the user hand-places color (transient/de-ess/band_width) on a captured
+    """Piece C: the user hand-places color (transient/de-ess) on a captured
     track via add_stem_device; it lands in the chain, resolves to a live monitor entry,
     edits/clamps via the co-edit param path, and removes. Phase 43 device freedom: these
     now also render on the master (add_master_device), so the master rail accepts them too."""
@@ -713,7 +593,7 @@ def test_add_stem_color_device(demo_project):
     s = Session(demo_project)
     stem = next(iter(s._state["stems"]))
 
-    for dev in ("transient", "deess", "band_width"):
+    for dev in ("transient", "deess"):
         s.add_stem_device(stem, dev)
         assert any(e["type"] == dev for e in s._state["stems"][stem]["chain"])
     s.add_master_device("transient")              # device freedom: color on the master too
@@ -729,7 +609,7 @@ def test_add_stem_color_device(demo_project):
 
     mc = monitor_chain_params(effective_chain(s._state["stems"][stem]))
     types = [e["type"] for e in mc["entries"]]
-    assert {"transient", "deess", "band_width"} <= set(types)   # all heard live
+    assert {"transient", "deess"} <= set(types)   # all heard live
     assert mc["print_only"] == []
 
     s.remove_stem_device(stem, "deess", 0)
@@ -765,7 +645,7 @@ def test_set_master_param_user_coedit(demo_project):
 def test_add_remove_master_device_user_coedit(demo_project):
     """Phase 40 co-edit: the user adds/removes master devices directly (no proposal).
     Defaults match the render shape, the freshly added device is immediately editable,
-    render order stays canonical, and there is at most one limiter."""
+    render order stays canonical, and - since Phase 65 - a second limiter is the user's to add."""
     from mix_engine.session import Session, effective_master_chain
     s = Session(demo_project)
 
@@ -776,13 +656,12 @@ def test_add_remove_master_device_user_coedit(demo_project):
 
     s.add_master_device("comp")
     s.add_master_device("limiter")
-    with pytest.raises(ValueError):
-        s.add_master_device("limiter")               # one limiter max
+    s.add_master_device("limiter")                   # as many as the user likes (Phase 65)
     with pytest.raises(ValueError):
         s.add_master_device("reverb")                # unknown device
 
     order = [e["type"] for e in effective_master_chain(s._state)]
-    assert order == ["gain", "eq", "comp", "limiter"]   # canonical, not insertion order
+    assert order == ["gain", "eq", "comp", "limiter", "limiter"]   # canonical, not insertion order
 
     s.add_master_device("dynamic_eq")                # default is a valid cut (gain != 0)
     assert any(e["type"] == "dynamic_eq" for e in s._state["master_chain"])
@@ -819,7 +698,7 @@ def test_set_master_device_param_full_config(demo_project):
 def test_output_and_makeup_gains_user_coedit(demo_project):
     """Phase 40 co-edit: the newly-surfaced output/makeup gains are editable and
     clamped — mb_comp per-band makeup (nested under low/mid/high), saturation +
-    clip output trim, and the limiter's loudness target (its output gain)."""
+    the clipper's gain, and the limiter's loudness target (its output gain)."""
     from mix_engine.session import Session
     s = Session(demo_project)
 
@@ -835,9 +714,10 @@ def test_output_and_makeup_gains_user_coedit(demo_project):
             if e["type"] == "saturation"][0]["output_db"] == -6.0
 
     s.add_master_device("clip")
-    s.set_master_device_param("clip", 0, "output_db", 99.0)          # clamp to +12
-    assert [e for e in s._state["master_chain"]
-            if e["type"] == "clip"][0]["output_db"] == 12.0
+    s.set_master_device_param("clip", 0, "gain_db", 99.0)            # clamp to +12 (its gain, before the clip)
+    s.set_master_device_param("clip", 0, "oversample", 8.0)          # on = 2x: held to 2
+    clip = [e for e in s._state["master_chain"] if e["type"] == "clip"][0]
+    assert clip["gain_db"] == 12.0 and clip["oversample"] == 2.0
 
     s.add_master_device("limiter")
     s.set_master_device_param("limiter", 0, "target_lufs_i", -14.0)
@@ -1049,9 +929,9 @@ def test_second_singleton_device_is_refused(demo_project):
 
     s = Session(demo_project)
     s._state["master_chain"] = []
-    s.add_master_device("comp")
+    s.add_master_device("width")   # every other device left this list in Phase 65 (test_phase65_stacked_comps.py)
     with pytest.raises(ValueError, match="one per chain"):
-        s.add_master_device("comp")
+        s.add_master_device("width")
     # multi-entry types are unaffected — an EQ bank is many bands by design
     s.add_master_device("eq")
     s.add_master_device("eq")
@@ -1067,7 +947,7 @@ def test_monitor_chain_params_splits_live_and_print_only():
          "band_gains_db": {"presence": 3.0, "air": -4.0}},
         {"type": "transpose", "semitones": 2},
         {"type": "dynamic_eq", "stem_id": "master", "freq_hz": 3000.0, "q": 4.0,
-         "threshold_db": -28.0, "ratio": 3.0, "attack_ms": 8.0,
+         "threshold_db": -28.0, "attack_ms": 8.0,
          "release_ms": 90.0, "gain_db": -6.0},
         {"type": "comp", "threshold_db": -18.0, "ratio": 2.0, "attack_ms": 10.0,
          "release_ms": 120.0, "makeup_db": 0.0, "mix": 1.0},
@@ -1110,7 +990,7 @@ def test_monitor_chain_params_splits_live_and_print_only():
     eq = out["entries"][1]
     assert eq["shape"] == "peak" and eq["freq_hz"] == 1000.0 and eq["q"] == 1.0
     deq = next(e for e in out["entries"] if e["type"] == "dynamic_eq")
-    assert deq["freq_hz"] == 3000.0 and deq["gain_db"] == -6.0 and deq["ratio"] == 3.0
+    assert deq["freq_hz"] == 3000.0 and deq["gain_db"] == -6.0 and "ratio" not in deq
     mb = next(e for e in out["entries"] if e["type"] == "mb_comp")
     assert mb["low"]["ratio"] == 3.0 and mb["high"]["threshold_db"] == -26.0
     assert mb["attack_ms"] == 12.0
@@ -1212,105 +1092,86 @@ def test_gateway_injects_send_return_for_a_sending_track():
     assert gtr == []
 
 
-# ---------- pre-limiter clipper (Phase 41; memoryless, bit-exact tier) ------
+# ---------- the clipper (Phase 41; clip_law since 2026-10-28; memoryless, bit-exact tier) ------
 
-@pytest.mark.parametrize("hardness", [0.0, 0.5, 1.0])
-def test_master_clip_render_matches_monitor(hardness):
+@pytest.mark.parametrize("softness", [0.0, 0.5, 1.0])
+def test_master_clip_render_matches_monitor(softness):
     """The master clipper nulls between the offline render (dsp._apply_master_chain ->
     _clip) and the live-monitor reference — memoryless, so bit-exact (like saturation)."""
     sig = _sig(seed=21, amp=0.6)
-    chain = [{"type": "clip", "threshold_db": -3.0, "hardness": hardness}]
+    chain = [{"type": "clip", "gain_db": 3.0, "clip_pct": 70.0, "softness": softness}]
     oracle = dsp._apply_master_chain(sig.copy(), SR, chain, report=None)
     ref = rm.render_monitor(sig, SR, monitor_chain_params(chain))
     assert _err_db(oracle, ref) < -100.0
 
 
 def test_clip_shaves_peaks():
-    """Hard clip caps at the threshold; any clip shaves the peak below the input's."""
+    """A hard clip caps at the ceiling; any clip shaves the peak below the input's."""
     sig = _sig(seed=22, amp=0.8)
-    t = 10.0 ** (-6.0 / 20.0)
     hard = rm.render_monitor(sig, SR, monitor_chain_params(
-        [{"type": "clip", "threshold_db": -6.0, "hardness": 1.0}]))
-    assert float(np.max(np.abs(hard))) <= t + 1e-6                  # capped at threshold
+        [{"type": "clip", "clip_pct": 50.0}]))
+    assert float(np.max(np.abs(hard))) <= 0.5 + 1e-6                # capped at the ceiling
     assert float(np.max(np.abs(hard))) < float(np.max(np.abs(sig)))  # peaks shaved
 
 
 def test_clip_contract_resolves():
     out = monitor_chain_params([{"type": "clip", "stem_id": "master",
-                                 "threshold_db": -4.0, "hardness": 0.7}])
+                                 "gain_db": 2.0, "clip_pct": 80.0, "softness": 0.3}])
     assert out["print_only"] == []
     c = next(e for e in out["entries"] if e["type"] == "clip")
-    assert c["threshold_db"] == -4.0 and c["hardness"] == 0.7
-    assert c["output_db"] == 0.0   # the output trim serializes (default neutral)
+    assert (c["gain_db"], c["clip_pct"], c["softness"], c["oversample"]) == (2.0, 80.0, 0.3, 1)
 
 
-@pytest.mark.parametrize("output_db", [-4.0, 4.0])
-def test_clip_output_trim_matches_dsp_bit_exact(output_db):
-    """The clipper's output trim is a plain gain applied last — the offline render
-    and the live-monitor reference still null (memoryless, like the rest of clip)."""
-    sig = _sig(seed=23, amp=0.6)
-    chain = [{"type": "clip", "threshold_db": -3.0, "hardness": 0.5,
-              "output_db": output_db}]
-    oracle = dsp._apply_master_chain(sig.copy(), SR, chain, report=None)
-    ref = rm.render_monitor(sig, SR, monitor_chain_params(chain))
-    assert _err_db(oracle, ref) < -100.0
-
-
-def test_clip_v2_oversampling_reduces_true_peak_overshoot():
-    """Clip v2: on a tone with inter-sample peaks, the naive hard clip overshoots
-    the threshold true-peak-wise; the 4x oversampled path measurably reduces that
-    overshoot. Length-preserving, deterministic, and oversample=1 stays
-    bit-identical to the legacy memoryless path."""
-    from scipy.signal import resample_poly
+def test_clip_oversampling_reduces_aliasing_and_holds_full_scale():
+    """Oversampling on: the knee at 2x - on a bright tone clipped under a 50 % ceiling the folded
+    harmonics drop - and the output never passes 0 dBFS. Length-preserving, deterministic, and
+    oversample 1 is the memoryless path."""
     from mix_engine import dsp
     t = np.arange(SR) / SR
-    sig = np.repeat((0.9 * np.sin(2 * np.pi * 10937.0 * t + 0.3))[:, None], 2, axis=1)
-    base = {"type": "clip", "threshold_db": -6.0, "hardness": 1.0, "output_db": 0.0}
+    sig = np.repeat((3.0 * np.sin(2 * np.pi * 7100.0 * t + 0.3))[:, None], 2, axis=1)
+    base = {"type": "clip", "clip_pct": 50.0}
     naive = dsp._clip(sig, base)
-    os4 = dsp._clip(sig, {**base, "oversample": 4})
-    tp = lambda a: 20.0 * np.log10(float(np.max(np.abs(resample_poly(a, 8, 1, axis=0)))))
-    assert os4.shape == sig.shape
-    assert tp(os4) < tp(naive) - 0.5                       # measurably less overshoot
-    assert np.array_equal(naive, dsp._clip(sig, {**base, "oversample": 1}))  # 1 == legacy
-    assert np.array_equal(os4, dsp._clip(sig, {**base, "oversample": 4}))    # deterministic
+    os2 = dsp._clip(sig, {**base, "oversample": 2})
+    def folded(a):
+        A = np.abs(np.fft.rfft(a[:, 0] * np.hanning(len(a))))
+        f = np.fft.rfftfreq(len(a), 1 / SR)
+        return A[np.argmin(np.abs(f - 12500.0))]
+    assert os2.shape == sig.shape
+    assert folded(os2) < folded(naive) / 30.0
+    assert float(np.max(np.abs(dsp._clip(sig * 3, {"type": "clip", "oversample": 2})))) <= 1.0
+    assert np.array_equal(os2, dsp._clip(sig, {**base, "oversample": 2}))    # deterministic
 
 
-def test_clip_v2_contract_and_model_bounds():
-    """The chain contract carries oversample (default 1 for pre-v2 entries), the
-    reference monitor renders the oversampled entry, and the model rejects
-    non-power-of-2 factors."""
+def test_clip_contract_and_model_bounds():
+    """The chain contract carries oversample (default 1), the reference monitor renders the
+    oversampled entry, and the model takes only 1 (off) and 2 (on)."""
     from mix_engine.models import ClipAction
-    out = monitor_chain_params(
-        [{"type": "clip", "stem_id": "master", "threshold_db": -4.0,
-          "hardness": 0.7, "oversample": 4}])
+    out = monitor_chain_params([{"type": "clip", "stem_id": "master", "clip_pct": 60.0, "oversample": 2}])
     c = next(e for e in out["entries"] if e["type"] == "clip")
-    assert c["oversample"] == 4
-    legacy = monitor_chain_params(
-        [{"type": "clip", "stem_id": "master", "threshold_db": -4.0}])
-    lc = next(e for e in legacy["entries"] if e["type"] == "clip")
-    assert lc["oversample"] == 1
+    assert c["oversample"] == 2
     sig = _sig(seed=24, amp=0.6)
-    ref = rm.render_monitor(sig, SR, out)
-    assert np.all(np.isfinite(ref))
-    assert ClipAction(stem_id="master", oversample=8).oversample == 8
+    assert np.all(np.isfinite(rm.render_monitor(sig, SR, out)))
+    assert ClipAction(stem_id="master", oversample=2).oversample == 2
     with pytest.raises(ValueError):
-        ClipAction(stem_id="master", oversample=3)
+        ClipAction(stem_id="master", oversample=4)
 
 
 def test_clip_guardrailed_for_agent_but_user_addable_on_stem(demo_project):
-    """The agent can't clip deeper than the -6 dB floor (guardrails bind the agent, not the
-    user); the USER can hand-place clip on a stem too (Phase 43 device freedom)."""
+    """The agent can't put the ceiling more than 6 dB under its input's full scale (CLIP in dB
+    minus GAIN; guardrails bind the agent, not the user); the USER can hand-place clip on a stem
+    too (Phase 43 device freedom)."""
     from mix_engine.guardrails import validate_proposal
     from mix_engine.models import ClipAction, ProposalRequest
     from mix_engine.session import Session
     s = Session(demo_project)
     stem = next(iter(s._state["stems"]))
-    mk = lambda thr: ProposalRequest(
+    mk = lambda gain, pct: ProposalRequest(
         rationale="x", predicted_impact=[],
-        actions=[ClipAction(stem_id="master", threshold_db=thr, hardness=0.5)])
-    assert validate_proposal(mk(-3.0), {}) == []                 # tasteful master clip
-    deep = validate_proposal(mk(-9.0), {})                       # too aggressive
-    assert any(v.rule == "clip_threshold_min_db" for v in deep)
+        actions=[ClipAction(stem_id="master", gain_db=gain, clip_pct=pct, softness=0.3)])
+    assert validate_proposal(mk(0.0, 71.0), {}) == []            # tasteful master clip (-3 dB)
+    assert validate_proposal(mk(3.0, 100.0), {}) == []           # the same depth by gain
+    for deep in (mk(0.0, 35.0), mk(9.0, 100.0), mk(4.0, 60.0)):  # -9 dB, -9 dB, -8.4 dB
+        assert any(v.rule == "clip_threshold_min_db" for v in validate_proposal(deep, {}))
     # device freedom: the user CAN hand-add clip on a stem (it renders as a peak clipper)
     s.add_stem_device(stem, "clip")
     assert any(e["type"] == "clip" for e in s._state["stems"][stem]["chain"])
@@ -1388,70 +1249,6 @@ def test_set_device_channel_roundtrips(demo_project):
         s.set_device_channel("eq", 0, "nope", target=stem)
     with pytest.raises(ValueError):
         s.set_device_channel("saturation", 0, "mid", target=stem)
-
-
-def test_set_device_band_roundtrips(demo_project):
-    """Band-width band selector (2026-07-05): the user picks the device's band
-    LABEL on a stem; the contract re-resolves it to the new bandpass center; a
-    bogus label or missing device is rejected."""
-    from mix_engine.session import Session
-    s = Session(demo_project)
-    stem = next(iter(s._state["stems"]))
-    s._state["stems"][stem]["chain"].append(
-        {"type": "band_width", "stem_id": stem, "band": "presence", "width": 1.4})
-    assert s.set_device_band(0, "bass", target=stem)["band"] == "bass"
-    bw = next(e for e in s._state["stems"][stem]["chain"] if e["type"] == "band_width")
-    assert bw["band"] == "bass"
-    resolved = monitor_chain_params(s._state["stems"][stem]["chain"])
-    rbw = next(e for e in resolved["entries"] if e["type"] == "band_width")
-    # bass = 60..150 Hz -> fc = round(sqrt(60*150), 1) = 94.9, q = round(fc/90, 4)
-    assert rbw["freq_hz"] == pytest.approx(94.9, abs=0.05)
-    assert rbw["band"] == "bass"       # the label rides along for the UI selector
-    with pytest.raises(ValueError):
-        s.set_device_band(0, "bogus", target=stem)
-    with pytest.raises(ValueError):
-        s.set_device_band(3, "bass", target=stem)   # no such occurrence
-
-
-def test_set_device_band_custom_edges(demo_project):
-    """Free band scrub (2026-07-19): explicit lo/hi place the band anywhere —
-    stored on the entry, resolved to fc = sqrt(lo*hi) with the edges riding
-    along; the offline render honours them; a preset pick clears them."""
-    import numpy as np
-
-    from mix_engine import dsp
-    from mix_engine.session import Session
-    s = Session(demo_project)
-    stem = next(iter(s._state["stems"]))
-    s._state["stems"][stem]["chain"].append(
-        {"type": "band_width", "stem_id": stem, "band": "presence", "width": 1.6})
-    out = s.set_device_band(0, lo_hz=300.0, hi_hz=1200.0, target=stem)
-    assert out["lo_hz"] == 300.0 and out["hi_hz"] == 1200.0
-    resolved = monitor_chain_params(s._state["stems"][stem]["chain"])
-    rbw = next(e for e in resolved["entries"] if e["type"] == "band_width")
-    assert rbw["freq_hz"] == pytest.approx((300.0 * 1200.0) ** 0.5, abs=0.1)
-    assert rbw["band"] == "custom"
-    assert rbw["lo_hz"] == 300.0 and rbw["hi_hz"] == 1200.0
-    # offline render: the custom band moves, the presence label band does NOT
-    sr = 44100
-    t = np.arange(sr) / sr
-    sine = np.stack([np.sin(2 * np.pi * 600.0 * t),
-                     -np.sin(2 * np.pi * 600.0 * t)], axis=1)  # pure side @600 Hz
-    entry = {"type": "band_width", "band": "presence", "width": 0.0,
-             "lo_hz": 300.0, "hi_hz": 1200.0}
-    narrowed = dsp._band_width_scale(sine, sr, entry)
-    # 600 Hz side content at the centre of a two-octave band: -42 dB once the split has settled
-    # (a 48 dB/oct split since 2026-10-21, the band width audit; the FFT mask erased it to 1e-6)
-    assert np.abs(narrowed[sr // 2:]).max() < 10 ** (-36 / 20)
-    entry_label_only = {"type": "band_width", "band": "presence", "width": 0.0}
-    untouched = dsp._band_width_scale(sine, sr, entry_label_only)
-    assert np.abs(untouched).max() > 0.9          # presence band (2-4k) misses 600 Hz
-    # bad edges rejected; a preset pick clears the custom edges
-    with pytest.raises(ValueError):
-        s.set_device_band(0, lo_hz=1200.0, hi_hz=300.0, target=stem)
-    s.set_device_band(0, "bass", target=stem)
-    bw = next(e for e in s._state["stems"][stem]["chain"] if e["type"] == "band_width")
-    assert "lo_hz" not in bw and "hi_hz" not in bw and bw["band"] == "bass"
 
 
 def test_ms_contract_carries_channel():
@@ -1699,72 +1496,75 @@ def test_gate_threshold_guardrailed_for_agent():
 
 
 def test_user_can_edit_a_stem_duck_param(demo_project):
-    """Phase 41: the user dials the agent's duck directly (native VST co-edit) — on a
-    per-track insert the edit targets THAT stem's duck, clamped to the model range."""
+    """Phase 41: the user dials the agent's duck directly (the DAW's co-edit) — on a
+    per-track insert the edit targets THAT stem's duck, clamped (duck_law's knobs, 2026-10-28)."""
     from mix_engine.session import Session
     s = Session(demo_project)
     stem = next(iter(s._state["stems"]))
     s._state["stems"][stem]["chain"].append(
-        {"type": "duck", "stem_id": stem, "key_stem_id": "kick",
-         "threshold_db": -40.0, "depth_db": 5.0, "attack_ms": 5.0, "release_ms": 120.0})
-    out = s.set_master_device_param("duck", 0, "depth_db", 8.0, target=stem)
-    assert out["value"] == 8.0
+        {"type": "duck", "stem_id": stem, "key_stem_id": "kick", "trigger": 1, "mix": 0.5})
+    out = s.set_master_device_param("duck", 0, "mix", 0.8, target=stem)
+    assert out["value"] == 0.8
     duck = next(e for e in s._state["stems"][stem]["chain"] if e["type"] == "duck")
-    assert duck["depth_db"] == 8.0
-    s.set_master_device_param("duck", 0, "depth_db", 99.0, target=stem)   # clamps to 12
-    assert duck["depth_db"] == 12.0
+    assert duck["mix"] == 0.8
+    s.set_master_device_param("duck", 0, "mix", 99.0, target=stem)   # clamps to 1
+    assert duck["mix"] == 1.0
+    s.set_master_device_param("duck", 0, "curve", 9.4, target=stem)  # an index: snapped
+    assert duck["curve"] == 9
 
 
-# ---------- sidechain duck (Phase 41; perceptual tier, host sidechain key) --
+# ---------- the duck (duck_law, 2026-10-28: the host sidechain's hits restart a curve) --
 
 def _duck_entry(**kw):
     base = {"type": "duck", "stem_id": "bass", "key_stem_id": "kick",
-            "threshold_db": -40.0, "depth_db": 8.0, "attack_ms": 5.0,
-            "release_ms": 150.0}
+            "trigger": 1, "curve": 1, "length": 1, "mix": 1.0}
     base.update(kw)
     return base
 
 
-def test_duck_reduces_under_a_loud_key_and_releases():
-    """The native duck reads the key off the host sidechain (Phase 41 Option A):
-    it ducks the main where the key is loud and releases where the key is silent,
-    bounded by depth_db. Per-sample causal approximation of dsp._duck (perceptual,
-    not a tight null) — the export keeps the offline duck-free key render."""
+def _kicks(n: int, at_s) -> np.ndarray:
+    k = np.zeros((n, 2))
+    tt = np.arange(int(0.2 * SR)) / SR
+    hit = 0.9 * np.sin(2 * np.pi * np.cumsum(50 + 100 * np.exp(-tt / 0.03)) / SR) * np.exp(-tt / 0.12)
+    for a in at_s:
+        i = int(a * SR); m = min(hit.size, n - i)
+        k[i:i + m] += hit[:m, None]
+    return k
+
+
+def test_duck_reduces_under_a_hit_and_comes_back():
+    """The native duck reads the hits off the host sidechain: a hit dips the main and the curve
+    brings it back; with no hit the main is untouched. The monitor's law is duck_law's."""
     sig = _sig(seconds=2.0, seed=11, amp=0.3)
     n = sig.shape[0]
-    key = np.zeros_like(sig)
-    key[: n // 2] = _sig(seconds=2.0, seed=12, amp=0.5)[: n // 2]   # key loud in the first half only
+    key = _kicks(n, [0.25])
     params = monitor_chain_params([_duck_entry()])
     out = rm.render_monitor(sig, SR, params, sidechain=key)
     assert np.all(np.isfinite(out))
-
     rms = lambda a: float(np.sqrt(np.mean(a ** 2)))
-    half = n // 2
-    assert rms(out[:half]) < 0.85 * rms(sig[:half])           # ducked under the key
-    tail = slice(half + int(0.35 * SR), n)                    # well past the release
-    assert rms(out[tail]) == pytest.approx(rms(sig[tail]), rel=0.02)
-    assert rms(out[:half]) >= rms(sig[:half]) * 10.0 ** (-8.0 / 20.0) * 0.9   # <= depth
+    dip = slice(int(0.26 * SR), int(0.30 * SR))
+    assert rms(out[dip]) < 0.2 * rms(sig[dip])                 # under the hit
+    tail = slice(int(1.0 * SR), n)                             # the curve is over
+    assert rms(out[tail]) == pytest.approx(rms(sig[tail]), rel=0.01)
 
 
 def test_duck_no_sidechain_is_noop():
-    """No key connected (sidechain=None) -> the duck passes through untouched, so
-    inserting the plugin without routing a sidechain never gates the audio."""
+    """A TRACK duck with no key connected (sidechain=None) passes through untouched, so
+    inserting it without routing a trigger never gates the audio."""
     sig = _sig(seed=13, amp=0.3)
     params = monitor_chain_params([_duck_entry()])
     out = rm.render_monitor(sig, SR, params, sidechain=None)
     assert _err_db(sig, out) < -200.0
 
 
-def test_duck_contract_resolves_amount_and_timing():
-    """The contract carries only amount/timing (the native engine reads the key
-    live); key_stem_id rides along as advisory intent. It is heard live, never
-    print_only."""
-    out = monitor_chain_params([_duck_entry(threshold_db=-38.0, depth_db=6.0,
-                                            attack_ms=4.0, release_ms=120.0)])
+def test_duck_contract_resolves_the_law_knobs():
+    """The contract carries the law's knobs (the native engine reads the key live);
+    key_stem_id rides along. It is heard live, never print_only."""
+    out = monitor_chain_params([_duck_entry(curve=9, length="1/2", mix=0.6, band=True, band_hz=180.0)])
     assert out["print_only"] == []
     d = next(e for e in out["entries"] if e["type"] == "duck")
-    assert d["depth_db"] == 6.0 and d["threshold_db"] == -38.0
-    assert d["attack_ms"] == 4.0 and d["key_stem_id"] == "kick"
+    assert (d["trigger"], d["curve"], d["length"], d["mix"]) == (1, 9, 2, 0.6)
+    assert d["band"] is True and d["band_hz"] == 180.0 and d["key_stem_id"] == "kick"
 
 
 def test_tune_and_transpose_carry_out_of_band_pitch_fields():

@@ -101,6 +101,41 @@ def test_ask_and_plan_emit_feed_events_and_the_plan_rides_the_live_context(monke
     assert "[current] comp the vocal" in session._sub.plan_reply
 
 
+class _SubProgress:
+    """Sets a plan, then marks progress the cheap way: the step numbers alone."""
+    async def chat_turn(self, *, system, prompt, tool_defs, execute, on_delta, on_tool,
+                        max_turns, effort=None, should_stop=None, max_tokens=None, timer=None):
+        await execute("set_plan", {"steps": ["comp the vocal", "tune it", "build a reverb send"],
+                                   "current": 0})
+        self.update = await execute("set_plan", {"current": 1, "done": [0]})
+        return "done", {}
+
+
+def test_a_plan_update_sends_only_its_step_numbers(monkeypatch):
+    """2026-11-02 (before/after round 5): set_plan was called 32 times in nine turns, each with
+    the whole list, and each reply echoed it back - while the plan already rides the live
+    context every round. Progress is the step numbers alone; the list stays as it was set."""
+    import anyio
+    session = _session(monkeypatch)
+    session._sub = _SubProgress()
+    events = []
+
+    async def emit(e):
+        events.append(e)
+
+    anyio.run(lambda: session.turn("do the vocal", tools=_tools(), context="CTX", emit=emit,
+                                   live_context=lambda: "LIVE"))
+    update = session._sub.update
+    assert not update.error, update.text
+    assert session.plan["steps"] == ["comp the vocal", "tune it", "build a reverb send"]
+    assert session.plan["current"] == 1 and session.plan["done"] == [0]
+    own = update.text.split("Your plan (set_plan")[0]   # the live block rides every result
+    assert own.startswith("Plan updated: step 2 of 3"), own
+    assert "comp the vocal" not in own, "a progress reply does not repeat the list"
+    cards = [e for e in events if e["type"] == "chat_plan"]
+    assert cards[-1]["steps"][2] == "build a reverb send" and cards[-1]["current"] == 1
+
+
 def test_a_host_hook_still_runs_after_the_event(monkeypatch):
     import anyio
     session = _session(monkeypatch)

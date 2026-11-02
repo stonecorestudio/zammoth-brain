@@ -1,11 +1,8 @@
 """The limiter's audit, 2026-10-17 (the device-by-device audit) - the offline engine and the brain.
 
-`dsp._brickwall` is `MonitorChain::applyLookaheadLimiter` (v2) transcribed - held here to a literal
-per-sample loop of the native law: the 4x detector, the target blended by link, HOLD as the
-running minimum over the lookahead, the one-pole envelope (attack over lookahead/6, release),
-the gain floor and the ceiling clamp. It was a windowed law of its own, and at release 300 the
-two engines read ~3 dB apart; the export oracle's `nonlinear` profile now runs a limiter that
-works hard at release 300. The native half is `--limiter-audit`.
+`dsp._brickwall` was held here to a per-sample loop of the native law (v2); since the two-stage
+limiter (2026-10-25) that loop is test_limiter_two_stage.py's. What stays here: a style write
+applies its knobs, the native's table is the model's, the loudness target's two doors.
 """
 from __future__ import annotations
 
@@ -23,51 +20,6 @@ from mix_engine.tp_detector import TP_CENTRE, intersample_peak
 
 SR = 48000
 ROOT = Path(__file__).resolve().parents[2]
-
-
-def _native_loop(x: np.ndarray, e: dict) -> np.ndarray:
-    n, nch = x.shape
-    c = 10 ** (e["ceiling_dbtp"] / 20)
-    ring = max(1, int(SR * 0.003))
-    atk = min(max(e.get("lookahead_ms", 3.0), 0.1), ring * 1000 / SR)
-    rel = max(1.0, e.get("release_ms", 50.0))
-    link = e.get("channel_link", 1.0)
-    ac, rc = 1 - math.exp(-6 / (SR * atk / 1000)), 1 - math.exp(-1 / (SR * rel / 1000))
-    pk = intersample_peak(x)
-    target = np.where(pk > c, c / np.maximum(pk, 1e-30), 1.0)
-    loud = np.max(pk, axis=1, keepdims=True)
-    target = target * (1 - link) + np.where(loud > c, c / np.maximum(loud, 1e-30), 1.0) * link
-
-    def t_at(m, ch):
-        return target[m, ch] if 0 <= m < n else 1.0
-    out = np.zeros_like(x)
-    env = [1.0] * nch
-    for s in range(n + ring):
-        for ch in range(nch):
-            hold = min(t_at(m, ch) for m in range(s - TP_CENTRE - ring, s - TP_CENTRE + 1))
-            env[ch] += (hold - env[ch]) * (ac if hold < env[ch] else rc)
-            m = s - ring
-            if 0 <= m < n:
-                g = min(env[ch], min(t_at(k, ch) for k in range(m - 2, m + 3)))
-                out[m, ch] = max(-c, min(c, x[m, ch] * g))
-    return out
-
-
-def _loud(n: int = 4000) -> np.ndarray:
-    rng = np.random.default_rng(1)
-    t = np.arange(n) / SR
-    left = np.sin(2 * np.pi * 220 * t) * (0.5 + 0.8 * (t % 0.05 < 0.01))
-    right = 0.7 * np.sin(2 * np.pi * 330 * t + 1) + 0.3 * rng.standard_normal(n)
-    return np.stack([left, right], axis=1) * 1.6
-
-
-@pytest.mark.parametrize("entry", [
-    {"ceiling_dbtp": -1.0, "release_ms": 50.0, "lookahead_ms": 3.0, "channel_link": 1.0},
-    {"ceiling_dbtp": -3.0, "release_ms": 300.0, "lookahead_ms": 1.0, "channel_link": 0.3},
-])
-def test_the_offline_limiter_is_the_native_law(entry):
-    x = _loud()
-    assert np.max(np.abs(dsp._brickwall(x, SR, entry) - _native_loop(x, entry))) < 2e-4
 
 
 def test_a_style_write_applies_its_preset(demo_project):

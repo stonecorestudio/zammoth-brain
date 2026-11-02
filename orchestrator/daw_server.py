@@ -51,7 +51,7 @@ if __package__ in (None, ""):
                                           arrangement_summary,
                                           build_arrangement_plan,
                                           is_arrangement_brief)
-    from orchestrator.daw_bridge import (LATEST_EDIT, apply_owed_coedits, coedit_batches_done, resolve_sent, ensure_saved_checkpoint, honour_discard, set_aside_unreadable_session, level_inverses, level_snapshot, level_values,
+    from orchestrator.daw_bridge import (LATEST_EDIT, duck_hits_owed, apply_owed_coedits, coedit_batches_done, resolve_sent, ensure_saved_checkpoint, honour_discard, set_aside_unreadable_session, level_inverses, level_snapshot, level_values,
                                          _master_makeup, _master_resolve_inputs, advise, apply_coedits,
                                          auto_mix_pass, midi_parts, midi_print_offer_said, mixable_stems,
                                          print_midi_parts, brief_not_understood,
@@ -65,7 +65,7 @@ if __package__ in (None, ""):
                                          reference_match, separate_track, session_observations, warm_observations,
                                          max_applied_seq, resolve_chains, run_agent_pass,
                                          session_readout, transpose_to_target_key,
-                                         perform_routing, NotBrainRouting, undo_last, undo_run,
+                                         perform_routing, IN_AGENT_TURN, NotBrainRouting, undo_last, undo_run,
         turn_delta, write_turn_delta,
         settle_turn_delta, write_atomic, RENDER_COMMANDS, mix_fingerprint)
     from orchestrator import chat_images
@@ -76,7 +76,7 @@ else:
     from .arrangement import (ArrangementError, apply_arrangement,
                               arrangement_summary, build_arrangement_plan,
                               is_arrangement_brief)
-    from .daw_bridge import (LATEST_EDIT, apply_owed_coedits, coedit_batches_done, resolve_sent, ensure_saved_checkpoint, honour_discard, set_aside_unreadable_session, level_inverses, level_snapshot, level_values,
+    from .daw_bridge import (LATEST_EDIT, duck_hits_owed, apply_owed_coedits, coedit_batches_done, resolve_sent, ensure_saved_checkpoint, honour_discard, set_aside_unreadable_session, level_inverses, level_snapshot, level_values,
                              _master_makeup, _master_resolve_inputs, advise, apply_coedits, auto_mix_pass,
                              midi_parts, midi_print_offer_said, mixable_stems, print_midi_parts,
                              brief_not_understood, chains_with_readout, chat_fallback_cost, chat_reply, chat_status_reply, strip_state, applied_seqs,
@@ -89,7 +89,7 @@ else:
                              max_applied_seq, moves_since, peek_project,
                              reference_match, session_observations, warm_observations,
                              resolve_chains, run_agent_pass, separate_track, session_readout,
-                             transpose_to_target_key, perform_routing, NotBrainRouting, undo_last, undo_run,
+                             transpose_to_target_key, perform_routing, IN_AGENT_TURN, NotBrainRouting, undo_last, undo_run,
     turn_delta, write_turn_delta,
         settle_turn_delta, write_atomic, RENDER_COMMANDS, mix_fingerprint)
     from . import chat_images
@@ -498,7 +498,11 @@ class Brain:
             note = (self._realize_mix_before(command, inner, held)
                     if command in RENDER_COMMANDS else None)
             if routing is not None:
-                routed = perform_routing(command, dict(args or {}), routing, replied)
+                in_turn = IN_AGENT_TURN.set(True)   # the gesture measures once, at its end
+                try:
+                    routed = perform_routing(command, dict(args or {}), routing, replied)
+                finally:
+                    IN_AGENT_TURN.reset(in_turn)
                 if routed is not None:
                     held["fp"] = None   # a routing push: see below
                     held.pop("tracks", None)
@@ -985,6 +989,17 @@ class Brain:
                           f"({type(exc).__name__}: {exc})", file=sys.stderr, flush=True)
             stems_by_registration(self.project_dir, True)
         self.apply_owed()
+        # What reading an old project's session did to it, said once with the hello (an open
+        # notice): a device bypassed because it was set to do nothing, a trim kept as a Utility,
+        # the re-fitted devices that sound different now (session STATE_VERSION 6).
+        try:
+            from mix_engine.session import take_migration_notices
+            Session(self.project_dir)            # the migration runs on a writable read of the file
+            for said in take_migration_notices(self.project_dir):
+                self._open_notices = [*getattr(self, "_open_notices", []), said]
+        except Exception as exc:  # noqa: BLE001 - an open must not fail on what it has to say
+            print(f"[daw_server] the open's notices were not read ({type(exc).__name__}: {exc})",
+                  file=sys.stderr, flush=True)
 
     def apply_owed(self):
         """The moves the DAW could not hand over before it went (daw_bridge.apply_owed_coedits):
@@ -1042,8 +1057,10 @@ class Brain:
     def get_chains(self) -> dict:
         state = self._state_now()
         makeup_db, pre_lufs_i, rate = _master_resolve_inputs(self.project_dir)
+        from mix_engine.session import Session
         return resolve_chains(state, makeup_db, pre_lufs_i, native_returns=True,  # DAW: real return tracks
-                              sample_rate=rate)   # ...at the project's rate (reader E4·R6)
+                              sample_rate=rate,   # ...at the project's rate (reader E4·R6)
+                              session=Session(self.project_dir, read_only=True))   # a TRACK duck's hits (2026-10-28)
 
     def get_strip(self) -> dict:
         """The strip map alone (daw_bridge.strip_state) — the DAW re-reads it, with get_chains,
@@ -1476,7 +1493,7 @@ class Brain:
         urls, _ = resolve_sent(entries, self.take_batch)
         return urls
 
-    def coedit(self, urls: list, batch: str | None = None) -> dict:
+    def coedit(self, urls: list, batch: str | None = None, duck_hits_for: list | None = None) -> dict:
         # Persist the DAW's queued device-rack edits to session.json (shared control), so the
         # agent's next pass starts from the user's manual tweaks. The DAW flushes the queue
         # right before a run/undo, on the same socket thread (no concurrent socket access).
@@ -1494,6 +1511,19 @@ class Brain:
             self.render_cache.clear()
         result = apply_coedits(self.project_dir, urls,
                                batches=[*taken, *([str(batch)] if batch else [])])
+        # A TRACK duck's trigger moved (or the DAW dropped its list and asks): its new hits ride
+        # this reply - no chain push follows a co-edit, and the node would play the old audio's
+        # (the pre-merge review of 2026-10-28). Only when something about a duck could have moved.
+        if urls or duck_hits_for:
+            from mix_engine.session import Session
+            try:
+                owed = duck_hits_owed(Session(self.project_dir, read_only=True), duck_hits_for or ())
+            except Exception as exc:   # noqa: BLE001 - a reading the node can live without
+                print(f"[daw_server] duck hits not found: {type(exc).__name__}: {exc}", file=sys.stderr)
+                owed = {}
+            if owed:
+                result = dict(result) if isinstance(result, dict) else {"result": result}
+                result["duck_hits"] = owed
         # No turn delta settles here any more (2026-09-10 audit P2, 02·F12): the next
         # co-edit batch is the USER's, whatever it holds, and a fader they pulled minutes
         # later was reported as "the measured effect of your last turn". Every turn now
@@ -1788,7 +1818,9 @@ class Brain:
             # brain is told by the DAW's co-edit (2026-10-17, the duck audit).
             if key.lower() not in ("", "none", "off", "master") and key not in held:
                 raise NotBrainRouting()
-            return self.set_duck(stem, key, a.get("threshold_db"), a.get("depth_db"))
+            # ...and the tuning the command takes (duck_law's mix / curve / length, 2026-10-28)
+            tune = {k: a[k] for k in ("mix", "curve", "length") if k in a}
+            return self.set_duck(stem, key, tune, by_agent=True)
 
         def a_track(name: str) -> str:
             """`name`, if it is a track of this project - else a refusal. The session routes
@@ -1944,20 +1976,74 @@ class Brain:
         res = Session(self.project_dir).route_bus(bus, target)
         return {**res, **chains_with_readout(self.project_dir, cache=self.render_cache)}
 
-    def set_duck(self, stem: str, key: str, threshold_db=None, depth_db=None) -> dict:
+    def set_duck(self, stem: str, key: str, tune: dict | None = None, by_agent: bool = False) -> dict:
         # Sidechain shared control (Tier-1): the USER keys a stem's duck off another stem (or clears
         # it), like the agent's duck action. Session.set_duck mutates session.json (the duck chain
         # entry carries key_stem_id); re-resolve so the DAW re-applies the chain → wireDuckSidechains
         # routes the key track → the duck is audible. Returns {stem, key_stem_id, chains, readout, ...}.
+        #
+        # THE TUNING IS READ BEFORE ANYTHING IS WRITTEN (the pre-merge review of 2026-10-28): a mix
+        # the command could not read raised after the trigger was already in session.json, and a
+        # length it did not know ("1/3") became 1/4 without a word. `by_agent` (duck.set_key from
+        # the engineer): the Duck cuts 12 dB at most, as at the proposal door - a mix past it is
+        # held there, and a Duck this call makes starts there, not at full mix (-34 dB at the dip).
+        from mix_engine import duck_law
+        from mix_engine.guardrails import LIMITS
         from mix_engine.session import Session
-        res = Session(self.project_dir).set_duck(
-            stem, key,
-            None if threshold_db is None else float(threshold_db),
-            None if depth_db is None else float(depth_db))
+        parsed: dict = {}
+        for k, v in (tune or {}).items():
+            if k == "mix":
+                f = v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+                if f is None or not math.isfinite(float(f)) or not 0.0 <= float(f) <= 1.0:
+                    raise ValueError("duck.set_key: mix is a number from 0 to 1; nothing was changed")
+                parsed["mix"] = float(f)
+            elif k == "curve":
+                names = [n.lower() for n in duck_law.CURVE_NAMES]
+                if isinstance(v, str) and v.strip().isdigit():   # "3" is curve 3, as before
+                    v = int(v.strip())
+                if isinstance(v, str) and v.strip().lower() in names:
+                    parsed["curve"] = names.index(v.strip().lower()) + 1
+                elif (isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(float(v))
+                      and float(v) == round(float(v)) and 1 <= int(v) <= duck_law.NUM_CURVES):
+                    parsed["curve"] = int(v)
+                else:
+                    raise ValueError(f"duck.set_key: curve is 1 to {duck_law.NUM_CURVES} (or a curve's "
+                                     "name); nothing was changed")
+            elif k == "length":
+                words = [n.lower() for n in duck_law.LENGTH_NAMES]
+                if isinstance(v, str) and v.strip().lower() in words:
+                    parsed["length"] = words.index(v.strip().lower())
+                elif (isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(float(v))
+                      and float(v) == round(float(v)) and 0 <= int(v) < len(words)):
+                    parsed["length"] = int(v)
+                else:
+                    raise ValueError(f"duck.set_key: length is one of {list(duck_law.LENGTH_NAMES)}; "
+                                     "nothing was changed")
+        session = Session(self.project_dir)
+        had_duck = any(e.get("type") == "duck" for e in session.stems.get(stem, {}).get("chain", []))
+        res = session.set_duck(stem, key)
+        if res.get("key_stem_id"):
+            held = {}
+            if by_agent:
+                cap = 1.0 - 10.0 ** (-LIMITS["duck_depth_max_db"] / 20.0)
+                if "mix" in parsed and parsed["mix"] > cap:
+                    held["mix"] = cap
+                    parsed["mix"] = cap
+                elif "mix" not in parsed and not had_duck:
+                    parsed["mix"] = cap
+            n = sum(1 for e in session.stems[stem]["chain"] if e.get("type") == "duck")
+            for k, v in parsed.items():   # every duck on the stem, as the trigger keys every one
+                for occ in range(n):
+                    session.set_master_device_param("duck", occ, k, float(v), target=stem)
+                res[k] = duck_law.LENGTH_NAMES[v] if k == "length" else v
+            if held:
+                res["applied"] = {k: round(v, 4) for k, v in held.items()}
+                res["applied_note"] = ("held to the agent's 12 dB at the curve's deepest: `applied` "
+                                       "is the mix that was set and plays")
         return {**res, **chains_with_readout(self.project_dir, cache=self.render_cache)}
 
     def copy_stem_state(self, src: str, dest: str, optional: bool = False,
-                        keep: dict | None = None) -> dict:
+                        keep: dict | None = None, after_map: dict | None = None) -> dict:
         self._drop_stale_render_cache()   # before the change: see the method
         # Track duplicate / paste (⌘D, ⌘C→⌘V): the native side clones the track's CLIPS +
         # fader; this brings the mix state the brain owns — devices, gain/pan/width, tags,
@@ -1974,7 +2060,7 @@ class Brain:
         session = Session(self.project_dir)
         if optional and str(src) not in session.stems:
             return {"ok": True, "skipped": True}
-        res = session.copy_stem_state(str(src), str(dest))
+        res = session.copy_stem_state(str(src), str(dest), after_map)
         if not res.get("ok"):
             return res
         # `keep`: the copy's LIVE strip as the DAW read it when it asked (reader C1·R3). The
@@ -2272,7 +2358,8 @@ def _error_text(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}"
 
 
-def coedit_unless_gone(brain, urls: list, gone, batch: str | None = None) -> dict:
+def coedit_unless_gone(brain, urls: list, gone, batch: str | None = None,
+                       duck_hits_for: list | None = None) -> dict:
     """`Brain.coedit`, unless the DAW that asked has hung up meanwhile (pre-merge review
     2026-10-06). This runs when the brain's mutate lock comes free - behind a render that can
     be half a minute and more. A DAW that was quitting gave the batch 1.5 s, parked it for the
@@ -2283,7 +2370,7 @@ def coedit_unless_gone(brain, urls: list, gone, batch: str | None = None) -> dic
               "(it keeps what it could not hand over)", file=sys.stderr, flush=True)
         return {"ok": False, "applied": 0, "failed": 0, "errors": [],
                 "skipped": "the DAW had gone before this could be applied"}
-    return brain.coedit(list(urls or []), batch)
+    return brain.coedit(list(urls or []), batch, duck_hits_for=duck_hits_for)
 
 
 def _failure(exc: BaseException) -> dict:
@@ -2858,7 +2945,8 @@ async def _serve_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                 elif method == "coedit":
                     urls = params.get("urls") or []
                     res = await locked_thread(brain, coedit_unless_gone, brain, urls,
-                                              reader.at_eof, params.get("batch"))
+                                              reader.at_eof, params.get("batch"),
+                                              params.get("duck_hits_for") or [])
                     if isinstance(res, dict) and res.get("turn_delta"):
                         # the feed's delta row for the agent's last turn, now measured
                         await send({"event": "turn_delta", **res["turn_delta"]})
@@ -3091,14 +3179,14 @@ async def _serve_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     await send({"id": rid, "result": await locked_thread(brain,
                         brain.copy_stem_state, str(params.get("src", "")),
                         str(params.get("dest", "")), bool(params.get("optional", False)),
-                        params.get("keep") if isinstance(params.get("keep"), dict) else None)})
+                        params.get("keep") if isinstance(params.get("keep"), dict) else None,
+                        params.get("after_map") if isinstance(params.get("after_map"), dict) else None)})
                 elif method == "restore_stem":
                     await send({"id": rid, "result": await locked_thread(brain,
                         brain.restore_stem, str(params.get("stem", "")))})
                 elif method == "set_duck":
                     await send({"id": rid, "result": await locked_thread(brain,
-                        brain.set_duck, str(params.get("stem", "")), str(params.get("key", "")),
-                        params.get("threshold_db"), params.get("depth_db"))})
+                        brain.set_duck, str(params.get("stem", "")), str(params.get("key", "")))})
                 elif method == "auto_mix":
                     # one agent pass at a time (they mutate session.json) — shared
                     # across connections via brain.run_active, like "run" below

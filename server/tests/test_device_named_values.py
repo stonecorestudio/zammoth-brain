@@ -31,7 +31,11 @@ def _list(name: str) -> list[str]:
 def test_the_named_values_are_the_brains_own_lists():
     assert _list("satCurves") == list(models.SAT_CURVES)
     assert _list("limStyles") == list(models.LIMITER_STYLES)
+    assert _list("compStyles") == list(models.COMP_STYLES)   # 2026-10-26: it had no pin
     assert _list("irModes") == list(IR_MODES)
+    assert _list("odCharacters") == list(models.OD_CHARACTERS)
+    from mix_engine.chorus_law import MODES
+    assert _list("chorusModes") == [m.lower() for m in MODES]   # lower case, as the door reads a word
 
 
 def test_the_auto_filters_names_are_the_brains_own_lists():

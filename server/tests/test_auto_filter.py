@@ -96,7 +96,7 @@ def _digital_db(f: float, fc: float, kind: int, slope: int, res: float) -> float
     w = np.tan(np.pi * f / SR) / np.tan(np.pi * fc / SR)
     s = 1j * w
     h = 1.0
-    for q in rm.auto_filter_qs(res, slope):
+    for q in rm.auto_filter_qs(kind, slope, res):
         den = s * s + s / q + 1.0
         num = (1.0, s * s, s / q, s * s + 1.0)[kind]
         h *= num / den

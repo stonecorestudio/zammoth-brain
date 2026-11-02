@@ -5,7 +5,7 @@ If you change a schema here, update that doc in the same commit (and vice versa)
 from __future__ import annotations
 
 import math
-from typing import Any, Literal, Optional, Union, get_args
+from typing import Annotated, Any, Literal, Optional, Union, get_args
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
@@ -88,7 +88,12 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_va
 #     it is in. A released song at 172 (86) read 114.66 at confidence 0.69 on its own drum stem,
 #     and reads 86.0; on 344 labelled files five readings move, each to its tempo or the octave,
 #     and none that read right. Where the bars do not decide it the reading is as it was.
-ANALYSIS_VERSION = 13
+# 14: `resonances` (2026-11-02, the Zammoth site's EDM master: the engineer offered to notch a
+#     "ring at 619 Hz" that was the song's D#): a finished master's tuning histogram smears under
+#     the tonal gate, so `_tuning` reads none and v9's played-note rule was skipped. Material with
+#     no tuning but a KEY read is pitched on A440's grid; the master's D#, F# and G# (619, 371,
+#     829 Hz) are no longer listed. Unpitched material (no key either) is read as before.
+ANALYSIS_VERSION = 14
 
 BAND_LABELS = ["sub", "bass", "low_mid", "mid", "high_mid", "presence", "brilliance", "air"]
 BAND_EDGES_HZ = [20, 60, 150, 400, 1000, 2000, 4000, 8000, 20000]
@@ -285,6 +290,13 @@ class NoteEvent(BaseModel):
     spread_cents: float       # pitch movement within the note (incl. vibrato)
 
 
+class NoteStep(BaseModel):
+    """One note of `NoteAnalysis.sequence`: the part in the order it is played."""
+    start_s: float
+    end_s: float
+    note_name: str
+
+
 class NotePlayed(BaseModel):
     """One pitch class and how long the part holds it (`NoteAnalysis.played`)."""
     note: str                  # "C#" - the octave is left out: a home note has none
@@ -305,7 +317,9 @@ class NoteAnalysis(BaseModel):
     `played` is the other question - WHICH notes the part plays: every pitch class it holds,
     longest first, over ALL its notes and not only the capped list. `notes` holds the notes
     furthest out of tune, which are as often the ones a part plays least; a bass's home note
-    is read from `played` (2026-10-12). Notes under the tracking floor (about C2) are not in it.
+    is read from `played` (2026-10-12). `sequence` is the third: the notes in the order they are
+    played, capped; `notes_found` counts them all. A bass under C2 is tracked on a longer frame,
+    so its edges are good to about a tenth of a second.
     """
     analysis_version: int = ANALYSIS_VERSION
     stem_id: str
@@ -313,6 +327,7 @@ class NoteAnalysis(BaseModel):
     notes: list[NoteEvent] = []
     notes_found: int = 0
     played: list[NotePlayed] = []
+    sequence: list[NoteStep] = []
     reason: Optional[str] = None
 
 
@@ -533,18 +548,33 @@ class PhaseBand(BaseModel):
     file_corr: Optional[float] = None
 
 
+class OneSidedClicks(BaseModel):
+    """A click on ONE side of a centred hit (`analyze_phase`, 2026-11-02): most of a bright
+    sound's hits carry a low-mid tick (300 Hz - 3 kHz) on `side` only, `excess_db` (median) over
+    the other side, while the hit's own top end is centred - so it is heard as a click in one
+    ear, and lifting the stem's attack or top end makes it louder. `count` hits, `per_minute`,
+    the first few at `at_s`. Definition: mix-analysis skill ▸ *Phase*."""
+    side: Literal["left", "right"]
+    count: int
+    per_minute: float
+    excess_db: float
+    at_s: list[float] = Field(default_factory=list)
+
+
 class PhaseTarget(BaseModel):
     """One channel's phase reading: a stem, a group or the master. `bands` holds only the bands
     that carry the channel's sound (within 30 dB of its total). For a stem an issue names (its
     own, or one of the master's `from_stems`): `width`, its strip width now, and
     `mono_safe_width`, the widest strip width at which every band of it reads +0.2 or more over
-    the song and below 0 less than 20 % of the time - and its bands carry `file_corr`."""
+    the song and below 0 less than 20 % of the time - and its bands carry `file_corr`. A stem
+    whose hits carry a tick on one side has `one_sided_clicks`."""
     target: str
     kind: Literal["stem", "bus", "master"]
     corr: Optional[float] = None
     bands: dict[str, PhaseBand] = Field(default_factory=dict)
     width: Optional[float] = None
     mono_safe_width: Optional[float] = None
+    one_sided_clicks: Optional[OneSidedClicks] = None
 
 
 class PhaseIssue(BaseModel):
@@ -595,7 +625,7 @@ class PhaseAnalysis(BaseModel):
     """The mix's stereo phase in one read (`analyze_phase`, 2026-10-13): the master, every stem
     (and group) in the mix, what cancels in mono and why, and pairs of stems that cancel each
     other in the lows. `clean` is True when there is no issue and no conflict - the PHASE lamps
-    of the DAW's imager, width, utility and band-width devices light on the same rule (a band's
+    of the DAW's Imager and Utility devices light on the same rule (a band's
     ~0.3 s correlation below 0). `window_s` is the window the per-window figures are measured
     on. Definitions are contractual: mix-analysis skill ▸ *Phase*."""
     analysis_version: int = ANALYSIS_VERSION
@@ -836,17 +866,15 @@ class EqBand(BaseModel):
     # stays capped at +6 via the eq_boost_max guardrail (guardrails bind the agent,
     # not the user). Cuts to -12.
     gain_db: float = Field(ge=-12, le=12)
-    q: float = Field(ge=0.3, le=8.0)
-    # Phase 46 (Pro-Q-class EQ, Tranche 1): `bandpass` (a single RBJ bandpass biquad,
-    # gain_db ignored, q sets width) and `tilt_shelf` (a matched low-shelf -g/2 +
-    # high-shelf +g/2 pair at freq_hz — gain_db is the total tilt) join the existing
-    # shapes.
+    q: float = Field(ge=0.1, le=40.0)   # == eq_law.Q_MIN / Q_MAX: the reference EQ's Q (2026-10-27)
+    # Phase 46: `bandpass` (gain_db ignored, q sets width) and `tilt_shelf` (lows -gain_db,
+    # highs +gain_db around freq_hz) join the existing shapes. Every shape runs the EQ's law
+    # (eq_law, 2026-10-27): a reference EQ's shapes and Q, measured.
     shape: Literal["peak", "low_shelf", "high_shelf", "hpf", "lpf", "notch",
                   "bandpass", "tilt_shelf"]
-    # Phase 46: variable-slope cuts, hpf/lpf only. A Butterworth cascade of
-    # `slope_db_oct // 12` RBJ 2nd-order biquad sections (6 = today's 1st-order
-    # Pedalboard filter — legacy behavior, bit-identical; the default/unset value,
-    # so existing sessions render unchanged). Ignored for every other shape.
+    # Phase 46: variable-slope cuts, hpf/lpf only: a Butterworth cascade of `slope_db_oct // 12`
+    # sections whose most resonant one takes q (q 1 = flat); 6 = one pole, no q. Ignored for
+    # every other shape.
     slope_db_oct: Literal[6, 12, 24, 48, 96] = 6
 
 
@@ -875,6 +903,17 @@ def _check_wet_target(action) -> None:
     if bool(action.return_id) == bool(action.stem_id):
         raise ValueError(f"{action.type} needs exactly one of return_id (FX return) "
                          "or stem_id (insert on a track/bus/master)")
+
+
+#: Which device of its type a mix proposal changes, on a target that may carry several (Phase 65
+#: step 3): None = THE one (refused where there are two or more: guardrails rule instance_which),
+#: N = the type's N-th entry on the target - the numbering of `comp#N` everywhere - replaced where
+#: it stands, "new" = one more beside the others. An address, never stored on the chain entry.
+InstanceRef = Optional[Union[Annotated[int, Field(ge=0, le=127, strict=True)], Literal["new"]]]
+INSTANCE_DESCRIPTION = (
+    "Which device of this type on the target the proposal changes: N = the N-th of the type on "
+    "the chain, counted from 0 as type#N counts it, replaced where it stands; \"new\" = add one "
+    "more beside the others. Leave it out where the target holds at most one of the type.")
 
 
 class EqAction(BaseModel):
@@ -911,11 +950,44 @@ class CompChannelParams(BaseModel):
     release_ms: float = Field(ge=10, le=1000)
     makeup_db: float = Field(default=0.0, ge=0, le=12)
     mix: float = Field(default=1.0, ge=0.0, le=1.0)
+    knee_db: float = Field(default=0.0, ge=0.0, le=72.0)   # the knee's width (CompAction.knee_db)
+
+
+# The compressor's characters (2026-10-25), index 0..5 -> name; dsp.COMP_CHARACTERS is the law each
+# names and MonitorChain kCompCharacters its native copy (test_comp_characters.py).
+COMP_STYLES = ("clean", "punch", "smooth", "glue", "vocal", "mastering")
+
+#: index -> (ratio, attack_ms, release_ms, knee_db): the knobs a character sets when it is chosen
+# (2026-10-26, James: a switch that moves no knob reads as broken - the limiter's rule,
+# LIMITER_STYLE_PRESETS). Threshold, makeup and mix stay the user's. VOCAL's ratio and knee read
+# AUTO (its measured law ignores both); its ratio is stored above 1 because 1:1 is off in every
+# character. DeviceSpecs.h kCompStylePresets is the native copy (test_comp_character_presets.py).
+COMP_STYLE_PRESETS = {0: (4.0, 10.0, 100.0, 0.0),    # CLEAN
+                      1: (4.0, 3.0, 50.0, 0.0),      # PUNCH
+                      2: (2.0, 25.0, 250.0, 12.0),   # SMOOTH
+                      3: (2.0, 10.0, 400.0, 6.0),    # GLUE
+                      4: (4.0, 5.0, 120.0, 0.0),     # VOCAL
+                      5: (1.5, 30.0, 300.0, 6.0)}    # MASTERING
+
+
+def apply_comp_style_preset(entry: dict, style: int) -> None:
+    """Write a character's knobs into a stored comp entry: the flat knobs, and on each Mid / Side
+    half its attack and release - and its ratio only where the half compresses (a half at 1:1 is
+    the one the user left off). `DeviceSpecs.h applyCompStylePreset` is the native copy."""
+    ratio, atk, rel, knee = COMP_STYLE_PRESETS[min(5, max(0, int(style)))]
+    entry.update(ratio=ratio, attack_ms=atk, release_ms=rel, knee_db=knee)
+    for half in ("mid", "side"):
+        h = entry.get(half)
+        if isinstance(h, dict):
+            h["attack_ms"], h["release_ms"] = atk, rel
+            if float(h.get("ratio", 2.0)) > 1.0:
+                h["ratio"] = ratio
 
 
 class CompAction(BaseModel):
     type: Literal["comp"] = "comp"
     stem_id: str
+    instance: InstanceRef = Field(default=None, description=INSTANCE_DESCRIPTION)
     threshold_db: float = Field(ge=-60, le=0)
     ratio: float = Field(ge=1.0, le=10.0)
     attack_ms: float = Field(ge=0.1, le=100)
@@ -928,11 +1000,25 @@ class CompAction(BaseModel):
     # Phase 41: M/S — compress only the mid or side of a stereo signal ("stereo" =
     # both, the default). e.g. side-only comp to tame a wide, unstable stereo image.
     channel: Literal["stereo", "mid", "side"] = "stereo"
+    # The CHARACTER (2026-10-25): clean / punch / smooth / glue / vocal / mastering (COMP_STYLES) -
+    # a mode of the law (dsp.COMP_CHARACTERS); in a proposal the knobs stay as set, while a co-edit or
+    # device.set of `style` also writes the character's knobs (COMP_STYLE_PRESETS). Absent = clean.
+    style: Optional[int] = Field(default=None, ge=0, le=5)
+    # The KNEE (2026-10-25): how wide the bend around the threshold is, in dB - 0 hard. VOCAL's law
+    # has no knee (the reference's does not either).
+    knee_db: float = Field(default=0.0, ge=0.0, le=72.0)
     # Phase 44: TRUE M/S — independent compressors on the mid AND the side at once.
     # Provide BOTH blocks; the flat params above are ignored for the M/S channels.
     mid: Optional[CompChannelParams] = None
     side: Optional[CompChannelParams] = None
     time_range_s: Optional[tuple[float, float]] = None  # Phase 15, stems only
+
+    @field_validator("style", mode="before")
+    @classmethod
+    def _style_name(cls, v: Any) -> Any:
+        if isinstance(v, str):   # accept the names too (the agent speaks words)
+            return _index_of_name(v, COMP_STYLES, "compressor style")
+        return v
 
     @model_validator(mode="after")
     def _check_range(self) -> "CompAction":
@@ -959,24 +1045,44 @@ class GainAction(BaseModel):
         return self
 
 
+DEESS_MODES = ("allround", "vocal")   # mode index 0..1 -> name (deess_law.MODES)
+
+
 class DeessAction(BaseModel):
-    """Split-band de-esser (v2 2026-07-05): compress the band above `freq_hz` when
-    it exceeds `threshold_db`. v2 frees the old fixed 4:1 / 1 ms / 50 ms dynamics
-    (`ratio`/`attack_ms`/`release_ms`), caps the reduction depth with `range_db`
-    (−6..−12 keeps esses natural; the −80 default is effectively uncapped), and
-    adds `wide=True` — apply the computed gain to the WHOLE signal (classic
-    wide-band de-essing, dips the full level on ess hits — often more transparent)
-    while the detector stays the band above `freq_hz`."""
+    """De-esser (deess_law): turns the band
+    `freq_hz`..`top_hz` down when it is over `threshold_db`. No ratio, attack or release: the cut
+    starts at the threshold and reaches `range_db` when the band's detector reads 0 dBFS (the
+    slope is the range over the threshold), with a fixed fast timing and a 12 ms lookahead.
+    `range_db` is the most it ever cuts (-24..0; -3..-8 keeps esses natural). `top_hz` closes the
+    band from above (20000 = open); a band narrower than about two octaves listens harder at its
+    centre. `mode`: "allround" cuts whatever crosses the threshold (a mix, a bus, an instrument);
+    "vocal" (one voice) cuts only while the band stands well clear of the voice's vowels - an
+    ess, never a bright sung note. `wide=True` turns the WHOLE signal down on an ess; split (the
+    default) turns down a gentle linear-phase high shelf whose depth is the cut."""
     type: Literal["deess"] = "deess"
     stem_id: str
     threshold_db: float = Field(ge=-60, le=0)
     freq_hz: float = Field(ge=2000, le=12000)
-    ratio: float = Field(default=4.0, ge=1.0, le=20.0)
-    attack_ms: float = Field(default=1.0, ge=0.1, le=20.0)
-    release_ms: float = Field(default=50.0, ge=10.0, le=500.0)
-    range_db: float = Field(default=-80.0, ge=-80.0, le=0.0)
+    top_hz: float = Field(default=20000.0, ge=2000.0, le=20000.0)   # 20000 = the band runs to the top
+    range_db: float = Field(default=-6.0, ge=-24.0, le=0.0)
+    mode: int = Field(default=0, ge=0, le=1)
     wide: bool = False
     time_range_s: Optional[tuple[float, float]] = None  # Phase 15, stems only
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _mode_name(cls, v: Any) -> Any:
+        if isinstance(v, str):   # the agent speaks words
+            return _index_of_name(v, DEESS_MODES, "de-esser mode")
+        return v
+
+    @field_validator("range_db", mode="before")
+    @classmethod
+    def _old_range(cls, v: Any, info: ValidationInfo) -> Any:
+        # a de-esser saved before 2026-10-27 could reach -80; its range is held to the law's 24
+        if (info.context or {}).get("stored") and isinstance(v, (int, float)) and v < -24.0:
+            return -24.0
+        return v
 
     @model_validator(mode="after")
     def _check_range(self) -> "DeessAction":
@@ -1010,17 +1116,17 @@ class MatchEqAction(BaseModel):
 
 
 class DynamicEqAction(BaseModel):
-    """Dynamic spectral EQ cut (Phase 38): isolate a narrow band and attenuate it
-    only while that band's envelope crosses threshold. This is the surgical tool
-    for resonances/harshness/mud bursts that are not constant enough for static
-    EQ. Downward only; use ordinary EQ for broad/static boosts."""
+    """Dynamic spectral EQ cut (Phase 38): a bell that dips only while its band crosses the
+    threshold. This is the surgical tool for resonances/harshness/mud bursts that are not constant
+    enough for static EQ. Downward only for the agent; use ordinary EQ for broad/static boosts.
+    No ratio (`dyneq_law`): over the threshold the band follows
+    the level dB for dB, through a soft knee, down to gain_db (its RANGE)."""
     type: Literal["dynamic_eq"] = "dynamic_eq"
     stem_id: str  # a stem id, bus id, or "master"
     freq_hz: float = Field(ge=40, le=16000)
     gain_db: float = Field(ge=-12.0, le=0.0)
     q: float = Field(ge=0.3, le=12.0)
     threshold_db: float = Field(ge=-60.0, le=0.0)
-    ratio: float = Field(ge=1.0, le=10.0)
     attack_ms: float = Field(default=10.0, ge=1.0, le=100.0)
     release_ms: float = Field(default=120.0, ge=20.0, le=1000.0)
     time_range_s: Optional[tuple[float, float]] = None
@@ -1051,11 +1157,14 @@ class MultibandCompAction(BaseModel):
     there — only the limiter pushes loudness)."""
     type: Literal["mb_comp"] = "mb_comp"
     stem_id: str  # a stem id or "master"
+    instance: InstanceRef = Field(default=None, description=INSTANCE_DESCRIPTION)
     low: MbBand
     mid: MbBand
     high: MbBand
-    attack_ms: float = Field(default=10.0, ge=0.1, le=100)
-    release_ms: float = Field(default=150.0, ge=10, le=1000)
+    # Defaults 2 ms / 85 ms (2026-10-25): where a reference multiband compressor's default
+    # settings measured on a dry vocal (black-box pass); the law itself already matched.
+    attack_ms: float = Field(default=2.0, ge=0.1, le=100)
+    release_ms: float = Field(default=85.0, ge=10, le=1000)
     # Movable band edges (Phase 44 — exposed to the agent, like the native co-edit).
     crossover_lo_hz: float = Field(default=150.0, ge=30.0, le=4000.0)
     crossover_hi_hz: float = Field(default=2000.0, ge=200.0, le=16000.0)
@@ -1068,36 +1177,41 @@ class MultibandCompAction(BaseModel):
 
 
 class OttBand(BaseModel):
-    """One band of the OTT upward/downward compressor (2026-07-07): how hard the
-    band leans into each side of the levelling (`up` boosts quiet material,
-    `down` tames loud material; 0 = that side off, 1 = full), plus a post gain."""
+    """One band of OTT (ott_law, 2026-10-28): how much of each side this band takes (`up` lifts quiet
+    material, `down` tames loud material; 1 = all of it, 0 = that side off), where its thresholds sit
+    (`threshold_pct`: 100 = as measured, each 50 % moves both by about 9-11 dB - over 100 the band is
+    lifted from louder and cut from louder), and a gain after the band."""
     up: float = Field(default=1.0, ge=0.0, le=1.0)
     down: float = Field(default=1.0, ge=0.0, le=1.0)
+    threshold_pct: float = Field(default=100.0, ge=0.0, le=200.0)
     gain_db: float = Field(default=0.0, ge=-12.0, le=12.0)
 
 
 class OttAction(BaseModel):
-    """OTT-style 3-band upward+downward compressor (2026-07-07): each band is
-    levelled toward a fixed internal target — quiet material is boosted (upward)
-    and loud material is cut (downward) — the aggressive, dense "OTT" sound
-    (modern pop/EDM vocals, synths, drum busses). `depth` is the one knob that
-    matters (0 = off, 1 = full squash); `time` scales the attack/release
-    ballistics (< 1 = snappier); per-band `up`/`down` rebalance the two sides;
-    `in_gain_db` drives more (or less) material into the target, `out_gain_db`
-    trims the result. Three real LR4 bands, the same in the render and the live
-    monitor. Stems + busses for the agent; master is a user-add
-    (upward compression pushes loudness — guardrails reject agent OTT there)."""
+    """OTT - three-band upward + downward compression (since 2026-10-28 fitted to a reference OTT,
+    `ott_law`): the split at 88.3 Hz / 2.5 kHz, each band's linked RMS level, a FIXED LIFT per band
+    (about +14 dB low, +9 mid, +14 high at full depth), quiet material lifted further below about -45
+    dBFS (up to +36 dB) and loud material cut almost flat above about -35 to -38 dBFS. The dense,
+    loud "OTT" sound (modern pop/EDM vocals, synths, drum busses). `depth` scales all of it (0 = off,
+    1 = full); `time` scales the release (1 = 100 %, 0 to 10); `upward_pct` / `downward_pct` (100 =
+    as measured; downward stops at 100) scale each side for every band; per band `up` / `down`,
+    `threshold_pct` and `gain_db`; `in_gain_db` drives the device, `out_gain_db` trims after it.
+    Stems + busses for the agent; master is a user-add (upward compression pushes loudness -
+    guardrails reject agent OTT there)."""
     type: Literal["ott"] = "ott"
     stem_id: str  # a stem id or a bus id ("master" = user-add only)
-    depth: float = Field(default=0.5, ge=0.0, le=1.0)
-    time: float = Field(default=1.0, ge=0.1, le=4.0)
+    instance: InstanceRef = Field(default=None, description=INSTANCE_DESCRIPTION)
+    depth: float = Field(default=1.0, ge=0.0, le=1.0)
+    time: float = Field(default=1.0, ge=0.0, le=10.0)
     in_gain_db: float = Field(default=0.0, ge=-12.0, le=12.0)
     out_gain_db: float = Field(default=0.0, ge=-12.0, le=12.0)
+    upward_pct: float = Field(default=100.0, ge=0.0, le=200.0)
+    downward_pct: float = Field(default=100.0, ge=0.0, le=100.0)
     low: OttBand = Field(default_factory=OttBand)
     mid: OttBand = Field(default_factory=OttBand)
     high: OttBand = Field(default_factory=OttBand)
-    crossover_lo_hz: float = Field(default=150.0, ge=30.0, le=4000.0)
-    crossover_hi_hz: float = Field(default=2000.0, ge=200.0, le=16000.0)
+    crossover_lo_hz: float = Field(default=88.3, ge=30.0, le=4000.0)
+    crossover_hi_hz: float = Field(default=2500.0, ge=200.0, le=16000.0)
 
     @model_validator(mode="after")
     def _check_crossovers(self) -> "OttAction":
@@ -1117,6 +1231,9 @@ def _validate_oversample(v: int) -> int:
     return v
 
 
+OD_CHARACTERS = ("pedal", "smooth", "crunchy", "power")   # character index 0..3 -> name (od_characters.NAMES)
+
+
 class OverdriveAction(BaseModel):
     """Overdrive distortion (2026-07-07): the classic drive-pedal topology — an
     optional resonant band-pass pre-filter (`filter_on` + `freq_hz`/`q`: focus
@@ -1125,13 +1242,18 @@ class OverdriveAction(BaseModel):
     a `tone` tilt on the shaped signal (0 dark / 0.5 neutral / 1 bright), a post
     output trim, then dry/wet `mix`. Harder and dirtier than `saturation` (whose
     curves stay polite) — reach for it for aggressive color on a stem or bus.
-    `oversample` (1/2/4/8) runs the soft-clipper at N x the sample rate — the grit
+    The lows are driven less than the rest (they stay tight), the curve clips one side sooner
+    (even harmonics), and the fizz above about 6.5 kHz is rolled off after the clipper.
+    `oversample` (1/2/4/8, default 8) runs the soft-clipper at N x the sample rate — the grit
     stays harmonic instead of folding back as aliasing.
     The tone is a high shelf, corner near 3 kHz: tone 1 lifts the top up to +6 dB, and that
-    lift is charged to the EQ boost budget. Deterministic; the same law in the native monitor
-    (at oversample 1 sample-identical, above it within the oversamplers' difference)."""
+    lift is charged to the EQ boost budget. `character` picks the voice: pedal (the above, the
+    default) or one of three amps - smooth, crunchy, power - each with its own filters around a
+    lopsided curve and a short cabinet (od_characters). Deterministic; the same law in the native
+    monitor (at oversample 1 sample-identical, above it within the oversamplers' difference)."""
     type: Literal["overdrive"] = "overdrive"
     stem_id: str
+    instance: InstanceRef = Field(default=None, description=INSTANCE_DESCRIPTION)
     drive_db: float = Field(default=12.0, ge=0.0, le=36.0)
     filter_on: bool = False
     freq_hz: float = Field(default=800.0, ge=40.0, le=12000.0)
@@ -1140,71 +1262,42 @@ class OverdriveAction(BaseModel):
     output_db: float = Field(default=0.0, ge=-24.0, le=12.0)
     mix: float = Field(default=1.0, ge=0.0, le=1.0)
     # Overdrive is the dirtiest curve in the palette, so it aliases the most: at heavy
-    # drive a bright source folds harmonics back as inharmonic grit. 4 is the useful
-    # setting; 1 (default) keeps older renders bit-identical.
-    oversample: int = Field(default=1)
+    # drive a bright source folds harmonics back as inharmonic grit (at 1x and 24 dB, aliasing
+    # 15-20 dB under the note). dsp.OD_OVERSAMPLE_DEFAULT.
+    oversample: int = Field(default=8)
+    # The CHARACTER (2026-10-26, od_characters): 0 pedal (the overdrive as it always was) / 1 smooth /
+    # 2 crunchy / 3 power - three amps fitted to a reference. A name or the index.
+    character: int = Field(default=0, ge=0, le=3)
 
     @field_validator("oversample")
     @classmethod
     def _os_pow2(cls, v: int) -> int:
         return _validate_oversample(v)
 
-
-class BandWidthAction(BaseModel):
-    """Per-band stereo width (Phase 15): the band's side scaled, the band split out at its edges
-    by a 48 dB/oct Linkwitz-Riley crossover pair (one law in both engines since 2026-10-21) - width
-    0 takes a one-octave band's side about 11-17 dB down, deeper for a wider band. Stems only;
-    no-op on mono. For multiband width work prefer the imager (movable
-    crossovers, all three bands in one device). 2026-07-19: optional
-    ``lo_hz``/``hi_hz`` place the band freely (both or neither, lo < hi) —
-    they override the label, mirroring the DAW's free band scrub."""
-    type: Literal["band_width"] = "band_width"
-    stem_id: str
-    band: Literal["sub", "bass", "low_mid", "mid", "high_mid", "presence",
-                  "brilliance", "air"]
-    width: float = Field(ge=0.0, le=2.0)
-    lo_hz: Optional[float] = Field(default=None, ge=20.0, le=20000.0)
-    hi_hz: Optional[float] = Field(default=None, ge=20.0, le=20000.0)
-
-    @model_validator(mode="after")
-    def _custom_edges(self) -> "BandWidthAction":
-        if (self.lo_hz is None) != (self.hi_hz is None):
-            raise ValueError("band_width: lo_hz and hi_hz come together")
-        if self.lo_hz is not None and self.hi_hz is not None \
-                and self.lo_hz >= self.hi_hz:
-            raise ValueError("band_width: lo_hz must be below hi_hz")
-        return self
+    @field_validator("character", mode="before")
+    @classmethod
+    def _character_name(cls, v: Any) -> Any:
+        if isinstance(v, str):   # the agent speaks words
+            return _index_of_name(v, OD_CHARACTERS, "overdrive character")
+        return v
 
 
-class ImagerAction(BaseModel):
-    """Multiband stereo imager (2026-07-05 — the band_width upgrade, Ozone-Imager
-    class): the signal splits into three bands at movable crossovers (a real
-    48 dB/oct Linkwitz-Riley split, one law in both engines since 2026-10-21 -
-    width_low 0 takes the low side ~40 dB down below 2/3 of the crossover, 6 dB at
-    it), each band's stereo width is M/S-scaled independently (0 = mono the band,
-    1 = untouched, 2 = double the side), and the bands sum back. The classic
-    mastering moves: mono the lows (width_low 0 for a tight, club-safe bottom),
-    widen the highs (width_high 1.2-1.4 for air) — without touching the mids.
-    Stems, busses and master; no-op on mono; one per chain (a new one replaces
-    it). All-1.0 widths = the split's allpass: every level the input's."""
-    type: Literal["imager"] = "imager"
-    stem_id: str
-    width_low: float = Field(default=1.0, ge=0.0, le=2.0)
-    width_mid: float = Field(default=1.0, ge=0.0, le=2.0)
-    width_high: float = Field(default=1.0, ge=0.0, le=2.0)
-    crossover_lo_hz: float = Field(default=150.0, ge=30.0, le=4000.0)
-    crossover_hi_hz: float = Field(default=2000.0, ge=200.0, le=16000.0)
-
-    @model_validator(mode="after")
-    def _check_crossovers(self) -> "ImagerAction":
-        if self.crossover_lo_hz >= self.crossover_hi_hz:
-            raise ValueError("crossover_lo_hz must be below crossover_hi_hz")
-        return self
-
-
-# Limiter Style presets — (release_ms, lookahead_ms). A Style is a knob preset, NOT a
-# hidden DSP scaler; keep in sync with the native editor button (NativeEditor limStyleBtn).
-LIMITER_STYLES = ("modern", "transparent", "punchy")   # style index 0..2 -> name
+# The limiter's CHARACTER (2026-10-25, the two-stage limiter; James picked CLEAN / LOUD / GLUE).
+# The limiter has two stages: a FAST one that catches each peak and lets go in milliseconds, and
+# a SLOW one that carries the held level and lets go over `release_ms`. The character is a real
+# mode of that law - the fast stage's release, the slow stage's attack and the hold that keeps the
+# slow stage steady through a low note - and choosing one also sets the two knobs it sounds best
+# at (LIMITER_STYLE_PRESETS). Sized by measurement against a reference limiter on bursts, a dry
+# vocal, a drum stem and a full mix; the record is docs/10-daw.md. MonitorChain.h kLimCharacters
+# is this table (test_limiter_two_stage.py reads it).
+# The index order keeps what a project saved before meaning what it meant: Modern (0) is CLEAN,
+# Transparent (1) - slow, gentle - is GLUE, Punchy (2) - fast, tight - is LOUD. The face shows them
+# CLEAN / LOUD / GLUE (his order).
+LIMITER_STYLES = ("clean", "glue", "loud")   # style index 0..2 -> name
+#: index -> (fast release ms, slow attack ms, slow hold ms)
+LIMITER_CHARACTERS = {0: (1.0, 300.0, 10.0),    # CLEAN: a held body, peaks let go at once
+                      1: (30.0, 100.0, 10.0),   # GLUE: peaks let go slowly, so hits are grouped
+                      2: (1.0, 30.0, 0.0)}      # LOUD: the body lets go fast too - louder, grittier
 
 
 def _index_of_name(value: str, names: tuple, what: str) -> int:
@@ -1218,27 +1311,44 @@ def _index_of_name(value: str, names: tuple, what: str) -> int:
     return names.index(name)
 
 
-LIMITER_STYLE_PRESETS = {0: (50.0, 3.0),    # Modern — balanced default
-                         1: (120.0, 3.0),   # Transparent — slow release, clean
-                         2: (20.0, 1.5)}     # Punchy — fast release, tight transients
+#: index -> (release_ms, lookahead_ms): the knobs a character sets when it is chosen
+# Each character sets a lookahead of its own (a switch that moves only one knob reads as broken -
+# James, 2026-10-25), longer the cleaner: never under 1.0 ms, where at 0.5 the fast stage's ramp is
+# steep enough that full-band material (white noise, noise-built drum bursts) leaves the contract
+# meter's tenth of a dB over the ceiling (test_reader_p2_t.py).
+LIMITER_STYLE_PRESETS = {0: (500.0, 1.5),   # CLEAN
+                         1: (250.0, 2.0),   # GLUE
+                         2: (100.0, 1.0)}   # LOUD
+LIMITER_DEFAULT_STYLE = 0                   # a limiter nobody set is CLEAN
+
+
+def limiter_knobs(entry: dict) -> tuple[float, float, int]:
+    """(release_ms, lookahead_ms, style) of a stored limiter entry: a knob it does not carry is
+    its character's (`MonitorChain::applyMonitorChain` reads the same fallbacks)."""
+    style = int(entry.get("style", LIMITER_DEFAULT_STYLE) or 0)
+    style = min(2, max(0, style))
+    rel, look = LIMITER_STYLE_PRESETS[style]
+    return (float(entry.get("release_ms", rel)), float(entry.get("lookahead_ms", look)), style)
 
 
 class LimiterAction(BaseModel):
     """Master-bus true-peak limiter (Phase 6). The only processor allowed to
     push loudness: optional LUFS makeup toward target_lufs_i, then a brickwall
-    at ceiling_dbtp. Master-only (session rejects it on stems); one limiter per
-    bus — a new limiter action replaces the existing one."""
+    at ceiling_dbtp. Master-only (session rejects it on stems). Without `instance` it
+    replaces the master's limiter; `instance` names which of several, "new" adds one."""
     type: Literal["limiter"] = "limiter"
     stem_id: str  # must be "master"
+    instance: InstanceRef = Field(default=None, description=INSTANCE_DESCRIPTION)
     ceiling_dbtp: float = Field(default=-1.0, ge=-6.0, le=-1.0)
     target_lufs_i: Optional[float] = Field(default=None, ge=-24.0, le=-6.0)
-    # Phase 44 advanced ballistics (character only — the ceiling is still guaranteed):
-    # release_ms = recovery speed (pumping vs loudness); lookahead_ms = peak-catch window;
-    # channel_link = 1 stereo-linked / 0 independent L-R; style = modern/transparent/punchy.
+    # Ballistics (character only — the ceiling is still guaranteed): release_ms = how fast the
+    # SLOW stage (the held level) lets go; lookahead_ms = how early the limiter starts pulling a
+    # peak down (shorter = louder and grittier); channel_link = 1 stereo-linked / 0 independent
+    # L-R; style = the character, clean / glue / loud (LIMITER_CHARACTERS).
     release_ms: Optional[float] = Field(default=None, ge=1.0, le=1000.0)
     lookahead_ms: Optional[float] = Field(default=None, ge=0.5, le=3.0)
     channel_link: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    style: Optional[int] = Field(default=None, ge=0, le=2)  # 0 modern / 1 transparent / 2 punchy
+    style: Optional[int] = Field(default=None, ge=0, le=2)  # 0 clean / 1 glue / 2 loud
 
     @field_validator("style", mode="before")
     @classmethod
@@ -1249,8 +1359,9 @@ class LimiterAction(BaseModel):
 
     @model_validator(mode="after")
     def _apply_style_preset(self) -> "LimiterAction":
-        # Style is a PRESET that fills release_ms / lookahead_ms (like the editor button
-        # moving the knobs), not a hidden DSP scaler. Explicit values win.
+        # The character is a mode of the law AND fills release_ms / lookahead_ms with the values
+        # it sounds best at (the face's CLEAN / LOUD / GLUE row moves those knobs too). Explicit
+        # values win.
         if self.style is not None:
             rel, look = LIMITER_STYLE_PRESETS[self.style]
             if self.release_ms is None:
@@ -1286,15 +1397,18 @@ class SatBand(BaseModel):
 
 class SaturationAction(BaseModel):
     """Deterministic waveshaper saturator (Phase 7; Phase 45 multiband). Single-band:
-    y = waveshape(k·x)/k, k = drive — unity for small signals, peaks compressed; `curve`
-    picks the model (tanh / warm / tube / hard); `output_db` is a post-shaper output trim.
+    y = curve(s·x)/s · the character's level law (about +1 dB, heavy +4, rising past ~12 dB of
+    drive - charged to the gain budget), s from the drive, peaks compressed; `curve`
+    picks the character (tanh = soft / warm = tape / tube / hard = heavy - sat_characters.py;
+    tape and tube add a linear tone after the curve); `output_db` is a post-shaper output trim.
     Multiband (Saturn-style): give a `bands` dict (low/mid/high), each with its own
     drive/output/mix(/curve), split at movable crossovers and summed, then a global `mix`.
     The flat drive_db/output_db are ignored when `bands` is set. Memoryless + deterministic.
-    `oversample` (1/2/4/8, single-band only) runs the curve at N x the sample rate so its
-    harmonics stop folding back as aliasing; 1 (default) is bit-identical to older renders."""
+    `oversample` (1/2/4/8, default 4) runs the curve - and in the multiband form the whole
+    split - at N x the sample rate so its harmonics stop folding back as aliasing."""
     type: Literal["saturation"] = "saturation"
     stem_id: str
+    instance: InstanceRef = Field(default=None, description=INSTANCE_DESCRIPTION)
     drive_db: float = Field(default=3.0, ge=1.0, le=12.0)   # single-band; ignored when bands are set
     output_db: float = Field(default=0.0, ge=-12.0, le=12.0)
     curve: int = Field(default=0, ge=0, le=3)   # global saturation model (0 tanh/1 warm/2 tube/3 hard)
@@ -1312,9 +1426,8 @@ class SaturationAction(BaseModel):
     crossover_lo_hz: float = Field(default=150.0, ge=30.0, le=4000.0)
     crossover_hi_hz: float = Field(default=2000.0, ge=200.0, le=16000.0)
     mix: float = Field(default=1.0, ge=0.0, le=1.0)           # global dry/wet
-    # SINGLE-BAND only: the multiband path splits with an FFT and shapes each band
-    # separately, and is not oversampled (2026-09-06) — set it on the flat saturator.
-    oversample: int = Field(default=1)
+    # dsp.SAT_OVERSAMPLE_DEFAULT; the multiband form runs its split and its three shapers at it.
+    oversample: int = Field(default=4)
 
     @field_validator("oversample")
     @classmethod
@@ -1332,28 +1445,55 @@ class SaturationAction(BaseModel):
 
 
 class ChorusAction(BaseModel):
-    """Chorus / ensemble (2026-09-06) — the modulation family's first device.
+    """Chorus (chorus_law, fitted to a reference two-line chorus, with its knob set).
 
-    One to three voices read the signal through a delay swept around `delay_ms` by `depth`
-    (`delay_ms * (1 + depth*sin)`), spread evenly around the LFO cycle, with the right channel
-    offset by `stereo_deg` — that offset is what makes it WIDE rather than merely detuned, and
-    it is the reason chorus is the standard fix for a thin mono synth, a lifeless doubled
-    vocal, or a guitar that needs to sit wider without EQ.
+    `mode` picks the sweep: "I" = one line at 0.40 Hz (+-1.95 ms around 3.25 ms) - slow and wide;
+    "II" = one line at 0.83 Hz (+-2.10 ms around 3.50 ms) - faster, more motion; "I+II" = both lines
+    at once - the thickest and loudest (its wet also loses a little more below ~60 Hz). The sweeps are
+    triangles and the right channel's runs opposite the left's, each line reading its own channel:
+    `stereo` (0..1) fades the right channel's wet from the left's line (mono, 0) to its own (fully
+    wide, 1). The wet is darker than the dry (+2.6 dB through the mids, -3 dB near 6 kHz, -9 dB at the
+    top) - the character of the device.
 
-    There is deliberately **no feedback**: feedback through a short swept delay is a FLANGER,
-    a separate device. Its absence also means every voice reads the dry input, so the LFO's
-    phase is a pure function of the host timeline and the render is reproducible.
+    `mix` is the reference's curve, NOT a crossfade: up to 0.5 the dry stays full and the wet comes
+    in on top (0.5 = dry and wet both at full, about +4.5 dB louder on music, +6.6 for I+II); above
+    0.5 the dry falls away, 1 = wet only. `output_db` (-24..+6) trims after it - take back what the
+    mix adds when the level must hold.
 
-    Subtle is the point: `mix` around 0.2-0.4 thickens, 1.0 is an effect. Mono sources gain
-    the most. Not a tone or loudness tool — it will comb-filter a source if pushed."""
+    There is deliberately **no feedback** (that is the flanger). For a thin mono synth, a lifeless
+    doubled vocal, a guitar that needs width without EQ; mix 0.2-0.4 thickens, more is an effect.
+    Not a tone or loudness tool."""
     type: Literal["chorus"] = "chorus"
     stem_id: str
-    rate_hz: float = Field(default=0.8, ge=0.01, le=10.0)     # sweep speed
-    depth: float = Field(default=0.25, ge=0.0, le=1.0)        # fraction of delay_ms swung
-    delay_ms: float = Field(default=20.0, ge=1.0, le=50.0)    # the delay swept AROUND
-    mix: float = Field(default=0.5, ge=0.0, le=1.0)           # dry/wet
-    voices: int = Field(default=1, ge=1, le=3)                # 2-3 = ensemble
-    stereo_deg: float = Field(default=90.0, ge=0.0, le=180.0)  # L/R LFO offset = the width
+    instance: InstanceRef = Field(default=None, description=INSTANCE_DESCRIPTION)
+    mode: int = Field(default=0, ge=0, le=2)                  # 0 = I, 1 = II, 2 = I+II (a name is taken)
+    stereo: float = Field(default=1.0, ge=0.0, le=1.0)        # the right channel's own line (0 = mono wet)
+    mix: float = Field(default=0.5, ge=0.0, le=1.0)           # the reference's dry / wet curve
+    output_db: float = Field(default=0.0, ge=-24.0, le=6.0)   # VOLUME, after it
+
+    @model_validator(mode="before")
+    @classmethod
+    def _old_knobs(cls, data: Any, info: ValidationInfo) -> Any:
+        # a chorus saved before 2026-10-28 (rate / depth / delay / voices / stereo_deg) is read once as
+        # the law's knobs (chorus_law.from_legacy); a REQUEST that names them is refused by name upstream
+        if (info.context or {}).get("stored") and isinstance(data, dict):
+            from .chorus_law import from_legacy, is_legacy, LEGACY_FIELDS
+            if is_legacy(data):
+                conv = from_legacy(data)
+                data = {k: v for k, v in data.items() if k not in LEGACY_FIELDS}
+                data.update(conv)
+        return data
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _mode_by_name(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            from .chorus_law import MODES
+            key = v.strip().upper().replace(" ", "")
+            if key not in MODES:
+                raise ValueError('mode is "I", "II" or "I+II" (or 0, 1, 2)')
+            return MODES.index(key)
+        return v
 
 
 class FlangerAction(BaseModel):
@@ -1380,7 +1520,7 @@ class FlangerAction(BaseModel):
 
     Where it earns its place: a flat DI guitar or synth that needs movement without a new
     part, a drum loop that needs a hook on the last bar, an effect-return that wants to be
-    the interesting thing. It is NOT a widener (that is the chorus, or `band_width`) and it
+    the interesting thing. It is NOT a widener (that is the chorus, or the Imager's stereoize) and it
     is NOT a tone tool — a comb is a comb, and at `mix` 0.5 it removes energy at every notch,
     which on a full mix reads as phasiness. Keep it on a stem.
 
@@ -1389,6 +1529,7 @@ class FlangerAction(BaseModel):
     into the low end and it stops sounding like a flanger and starts sounding broken."""
     type: Literal["flanger"] = "flanger"
     stem_id: str
+    instance: InstanceRef = Field(default=None, description=INSTANCE_DESCRIPTION)
     rate_hz: float = Field(default=0.5, ge=0.01, le=10.0)      # sweep speed
     depth: float = Field(default=0.6, ge=0.0, le=1.0)          # fraction of delay_ms swung
     delay_ms: float = Field(default=3.0, ge=0.5, le=20.0)      # the delay swept AROUND
@@ -1427,8 +1568,8 @@ class AutoFilterAction(BaseModel):
       "1/16D", "1/1" = a bar of 4/4, up to "8/1"); `lfo_phase_deg` turns where the cycle starts
       and `lfo_stereo_deg` offsets the right channel, which is what makes a sweep move across
       the stereo field;
-    * the envelope, `env_amount_oct` (negative closes the filter on a hit), following the
-      level of the device's own input - or, when `key_stem_id` names another track, THAT
+    * the envelope, `env_amount_oct` (the octaves it moves from -60 dBFS to full scale; negative
+      closes the filter on a hit), following the level of the device's own input - or, when `key_stem_id` names another track, THAT
       track's level (a sidechain: the hi-hats opening the pad's filter). A track has ONE
       trigger: a Duck on it and this device share it.
 
@@ -1438,6 +1579,7 @@ class AutoFilterAction(BaseModel):
     deep LFO on a full mix reads as a mistake. Keep it on a part or a group."""
     type: Literal["auto_filter"] = "auto_filter"
     stem_id: str
+    instance: InstanceRef = Field(default=None, description=INSTANCE_DESCRIPTION)
     filter_type: int = Field(default=0, ge=0, le=3)            # lp / hp / bp / notch
     slope_db_oct: int = Field(default=12, ge=12, le=24)        # 12 or 24
     cutoff_hz: float = Field(default=1000.0, ge=20.0, le=20000.0)
@@ -1495,30 +1637,45 @@ class AutoFilterAction(BaseModel):
 
 
 class ClipAction(BaseModel):
-    """Pre-limiter clipper (Phase 41; v2 2026-07-05 adds oversampling): shave transient
-    peaks before the limiter so the master gets louder and cleaner (the modern loudness
-    chain). Deterministic waveshaper from a soft tanh knee (`hardness` 0) to a hard
-    brickwall (`hardness` 1) at `threshold_db`. `oversample` (1/2/4/8) runs the shaper
-    at N× the sample rate — far less inter-sample overshoot and aliasing (a short
-    linear-phase filter), though not a ceiling of its own: the filter rings past the
-    threshold, and the master's limiter is what holds the true peak; 1 (default) is the
-    plain memoryless path. Legal on the MASTER, a STEM (Phase 43 device freedom) or a
-    group BUS (2026-09-08); on the master it runs just before the limiter. Unlike saturation it
-    flattens peaks, not warms them."""
+    """Clipper (clip_law): turn the
+    signal up by `gain_db` (0..12, before the clip; nothing makes the level back up after it), then
+    flatten everything over `clip_pct` (the ceiling, % of full scale: 100 = 0 dBFS, 50 = -6 dBFS).
+    `softness` (0..1) bends into the ceiling instead of hitting it: 0 is a brickwall; at s the
+    signal is untouched up to (1 - s) x the ceiling and reaches it at (1 + s) x - a quadratic knee
+    centred on the ceiling. Each channel on its own. `oversample` 2 runs the clip at 2x (far less
+    aliasing on bright material) and then holds the output under 0 dBFS; 1 = off. Not a ceiling of
+    its own below full scale: the resampling rings past `clip_pct`, so on the master the limiter
+    after it is what holds the true peak. Legal on the MASTER, a STEM or a group BUS; on the master
+    it runs just before the limiter. Unlike saturation it flattens peaks, not warms them."""
     type: Literal["clip"] = "clip"
     stem_id: str  # "master", a stem, or a group bus
-    threshold_db: float = Field(default=-3.0, ge=-12.0, le=0.0)
-    hardness: float = Field(default=0.5, ge=0.0, le=1.0)
-    # Post-clip output trim (level makeup), applied last as a plain gain. Negative
-    # backs the clipped signal off the limiter; positive drives it harder (the true
-    # peak still bounded by the limiter ceiling downstream).
-    output_db: float = Field(default=0.0, ge=-12.0, le=12.0)
-    oversample: int = Field(default=1)  # 1 = off (bit-exact legacy path)
+    instance: InstanceRef = Field(default=None, description=INSTANCE_DESCRIPTION)
+    gain_db: float = Field(default=0.0, ge=0.0, le=12.0)
+    clip_pct: float = Field(default=100.0, ge=0.0, le=100.0)
+    softness: float = Field(default=0.0, ge=0.0, le=1.0)
+    oversample: int = Field(default=1)  # 1 = off, 2 = on (2x)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _old_knobs(cls, data: Any, info: ValidationInfo) -> Any:
+        # a clipper saved before 2026-10-28 (threshold / hardness / output trim) is read once as the
+        # law's knobs (clip_law.from_legacy); a REQUEST that names them is refused by name upstream
+        if (info.context or {}).get("stored") and isinstance(data, dict):
+            from .clip_law import from_legacy, is_legacy, LEGACY_FIELDS
+            if is_legacy(data):
+                conv = from_legacy(data)
+                data = {k: v for k, v in data.items() if k not in LEGACY_FIELDS}
+                data.update(conv)
+            if isinstance(data.get("oversample"), int) and data["oversample"] > 2:
+                data = {**data, "oversample": 2}
+        return data
 
     @field_validator("oversample")
     @classmethod
-    def _oversample_pow2(cls, v: int) -> int:
-        return _validate_oversample(v)
+    def _oversample_on_off(cls, v: int) -> int:
+        if v not in (1, 2):
+            raise ValueError("oversample is 1 (off) or 2 (on, 2x)")
+        return v
 
 
 class TiltAction(BaseModel):
@@ -1536,6 +1693,9 @@ class TiltAction(BaseModel):
     output_db: float = Field(default=0.0, ge=-12.0, le=12.0)
 
 
+GATE_CHARACTERS = ("classic", "clean", "vocal", "guitar")   # character index 0..3 -> name (gate_characters.NAMES)
+
+
 class GateAction(BaseModel):
     """Downward gate / expander (Phase 41; v2 adds hold/range/hysteresis + detector
     filters): attenuate the signal when it falls BELOW `threshold_db` — silence
@@ -1548,9 +1708,14 @@ class GateAction(BaseModel):
     filters shape only the DETECTOR (the audio path is untouched): `sc_hpf_hz` > 0
     keys the gate off highs (e.g. ignore kick bleed in a snare mic), `sc_lpf_hz`
     < 20000 keys it off lows. Stems, busses and the master (gating a full mix is rarely wanted).
+    `character` picks the law (classic / clean / vocal / guitar): each has its own built-in
+    hysteresis, starts cutting a little under its threshold (classic at 4:1 about 3 dB under) and
+    has its own attack and release shapes; vocal's detector hears the top boosted, guitar's the
+    lows cut. hysteresis_db is ADDED to the character's own.
     Distinct from spectral_denoise, which is broadband artifact repair, not dynamics."""
     type: Literal["gate"] = "gate"
     stem_id: str
+    instance: InstanceRef = Field(default=None, description=INSTANCE_DESCRIPTION)
     threshold_db: float = Field(default=-40.0, ge=-80.0, le=0.0)
     ratio: float = Field(default=4.0, ge=1.0, le=20.0)
     attack_ms: float = Field(default=1.0, ge=0.1, le=100.0)
@@ -1560,6 +1725,18 @@ class GateAction(BaseModel):
     hysteresis_db: float = Field(default=0.0, ge=0.0, le=24.0)
     sc_hpf_hz: float = Field(default=0.0, ge=0.0, le=2000.0)      # 0 = off
     sc_lpf_hz: float = Field(default=20000.0, ge=200.0, le=20000.0)  # 20000 = off
+    # The CHARACTER (2026-10-27, gate_characters): four laws fitted to a reference gate - 0 classic
+    # (the default), 1 clean, 2 vocal (it listens to the top: consonants open it), 3 guitar (it
+    # listens with the lows down, opens after a short delay and holds before it lets go). A name or
+    # the index.
+    character: int = Field(default=0, ge=0, le=3)
+
+    @field_validator("character", mode="before")
+    @classmethod
+    def _character_name(cls, v: Any) -> Any:
+        if isinstance(v, str):   # the agent speaks words
+            return _index_of_name(v, GATE_CHARACTERS, "gate character")
+        return v
 
 
 class TransientAction(BaseModel):
@@ -1574,6 +1751,7 @@ class TransientAction(BaseModel):
     gain budget as gain moves)."""
     type: Literal["transient"] = "transient"
     stem_id: str
+    instance: InstanceRef = Field(default=None, description=INSTANCE_DESCRIPTION)
     attack_db: float = Field(default=0.0, ge=-6.0, le=6.0)
     sustain_db: float = Field(default=0.0, ge=-6.0, le=6.0)
     speed: float = Field(default=1.0, ge=0.25, le=4.0)
@@ -1634,15 +1812,56 @@ class TransposeAction(BaseModel):
 
 
 class SidechainDuckAction(BaseModel):
-    """Sidechain duck (Phase 7): the key stem's level pushes this stem down —
-    the kick→bass classic. Key renders without its own ducks (no cycles)."""
+    """Duck: the track's gain follows one of 16 drawn CURVES (1-8 duck, 9-10 sub-bass, 11-12 trim a
+    kick's tail, 13-14 reverse, 15-16 rhythm) scaled by MIX (gain = 1 - mix x (1 - curve)). TRIGGER
+    "sync" restarts the curve on the song's grid every LENGTH (1/8, 1/4, 1/2, 1/1); "track" restarts
+    it on each hit of `key_stem_id` and plays it once (the kick->bass classic) - a duck that names
+    a key and no trigger is a "track" duck. A hit is a percussive onset: a sustained part (a pad, a
+    held lead) fires few or none. BAND ducks only the low end, below band_hz. Key renders without
+    their own ducks (no cycles)."""
     type: Literal["duck"] = "duck"
     stem_id: str       # the stem being ducked
-    key_stem_id: str   # the stem whose level drives the duck
-    threshold_db: float = Field(ge=-60.0, le=0.0)
-    depth_db: float = Field(ge=1.0, le=12.0)  # max gain reduction
-    attack_ms: float = Field(default=5.0, ge=1.0, le=100.0)
-    release_ms: float = Field(default=150.0, ge=20.0, le=1000.0)
+    instance: InstanceRef = Field(default=None, description=INSTANCE_DESCRIPTION)
+    key_stem_id: str = ""   # the trigger track (trigger "track")
+    trigger: int = Field(default=0, ge=0, le=1)        # 0 sync, 1 track (the words are taken too)
+    curve: int = Field(default=1, ge=1, le=16)
+    length: int = Field(default=1, ge=0, le=3)         # 0 1/8, 1 1/4, 2 1/2, 3 1/1 (or the words)
+    mix: float = Field(default=1.0, ge=0.0, le=1.0)
+    band: bool = False
+    band_hz: float = Field(default=320.0, ge=20.0, le=5120.0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _words_and_old_knobs(cls, data: Any, info: ValidationInfo) -> Any:
+        # a Duck saved before 2026-10-28 (threshold / depth / attack / release) is read once as the
+        # law's knobs (duck_law.from_legacy); a REQUEST that names them is refused by name upstream
+        if not isinstance(data, dict):
+            return data
+        from . import duck_law
+        if (info.context or {}).get("stored") and duck_law.is_legacy(data):
+            data = duck_law.from_legacy(data)
+        data = dict(data)
+        # a key and no trigger named: the duck listens to that key (TRACK) - left on SYNC it pumped
+        # on the grid and never heard its key (the pre-merge review of 2026-10-28)
+        if str(data.get("key_stem_id") or "").strip() and data.get("trigger") is None:
+            data["trigger"] = 1
+        if isinstance(data.get("trigger"), str):
+            w = data["trigger"].strip().lower()
+            if w not in duck_law.TRIGGERS:
+                raise ValueError(f"trigger is one of {list(duck_law.TRIGGERS)}")
+            data["trigger"] = duck_law.TRIGGERS.index(w)
+        if isinstance(data.get("length"), str):
+            w = data["length"].strip()
+            if w not in duck_law.LENGTH_NAMES:
+                raise ValueError(f"length is one of {list(duck_law.LENGTH_NAMES)}")
+            data["length"] = duck_law.LENGTH_NAMES.index(w)
+        if isinstance(data.get("curve"), str) and not data["curve"].strip().isdigit():
+            names = [n.lower() for n in duck_law.CURVE_NAMES]
+            w = data["curve"].strip().lower()
+            if w not in names:
+                raise ValueError(f"curve is 1..16 or one of {list(duck_law.CURVE_NAMES)}")
+            data["curve"] = names.index(w) + 1
+        return data
 
 
 class ReturnReverbAction(BaseModel):
@@ -1656,7 +1875,7 @@ class ReturnReverbAction(BaseModel):
     stem_id: str = ""     # insert placement: stem / bus id / "master" (mutually exclusive with return_id)
     decay_s: float = Field(default=1.8, ge=0.2, le=12.0)
     pre_delay_ms: float = Field(default=20.0, ge=0.0, le=250.0)
-    tone: float = Field(default=0.5, ge=0.0, le=1.0)
+    tone: float = Field(default=0.5, ge=0.0, le=1.0)   # 0 dark, 0.5 flat, 1 bright: a dark room is a low tone, never a negative one
     # Dry/wet. 1.0 = wet only — what a RETURN needs (the dry lives on the source tracks)
     # and the pre-2026-07-20 behaviour, so every existing session renders bit-identically.
     # An insert wants a blend; add_stem_device seeds INSERT_WET_MIX.
@@ -1700,8 +1919,9 @@ class ReturnDelayAction(BaseModel):
     stem_id: str = ""     # insert placement (mutually exclusive with return_id)
     delay_ms: float = Field(default=250.0, ge=20.0, le=2000.0)
     feedback: float = Field(default=0.25, ge=0.0, le=0.85)
-    tone: float = Field(default=0.5, ge=0.0, le=1.0)
+    tone: float = Field(default=0.5, ge=0.0, le=1.0)   # the loop's low-pass: each echo darker than the last
     mix: float = Field(default=1.0, ge=0.0, le=1.0)   # dry/wet; 1.0 = return form (unchanged)
+    ping_pong: bool = False   # echoes alternate left / right (the input's mid)
 
     @model_validator(mode="after")
     def _check_target(self) -> "ReturnDelayAction":
@@ -1743,9 +1963,20 @@ class PanAction(BaseModel):
 
 
 class WidthAction(BaseModel):
+    """The Imager (2026-10-28 - one stereo device, fitted to a reference imager): the channel's
+    stereo WIDTH, a mid/side scale (`width` 0 = mono, 1 = as it is, 2 = the side doubled; the mid
+    is never touched, so the mono sum stays the input's), and STEREOIZE - while `width` is above
+    1, side made from the mid through a short sparse decorrelation filter `stereoize_ms` long
+    (1-20 ms, whole ms; longer = wider and more diffuse), the lows kept narrower than the top. It
+    widens a part that is close to mono, which a plain width cannot. On a track or a group it is
+    the channel strip's width (one per channel); the master's sit in series."""
     type: Literal["width"] = "width"
     stem_id: str
     width: float = Field(ge=0.0, le=2.0)
+    # None = leave the channel's stereoize as it is: a width move that does not name it never
+    # switches off the user's (the pre-merge review of 2026-10-29)
+    stereoize: Optional[bool] = None
+    stereoize_ms: Optional[float] = Field(default=None, ge=1.0, le=20.0)
 
 
 class SpectrogramAction(BaseModel):
@@ -1768,10 +1999,11 @@ class UtilityAction(BaseModel):
     48 dB/oct split (the Live workflow: keep the lows centered, leave the top
     wide; an octave below the knob the side is -48 dB, at the knob -6); `dc_filter` is a gentle one-pole 5 Hz
     high-pass; `balance` is the output balance law (−1 hard left .. +1 hard
-    right). Distinct from the channel-strip fader; all-default is a no-op. One
-    per chain (the native MonitorChain hosts a single Utility step)."""
+    right). Distinct from the channel-strip fader; all-default is a no-op. A
+    chain may hold several (`instance` says which one a proposal changes)."""
     type: Literal["utility"] = "utility"
     stem_id: str  # a stem id, a bus id, or "master"
+    instance: InstanceRef = Field(default=None, description=INSTANCE_DESCRIPTION)
     gain_db: float = Field(default=0.0, ge=-24.0, le=24.0)
     width: float = Field(default=1.0, ge=0.0, le=2.0)
     mono: bool = False
@@ -1813,8 +2045,7 @@ Action = Union[EqAction, CompAction, GainAction, DeessAction, PanAction,
                SidechainDuckAction, DynamicEqAction, ReturnReverbAction,
                ReturnConvolutionAction, ReturnDelayAction, SendAction, MuteAction,
                ExcludeAction, MatchEqAction, MultibandCompAction, OttAction,
-               OverdriveAction, ChorusAction, FlangerAction, AutoFilterAction, BandWidthAction,
-               ImagerAction, GroupAction,
+               OverdriveAction, ChorusAction, FlangerAction, AutoFilterAction, GroupAction,
                RouteAction]
 
 

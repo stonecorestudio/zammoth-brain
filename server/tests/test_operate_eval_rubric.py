@@ -96,12 +96,12 @@ def test_sequence_is_subsequence_not_exact_match():
 # a co-edit that IS a command in the DAW: duck, return level
 # --------------------------------------------------------------------------
 
-DUCK = "duck the piano under lead_vox so the vocal stays on top"
+DUCK = "duck the bass_di under kick_in so the low end stops fighting"
 
 
 @pytest.mark.parametrize("steps, want", [
-    ([cmd("duck.set_key", stem="piano", key="lead_vox")], "correct"),
-    ([prop({"type": "duck", "stem_id": "piano", "key_stem_id": "lead_vox"})],
+    ([cmd("duck.set_key", stem="bass_di", key="kick_in")], "correct"),
+    ([prop({"type": "duck", "stem_id": "bass_di", "key_stem_id": "kick_in"})],
      "none"),
     ([run()], "escalated"),
 ])
@@ -161,7 +161,7 @@ def test_device_technique_is_one_proposal(steps, want, why):
      {"type": "saturation", "stem_id": "bass_di"},
      {"type": "overdrive", "stem_id": "bass_di"}),
     ("widen the piano but keep its low end mono",
-     {"type": "imager", "stem_id": "piano"},
+     {"type": "width", "stem_id": "piano"},
      {"type": "width", "stem_id": "bass_di"}),        # wrong stem
     ("tame the harsh 3k on lead_vox only when it gets loud",
      {"type": "dynamic_eq", "stem_id": "lead_vox", "freq_hz": 3200},

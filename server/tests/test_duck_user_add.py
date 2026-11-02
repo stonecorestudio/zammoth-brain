@@ -1,5 +1,6 @@
 """User-addable sidechain Duck (2026-07-11): the browser Devices tab / dock add path.
-A duck lands UNKEYED (key_stem_id "") and must be a render no-op until keyed; one duck
+A duck lands on SYNC (since 2026-10-28, duck_law: it pumps on the beat at once, as the reference
+curve-ducker does); a TRACK duck with no trigger is a render no-op; one duck
 per stem (re-key via set_duck); stem-only (a bus/return add is refused). The keyed
 render/duck math itself is covered by the Phase 7 tests + the DAW --sidechain smoke."""
 import numpy as np
@@ -17,11 +18,14 @@ def test_duck_user_add_unkeyed_is_render_noop(demo_project):
     res = s.add_stem_device(stem, "duck")
     assert res == {"type": "duck", "occurrence": 0, "target": stem}
     entry = [e for e in s._state["stems"][stem]["chain"] if e["type"] == "duck"][0]
-    assert entry["key_stem_id"] == ""          # lands unkeyed
-    assert entry["threshold_db"] == -30.0 and entry["depth_db"] == 6.0
+    assert entry["key_stem_id"] == ""          # lands unkeyed...
+    assert (entry["trigger"], entry["curve"], entry["length"], entry["mix"]) == (0, 1, 1, 1.0)
 
+    synced, _ = render_stem(Session(demo_project), stem)   # ...on SYNC: it pumps
+    assert not np.array_equal(before, synced)
+    s.set_master_device_param("duck", 0, "trigger", 1, target=stem)
     after, _ = render_stem(Session(demo_project), stem)   # fresh session: no cache aliasing
-    assert np.array_equal(before, after)       # unkeyed duck = bit-identical no-op
+    assert np.array_equal(before, after)       # a TRACK duck with no trigger = bit-identical no-op
 
 
 def test_duck_one_per_stem_and_keying(demo_project):
@@ -30,13 +34,12 @@ def test_duck_one_per_stem_and_keying(demo_project):
     stem, key = stems[0], stems[1]
 
     s.add_stem_device(stem, "duck")
-    with pytest.raises(ValueError):            # one duck per stem — re-key, don't stack
-        s.add_stem_device(stem, "duck")
+    s.add_stem_device(stem, "duck")            # Phase 65: as many ducks as you like...
 
-    out = s.set_duck(stem, key)                # keying replaces the unkeyed entry
+    out = s.set_duck(stem, key)                # ...and ONE trigger: a pick keys every one of them
     assert out["key_stem_id"] == key
     ducks = [e for e in s._state["stems"][stem]["chain"] if e["type"] == "duck"]
-    assert len(ducks) == 1 and ducks[0]["key_stem_id"] == key
+    assert len(ducks) == 2 and all(d["key_stem_id"] == key for d in ducks)
 
 
 def test_duck_refused_on_bus_and_return(demo_project):
@@ -59,20 +62,17 @@ def test_duck_rekey_keeps_tuning_and_clear_keeps_device(demo_project):
     # the user (or SC AUTO) tunes it…
     ducks = lambda: [e for e in s._state["stems"][stem]["chain"] if e["type"] == "duck"]
     d = ducks()[0]
-    d["threshold_db"], d["depth_db"], d["attack_ms"], d["release_ms"], d["enabled"] = -42.0, 9.5, 12.0, 320.0, False
+    d["curve"], d["length"], d["mix"], d["band"], d["band_hz"], d["enabled"] = 9, 3, 0.4, True, 150.0, False
     s._persist()
     # …then re-keys: the tuning + bypass carry over, only the trigger changes
     s.set_duck(stem, key_b if key_b != stem else key_a)
     d = ducks()[0]
-    assert d["threshold_db"] == -42.0 and d["depth_db"] == 9.5
-    assert d["attack_ms"] == 12.0 and d["release_ms"] == 320.0 and d["enabled"] is False
-    # explicit arguments still win (the agent's duck.set_key carries threshold/depth)
-    s.set_duck(stem, key_a, threshold_db=-20.0)
-    assert ducks()[0]["threshold_db"] == -20.0 and ducks()[0]["depth_db"] == 9.5
+    assert (d["curve"], d["length"], d["mix"], d["band"], d["band_hz"]) == (9, 3, 0.4, True, 150.0)
+    assert d["enabled"] is False and d["trigger"] == 1      # a picked trigger is a TRACK duck
     # "none" disarms but keeps the device, its tuning intact
     s.set_duck(stem, "none")
     d = ducks()
-    assert len(d) == 1 and d[0]["key_stem_id"] == "" and d[0]["depth_db"] == 9.5
+    assert len(d) == 1 and d[0]["key_stem_id"] == "" and d[0]["mix"] == 0.4
     # a stem that never had a duck gets none from a clear
     other = key_a
     s.set_duck(other, "none")
@@ -121,12 +121,12 @@ def test_rekey_to_a_genuinely_different_trigger_keeps_tuning(demo_project):
     s.set_duck(stem, key_a)
     ducks = lambda: [e for e in s._state["stems"][stem]["chain"] if e["type"] == "duck"]
     d = ducks()[0]
-    d["threshold_db"], d["depth_db"], d["attack_ms"], d["release_ms"] = -42.0, 9.5, 12.0, 320.0
+    d["curve"], d["length"], d["mix"] = 12, 0, 0.6
     s._persist()
     s.set_duck(stem, third)                                # a DIFFERENT trigger
     d = ducks()[0]
     assert d["key_stem_id"] == third
-    assert (d["threshold_db"], d["depth_db"], d["attack_ms"], d["release_ms"]) == (-42.0, 9.5, 12.0, 320.0)
+    assert (d["curve"], d["length"], d["mix"]) == (12, 0, 0.6)
 
 
 def test_set_duck_keeps_the_duck_where_it_is(demo_project):
@@ -168,18 +168,18 @@ def test_disarmed_duck_survives_a_copy(demo_project):
     stems = list(s._state["stems"])
     stem, key = stems[0], stems[1]
     s.add_stem_device(stem, "duck")
-    s.set_duck(stem, key, threshold_db=-24.0, depth_db=8.0)
+    s.set_duck(stem, key)
+    s.set_master_device_param("duck", 0, "mix", 0.35, target=stem)
     s.set_duck(stem, "none")                               # disarmed, tuning kept
     res = s.copy_stem_state(stem, key)
     assert res.get("devices_dropped") == [], res
     dest = [e for e in s._state["stems"][key]["chain"] if e["type"] == "duck"]
     assert len(dest) == 1 and dest[0]["key_stem_id"] == ""
-    assert dest[0]["threshold_db"] == -24.0 and dest[0]["depth_db"] == 8.0
+    assert dest[0]["mix"] == 0.35
 
     # …and a duck whose key really IS gone is still dropped, with the reason it deserves
     s2 = Session(demo_project)
     s2._state["stems"][stem]["chain"] = [
-        {"type": "duck", "key_stem_id": "no_such_stem", "threshold_db": -30.0,
-         "depth_db": 6.0, "attack_ms": 5.0, "release_ms": 150.0}]
+        {"type": "duck", "key_stem_id": "no_such_stem", "trigger": "track", "mix": 0.5}]
     chain, dropped = s2._validated_chain(s2._state["stems"][stem]["chain"], key)
     assert chain == [] and dropped == ["duck (its key track isn't in this project)"]

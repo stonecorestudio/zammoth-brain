@@ -163,8 +163,7 @@ def test_an_emptied_child_takes_its_empty_parent_with_it(tmp_path):
 # ====================================================================================
 
 def _duck(key: str) -> dict:
-    return {"type": "duck", "key_stem_id": key, "depth_db": 6.0, "threshold_db": -30.0,
-            "attack_ms": 10.0, "release_ms": 120.0}
+    return {"type": "duck", "key_stem_id": key, "trigger": 1, "curve": 1, "length": 1, "mix": 0.5}
 
 
 def test_a_copied_duck_keyed_to_its_new_track_is_dropped(tmp_path):
@@ -188,15 +187,16 @@ def _sat(drive: float) -> dict:
     return {"type": "saturation", "drive_db": drive}
 
 
-def test_an_adopted_chain_holds_one_of_a_singleton(tmp_path):
-    """Two whole-file saturations in a foreign chain: the offline render ran both, the DAW's
-    node holds one parameter set per type and the LAST wins. The one the node plays is kept."""
+def test_an_adopted_chain_keeps_every_saturation(tmp_path):
+    """Two whole-file saturations in a foreign chain. Until Phase 65 the DAW's node held one
+    parameter set per type and the copy kept the last; since then each entry is an instance of
+    its own (only a track's Width stays one: `_NATIVE_SINGLETON_KINDS`), so both are kept."""
     proj = _four(tmp_path)
     session = Session(proj)
     out = session.adopt_stem_state("pad", {"chain": [_sat(3.0), _sat(9.0)]}, chain_only=True)
     sats = [e for e in session.stems["pad"]["chain"] if e["type"] == "saturation"]
-    assert [e["drive_db"] for e in sats] == [9.0], sats
-    assert any("saturation" in d for d in out["devices_dropped"]), out
+    assert [e["drive_db"] for e in sats] == [3.0, 9.0], sats
+    assert out["devices_dropped"] == [], out
 
 
 def test_ranged_entries_and_slot_devices_are_not_singletons(tmp_path):
@@ -213,7 +213,7 @@ def test_ranged_entries_and_slot_devices_are_not_singletons(tmp_path):
     assert sorted(e["type"] for e in session.stems["pad"]["chain"]) == ["comp", "comp", "eq", "eq"]
 
 
-def test_a_legacy_session_with_two_of_a_singleton_loads_with_one(tmp_path):
+def test_a_session_with_two_saturations_loads_with_both(tmp_path):
     proj = _four(tmp_path)
     Session(proj)._persist()
     path = proj / "session.json"
@@ -222,7 +222,7 @@ def test_a_legacy_session_with_two_of_a_singleton_loads_with_one(tmp_path):
     path.write_text(json.dumps(state))
     session = Session(proj)
     sats = [e for e in session.stems["pad"]["chain"] if e["type"] == "saturation"]
-    assert [e["drive_db"] for e in sats] == [9.0], sats
+    assert [e["drive_db"] for e in sats] == [3.0, 9.0], sats   # Phase 65: both are instances
     audio, _ = dsp.render_stem(session, "pad")           # ...and it renders
     assert np.isfinite(audio).all()
 
@@ -463,17 +463,18 @@ def test_a_copied_chain_keeps_every_device_with_its_storage_keys(tmp_path):
     assert sorted(out["devices"]) == ["eq", "saturation"]
 
 
-@pytest.mark.parametrize("style, index", [("modern", 0), ("Transparent", 1), (" punchy ", 2), (2, 2)])
+@pytest.mark.parametrize("style, index", [("clean", 0), (" glue ", 1), ("Loud", 2), (2, 2)])
 def test_a_limiter_style_by_name_or_number(style, index):
     assert LimiterAction(stem_id="master", style=style).style == index
 
 
 def test_an_unknown_limiter_style_is_refused():
-    """`style: "loud"` was read as style 0 (Modern)."""
+    """`style: "loud"` was read as style 0. Since the two-stage limiter (2026-10-25) the names are
+    clean / loud / glue, and an old name (punchy) is refused naming them."""
     with pytest.raises(ValidationError) as refused:
-        LimiterAction(stem_id="master", style="loud")
+        LimiterAction(stem_id="master", style="punchy")
     text = str(refused.value)
-    assert "loud" in text and "transparent" in text and "punchy" in text, text
+    assert "punchy" in text and "clean" in text and "glue" in text, text
 
 
 @pytest.mark.parametrize("curve, index", [("tanh", 0), ("Warm", 1), ("tube", 2), ("hard", 3), (3, 3)])
@@ -594,7 +595,7 @@ def test_dual_mono_reads_exactly_what_it_did():
     assert np.array_equal(dsp._block_env_db(_stereo(x, x), SR), old)
 
 
-DYN_EQ = {"type": "dynamic_eq", "freq_hz": 3000.0, "q": 2.0, "threshold_db": -40.0, "ratio": 8.0,
+DYN_EQ = {"type": "dynamic_eq", "freq_hz": 3000.0, "q": 2.0, "threshold_db": -40.0,
           "gain_db": -6.0, "attack_ms": 5.0, "release_ms": 80.0}
 
 
@@ -607,13 +608,21 @@ def test_a_dynamic_eq_cuts_anti_phase_band_content():
 
 
 def test_a_duck_follows_an_anti_phase_key():
+    # since 2026-10-28 a duck restarts a curve on each HIT (duck_law): kicks, in and out of phase
     bed = _tone(220.0, 2.0, level=0.2)
-    key = _tone(90.0, 2.0, level=0.3)
-    entry = {"depth_db": 9.0, "threshold_db": -30.0, "attack_ms": 5.0, "release_ms": 80.0}
+    n = bed.size
+    key = np.zeros(n)
+    tt = np.arange(int(0.2 * SR)) / SR
+    hit = 0.9 * np.sin(2 * np.pi * np.cumsum(50 + 100 * np.exp(-tt / 0.03)) / SR) * np.exp(-tt / 0.12)
+    for start in range(0, n - hit.size, SR // 2):
+        key[start:start + hit.size] += hit
+    entry = {"trigger": 1, "curve": 1, "length": 1, "mix": 0.5}
+    moved = {}
     for name, k in (("in phase", _stereo(key, key)), ("anti-phase", _stereo(key, -key))):
-        out = dsp._duck(_stereo(bed, bed), SR, k, entry)
-        moved = _db(out[SR // 2:, 0]) - _db(bed[SR // 2:])
-        assert moved == pytest.approx(-9.0, abs=0.5), f"{name}: the bed moved {moved:+.2f} dB"
+        out = dsp._duck(_stereo(bed, bed), SR, entry, key_audio=k)
+        moved[name] = _db(out[:, 0]) - _db(bed)
+        assert moved[name] < -0.5, f"{name}: the bed moved {moved[name]:+.2f} dB"
+    assert moved["in phase"] == pytest.approx(moved["anti-phase"], abs=0.01)
 
 
 def test_a_transient_shaper_sees_anti_phase_hits():
@@ -683,14 +692,12 @@ def test_a_notes_cents_are_read_true_down_to_the_floor(notes, within, cents):
     assert worst <= within, [(n.note_name, n.cents_off) for n in result.notes]
 
 
-def test_a_bass_below_the_tracking_floor_is_told_the_floor():
-    """E1-B1 was refused with "this needs a MONOPHONIC source": the part IS monophonic, it
-    plays below the 65 Hz the tracker can follow. The reason sends the agent to the wrong
-    conclusion about the source."""
+def test_a_bass_below_the_ordinary_tracker_is_read_by_the_low_one():
+    """E1-B1 was refused with "this needs a MONOPHONIC source", then told the 65 Hz floor;
+    since the final QA of 2026-10-30 it is read."""
     result = analysis.analyze_notes(_bass_line(E1_TO_B1), SR, "bass")
-    assert result.notes == [] and result.reason
-    assert "65 Hz" in result.reason, result.reason
-    assert "MONOPHONIC" not in result.reason, result.reason
+    assert result.reason is None and result.notes_found >= 4
+    assert result.sequence[0].note_name == "E1"
 
 
 def test_noise_is_still_told_it_has_no_pitch():
@@ -1006,3 +1013,17 @@ def test_the_console_does_not_offer_to_notch_a_played_note(tmp_path):
         shutil.copy(wav, proj / wav.name)
     said = " | ".join(o["text"] for o in daw_bridge.session_observations(proj, cap=8))
     assert "resonance" not in said, said
+
+
+def test_a_mix_whose_tuning_is_not_read_but_whose_key_is_keeps_its_notes_out():
+    """A finished master's tuning histogram is smeared by its drums, reverb and saturation
+    under the tonal gate (2.5 against 3.0 on a 2026-11-02 EDM master), so `_tuning` read it
+    as unpitched and the song's own D#, F# and G# (619, 371, 829 Hz) were offered as rings to
+    notch. Material a key is read on is pitched: its notes are its notes, on A440's grid."""
+    x = _held_notes()
+    assert analysis._key(x, SR) is not None
+    out = analysis._resonances(x[:, np.newaxis], SR, None)
+    assert not out, [r.freq_hz for r in out]
+    # ...and a real ring on that material is still found
+    out = analysis._resonances(_with_a_ringing_mode(x, 190.0)[:, np.newaxis], SR, None)
+    assert out and abs(out[0].freq_hz - 190) <= 6, out

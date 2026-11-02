@@ -1124,8 +1124,7 @@ def test_import_track_from_materializes_audio_and_state(demo_project: Path, tmp_
                   {"type": "eq",
                    "band": {"freq_hz": 2000, "gain_db": 3.0, "q": 1.0, "shape": "peak"}},
                   {"type": "eq", "freq_hz": 500, "gain_db": 2.0},   # malformed: no band
-                  {"type": "duck", "key_stem_id": "stem_b", "threshold_db": -30.0,
-                   "depth_db": 6.0}]})
+                  {"type": "duck", "key_stem_id": "stem_b", "trigger": "track", "mix": 0.5}]})
     (demo_project / "session.json").write_text(json.dumps(state))
 
     dest = _other_project(demo_project, tmp_path)
@@ -1329,8 +1328,7 @@ def test_import_chain_from_adopts_only_the_devices(demo_project: Path, tmp_path:
                   {"type": "eq",
                    "band": {"freq_hz": 2000, "gain_db": 3.0, "q": 1.0, "shape": "peak"}},
                   {"type": "eq", "freq_hz": 500, "gain_db": 2.0},   # malformed: no band
-                  {"type": "duck", "key_stem_id": "nope", "threshold_db": -30.0,
-                   "depth_db": 6.0}]})                              # dangling key → drops
+                  {"type": "duck", "key_stem_id": "nope", "trigger": "track", "mix": 0.5}]})                              # dangling key → drops
     (demo_project / "session.json").write_text(json.dumps(state))
 
     dest = _other_project(demo_project, tmp_path)

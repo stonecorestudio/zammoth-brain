@@ -118,10 +118,15 @@ def test_is_this_a_take_is_asked_in_one_place():
 
 def test_the_osc_door_and_the_brain_door_share_the_confirm_rule():
     """S4.R15 a. The brain's door asked for the user's yes on three things, the OSC door copied
-    one. Both now call needsUserYes; the per-call confirms are written once."""
+    one. Both now call needsUserYes; the per-call confirms are written once. Since 2026-11-02
+    the brain's door asks `agentNeedsYes`: needsUserYes, less one new master export inside the
+    project (`exportNeedsNoYes`) - the OSC door keeps needsUserYes whole."""
     app = _product(_read("App.cpp"))
     assert app.count("dawcmd::agentConfirmFor (command, args)") == 1, "the per-call confirm is written at more than one door"
-    assert "const bool needsConfirm = needsUserYes (*spec, command, args);" in app
+    assert "const bool needsConfirm = c->agentNeedsYes (*spec, command, args);" in app
+    agent = app[app.index("    bool agentNeedsYes ("):]
+    agent = agent[: agent.index("\n    }\n")]
+    assert "return needsUserYes (spec, command, args) && ! exportNeedsNoYes (" in agent
     door = app[app.index("    juce::String oscRefusal ("):]
     door = door[: door.index("\n    }\n")]
     assert "needsUserYes (*spec, command, args)" in door and "dawcmd::startsEngineer (command)" in door

@@ -42,7 +42,7 @@ def _rules(result) -> set[str]:
 
 def _bell(stem: str, gain: float, freq: float = 440.0) -> dict:
     return {"type": "eq", "stem_id": stem,
-            "band": {"shape": "peak", "freq_hz": freq, "gain_db": gain, "q": 1.0}}
+            "band": {"shape": "peak", "freq_hz": freq, "gain_db": gain, "q": 1.41}}   # the cookbook 1.0's width (eq_law)
 
 
 def _gain(stem: str, db: float) -> dict:
@@ -161,11 +161,14 @@ def test_the_transient_charge_is_its_larger_lift_plus_its_output():
 
 
 def test_the_agents_ott_depth_keeps_its_upward_side_inside_the_pass_rail(demo_project):
-    """OTT lifts quiet material by up to OTT_MAX_BOOST_DB x depth and no wallet charges it. The
-    run's depth cap is set so that worst case IS the per-pass rail (James, 2026-10-05)."""
-    from mix_engine.dsp import OTT_MAX_BOOST_DB
+    """OTT's upward side is not charged; the run's depth cap holds it near the per-pass rail (James,
+    2026-10-05). Under ott_law (2026-10-28) the FIXED makeup is charged as gain, and at the cap it
+    leaves room in the rail; the lift on a quiet stem is measured in the next test."""
+    from mix_engine.ott_law import makeup_lift_db
+    from mix_engine.guardrails import level_charge_db
 
-    assert OTT_MAX_BOOST_DB * LIMITS["ott_depth_max"] <= LIMITS["gain_per_stem_per_pass_db"]
+    at_cap = {"type": "ott", "stem_id": "stem_a", "depth": LIMITS["ott_depth_max"]}
+    assert level_charge_db(at_cap) == makeup_lift_db(at_cap) < LIMITS["gain_per_stem_per_pass_db"]
     session = Session(demo_project)
     deep = _propose(session, [{"type": "ott", "stem_id": "stem_a", "depth": 0.3}])
     assert "ott_depth_max" in _rules(deep)
@@ -283,8 +286,8 @@ _SINGLETON_SHAPES = {
     "ott": {"depth": 0.2}, "saturation": {"drive_db": 3.0}, "overdrive": {},
     "chorus": {"mix": 0.3}, "flanger": {"mix": 0.3}, "auto_filter": {"cutoff_hz": 800.0}, "clip": {},
     "deess": {"threshold_db": -30.0, "freq_hz": 6000.0}, "gate": {},
-    "transient": {"attack_db": 2.0}, "imager": {}, "utility": {"gain_db": 1.0},
-    "duck": {"key_stem_id": "stem_b", "threshold_db": -30.0, "depth_db": 3.0},
+    "transient": {"attack_db": 2.0}, "utility": {"gain_db": 1.0},
+    "duck": {"key_stem_id": "stem_b", "trigger": "track", "mix": 0.3},
 }
 
 
@@ -394,13 +397,11 @@ def _master(kind: str, **fields) -> dict:
     return {"type": kind, "stem_id": "master", **fields}
 
 
-def test_four_legal_narrowings_of_the_master_are_one_illegal_one(demo_project):
-    """width 0.5 x utility 0.5 x imager 0.5 x band_width 0.5 = 0.0625 of the side in the mids:
-    one accepted proposal, master side/mid -23.6 dB."""
+def test_two_legal_narrowings_of_the_master_are_one_illegal_one(demo_project):
+    """width 0.5 x utility 0.5 = 0.25 of the side (it was four devices, 0.0625, until the 3-band
+    imager and band width were retired, 2026-10-28)."""
     session = Session(demo_project)
-    four = [_master("width", width=0.5), _master("utility", width=0.5),
-            _master("imager", width_mid=0.5, width_high=0.5),
-            _master("band_width", band="mid", width=0.5)]
+    four = [_master("width", width=0.5), _master("utility", width=0.5)]
     assert "master_width_min" in _rules(_propose(session, four))
     # two that are each legal and compose under the floor
     assert "master_width_min" in _rules(_propose(session, [_master("width", width=0.7),
@@ -430,7 +431,7 @@ def test_the_floor_binds_only_where_the_proposal_narrows(demo_project):
     session.set_master_device_param("utility", 0, "width", 0.3)
     session = Session(demo_project)
     _apply(session, [_bell("master", 2.0)])
-    _apply(session, [_master("imager", width_high=1.2)])
+    _apply(session, [_master("width", width=1.2)])                 # a widen: not refused
     assert "master_width_min" in _rules(_propose(session, [_master("width", width=0.9)]))
     # a device the user switched off narrows nothing
     session.set_master_device_enabled("utility", 0, False)
@@ -440,8 +441,7 @@ def test_the_floor_binds_only_where_the_proposal_narrows(demo_project):
 
 def test_folding_the_lows_stays_free_under_the_composed_floor(demo_project):
     session = Session(demo_project)
-    _apply(session, [_master("utility", width=0.5), _master("imager", width_low=0.0),
-                     _master("band_width", band="bass", width=0.0)])
+    _apply(session, [_master("utility", width=0.5, bass_mono=True, bass_mono_hz=150.0)])
 
 
 # ---------- D8·R2: the journal follows a rename ----------

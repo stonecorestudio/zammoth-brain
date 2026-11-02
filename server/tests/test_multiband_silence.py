@@ -142,7 +142,14 @@ def test_the_device_writes_nothing_before_its_content(label, render, lo_hz, hi_h
     x_fr, k = _silent_lead_stem()
     cx = {"crossover_lo_hz": lo_hz, "crossover_hi_hz": hi_hz}
     out = np.asarray(render(_channels_first(x_fr), **cx))
-    assert np.all(out[:, :k] == 0.0), (
+    # The multiband saturation runs oversampled (at least 4x since 2026-10-24): its decimation
+    # filter is linear-phase and rings a few samples ahead of an onset - in the DAW as here, the
+    # oversampled shaper's property and not leakage from the split. Everything further back is
+    # still exactly zero, and the ring itself is small.
+    reach = 64 if label.startswith("mb_sat") else 0
+    if reach:
+        assert _peak_db(out[:, k - reach:k]) < -40.0, f"{label}: the decimation's pre-ring is {_peak_db(out[:, k - reach:k]):.1f} dBFS"
+    assert np.all(out[:, :k - reach] == 0.0), (
         f"{label} at {lo_hz:.0f}/{hi_hz:.0f} Hz: {_peak_db(out[:, :k]):.1f} dBFS before the "
         f"first sample of content")
     # NEGATIVE CONTROL - the device does something to the music, or the silence is vacuous.
@@ -170,12 +177,23 @@ def test_the_silence_stays_silent_end_to_end_through_render_stem(tmp_path):
     rendered = _channels_first(out)                       # render_stem returns (frames, ch)
     assert np.all(rendered[:, :k] == 0.0), (
         f"render_stem put {_peak_db(rendered[:, :k]):.1f} dBFS into a bit-exact silent lead-in")
-    # NEGATIVE CONTROL - the render path runs the device: the MUSIC is changed by the OTT.
+    # NEGATIVE CONTROL - the render path runs the device: the MUSIC is what dsp._ott makes of it,
+    # and that is not the dry. (Under ott_law, 2026-10-28, OTT at the agent's cap moves this loud
+    # lead by ~1 dB in the mids - its makeup and its downward side nearly cancel in RMS - so the
+    # control reads the octaves, not the whole RMS.)
+    from scipy.signal import welch
     music = slice(k, rendered.shape[1])
-    dry, wet = _rms_db(_channels_first(x_fr)[:, music]), _rms_db(rendered[:, music])
-    assert abs(wet - dry) > 1.0, (
-        f"the OTT moved the music by only {wet - dry:+.2f} dB RMS - the render path is "
-        f"not actually running the device, so the silence leg is vacuous")
+    dry_m = _channels_first(x_fr)[:, music]
+    direct = dsp._ott(np.ascontiguousarray(_channels_first(x_fr)).astype(np.float32), SR,
+                      session._state["stems"]["lead"]["chain"][-1])[:, music]
+    assert np.max(np.abs(rendered[:, music] - direct)) < 1e-4, "the render is not the device's own output"
+    f, pd = welch(dry_m[0], SR, nperseg=4096)
+    _, pw = welch(rendered[0, music], SR, nperseg=4096)
+    moved = max(abs(10 * np.log10(pw[(f >= c / 1.414) & (f < c * 1.414)].sum()
+                                  / pd[(f >= c / 1.414) & (f < c * 1.414)].sum()))
+                for c in (125, 250, 500, 1000, 2000))
+    assert moved > 0.5, (f"the OTT moved no octave of the music by more than {moved:.2f} dB - the "
+                         f"render path is not actually running the device, so the silence leg is vacuous")
 
 
 def test_multiband_saturation_still_saturates():

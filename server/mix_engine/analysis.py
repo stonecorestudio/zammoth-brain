@@ -28,6 +28,7 @@ from .models import (  # noqa: F401
     NoteAnalysis,
     NotePlayed,
     NoteEvent,
+    NoteStep,
     PhraseAnalysis,
     PhraseLevelMove,
     PhrasePitch,
@@ -1675,6 +1676,7 @@ NOTE_PERIODICITY = 0.5       # normalised autocorrelation below this = unvoiced
 NOTE_OCTAVE_TOLERANCE = 0.85  # accept the FIRST peak within this of the best
 NOTE_MIN_FRAMES = 8          # 80 ms — shorter runs are transitions, not notes
 NOTE_MAX_REPORTED = 8
+NOTE_SEQUENCE_MAX = 128      # `sequence`: a whole bass part, in the order it is played
 NOTE_PLAYED_MAX = 7          # pitch classes listed in `played`: a scale's worth
 # The monophony gate (2026-08-08). Autocorrelation answers a CHORD with the
 # virtual fundamental, so polyphony used to be reported as a confident note one
@@ -1692,13 +1694,21 @@ NOTE_MIN_FUNDAMENTAL = 0.05
 # under the floor. ~31 Hz is B0, the low string of a five-string bass.
 NOTE_SUBFLOOR_MIN_HZ = 31.0
 NOTE_SUBFLOOR_SHARE = 0.5    # of the frames that carry signal
+# A part under the floor is tracked on a decimated signal (final QA, 2026-10-30): the same
+# 2048-sample frame then holds 186 ms, nearly six periods of 31 Hz. Without it the agent had to
+# pitch the user's bass up an octave and print it bar by bar to learn its notes.
+NOTE_LOW_DECIMATE = 4
+NOTE_LOW_F0_MAX_HZ = 260.0
+NOTE_LOW_RETRY_SHARE = 0.6   # of its sounding time a read must hold, or the low one is asked too
 
 
-def _f0_track(mono: np.ndarray, sample_rate: int
+def _f0_track(mono: np.ndarray, sample_rate: int, low: bool = False
               ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Frame-wise f0 in Hz via normalised autocorrelation (0 = unvoiced), the
     frame start times, and the harmonic SHARE of each frame. Pure numpy/scipy —
-    no librosa, deterministic.
+    no librosa, deterministic. `low` reads NOTE_SUBFLOOR_MIN_HZ..NOTE_LOW_F0_MAX_HZ
+    on a decimated signal; the times are then the frames' CENTRES, because a frame
+    that long is most of a note.
 
     The share is the energy at the f0's OWN first partial relative to its
     strongest partial — i.e. "is this fundamental actually there?". A C4-E4-G4
@@ -1724,11 +1734,16 @@ def _f0_track(mono: np.ndarray, sample_rate: int
     # NOTE_FRAME / NOTE_HOP are sample counts at the base rate: at 96 k a 2048-sample frame
     # held 1.4 periods of a 65 Hz note and at 192 k found no note at all (reader E5.R3).
     mono, sample_rate = _at_base_rate(mono, sample_rate)
+    hop, f0_low, f0_high = NOTE_HOP, NOTE_F0_MIN_HZ, NOTE_F0_MAX_HZ
+    if low:
+        mono = resample_poly(mono, 1, NOTE_LOW_DECIMATE)
+        sample_rate = sample_rate / NOTE_LOW_DECIMATE
+        hop, f0_low, f0_high = NOTE_HOP // NOTE_LOW_DECIMATE, NOTE_SUBFLOOR_MIN_HZ, NOTE_LOW_F0_MAX_HZ
     if mono.shape[0] < NOTE_FRAME * 2:
         return np.array([]), np.array([]), np.array([])
-    starts = np.arange(0, mono.shape[0] - NOTE_FRAME + 1, NOTE_HOP)
-    min_lag = max(2, int(sample_rate / NOTE_F0_MAX_HZ))
-    max_lag = min(NOTE_FRAME - 1, int(sample_rate / NOTE_F0_MIN_HZ))
+    starts = np.arange(0, mono.shape[0] - NOTE_FRAME + 1, hop)
+    min_lag = max(2, int(sample_rate / f0_high))
+    max_lag = min(NOTE_FRAME - 1, int(sample_rate / f0_low))
     if min_lag >= max_lag:
         return np.array([]), np.array([]), np.array([])
 
@@ -1785,7 +1800,8 @@ def _f0_track(mono: np.ndarray, sample_rate: int
         if len(amps) >= 3:
             peak = max(amps)
             share[i] = amps[0] / peak if peak > 0 else 0.0
-    return f0, starts / sample_rate, share
+    times = (starts + NOTE_FRAME / 2 if low else starts) / sample_rate
+    return f0, times, share
 
 
 def _plays_below_the_note_floor(mono: np.ndarray, sample_rate: int) -> bool:
@@ -1831,14 +1847,28 @@ def analyze_notes(audio, sample_rate: int, stem_id: str,
     if np.max(np.abs(audio)) < SILENCE_PEAK:
         return NoteAnalysis(stem_id=stem_id, reason="silent")
 
-    mono = audio.mean(axis=1)
-    f0, times, fundamental = _f0_track(mono, sample_rate)
-    below_floor = (f"this part plays below the {NOTE_F0_MIN_HZ:.0f} Hz tracking floor "
-                   "(about C2) — a bass's lowest octave cannot be measured note by "
+    return _notes_read(audio.mean(axis=1), sample_rate, stem_id, max_notes)
+
+
+def _notes_read(mono: np.ndarray, sample_rate: int, stem_id: str,
+                max_notes: Optional[int], low: bool = False) -> NoteAnalysis:
+    """`analyze_notes` over one tracker. A part the ordinary one finds below its floor goes
+    round again on the low one; only what neither can read is told the floor."""
+    f0, times, fundamental = _f0_track(mono, sample_rate, low)
+
+    def under_the_floor() -> NoteAnalysis:
+        read = _notes_read(mono, sample_rate, stem_id, max_notes, low=True)
+        if read.notes_found:
+            return read
+        return NoteAnalysis(
+            stem_id=stem_id,
+            reason=f"this part plays below the {NOTE_SUBFLOOR_MIN_HZ:.0f} Hz tracking floor, "
+                   "or too low and short to hold a note: it cannot be measured note by "
                    "note. Nothing here says the source is polyphonic or out of tune")
+
     if f0.size == 0 or not np.any(f0 > 0):
-        if _plays_below_the_note_floor(mono, sample_rate):
-            return NoteAnalysis(stem_id=stem_id, reason=below_floor)
+        if not low and _plays_below_the_note_floor(mono, sample_rate):
+            return under_the_floor()
         return NoteAnalysis(
             stem_id=stem_id,
             reason="no stable pitch to track — this needs a MONOPHONIC source "
@@ -1881,8 +1911,8 @@ def analyze_notes(audio, sample_rate: int, stem_id: str,
             note = int(semitone[i])
             events.append(NoteEvent(
                 start_s=round(float(times[i]), 2),
-                end_s=round(float(times[j])
-                            + NOTE_FRAME * _rate_factor(sample_rate) / sample_rate, 2),
+                end_s=round(float(times[j]) + (0.0 if low else
+                            NOTE_FRAME * _rate_factor(sample_rate) / sample_rate), 2),
                 midi_note=note,
                 note_name=f"{PITCH_CLASSES[note % 12]}{note // 12 - 1}",
                 cents_off=round(cents_off, 1),
@@ -1896,14 +1926,22 @@ def analyze_notes(audio, sample_rate: int, stem_id: str,
         # check above is reached only when NOTHING tracked, and a real bass always has a few
         # frames that do - a passing note above C2, an octave error - so a 55 Hz bass loop was
         # told it "may be polyphonic, percussive, or heavily slurred".
-        if _plays_below_the_note_floor(mono, sample_rate):
-            return NoteAnalysis(stem_id=stem_id, reason=below_floor)
+        if not low and _plays_below_the_note_floor(mono, sample_rate):
+            return under_the_floor()
         return NoteAnalysis(
             stem_id=stem_id,
             stem_tuning_offset_cents=(round(centre_cents, 1)
                                       if centre is not None else None),
             reason="no note held long enough to measure — the source may be "
                    "polyphonic, percussive, or heavily slurred")
+
+    # A line that crosses the floor: the notes above it track and the ones under it do not,
+    # so the part was reported as its top few notes. The low read covers both.
+    if not low and _held_seconds(events) < NOTE_LOW_RETRY_SHARE * _sounding_seconds(mono, sample_rate) \
+            and _plays_below_the_note_floor(mono, sample_rate):
+        read = _notes_read(mono, sample_rate, stem_id, max_notes, low=True)
+        if _held_seconds(read.sequence) > 1.5 * _held_seconds(events):
+            return read
 
     ranked = sorted(events, key=lambda n: abs(n.deviation_cents), reverse=True)
     return NoteAnalysis(
@@ -1912,7 +1950,23 @@ def analyze_notes(audio, sample_rate: int, stem_id: str,
                                   if centre is not None else None),
         notes=ranked[:(max_notes if max_notes is not None else NOTE_MAX_REPORTED)],
         notes_found=len(events),
-        played=_notes_played(events))
+        played=_notes_played(events),
+        sequence=[NoteStep(start_s=n.start_s, end_s=n.end_s, note_name=n.note_name)
+                  for n in events[:NOTE_SEQUENCE_MAX]])
+
+
+def _held_seconds(events) -> float:
+    return sum(max(0.0, n.end_s - n.start_s) for n in events)
+
+
+def _sounding_seconds(mono: np.ndarray, sample_rate: int) -> float:
+    """How long a part carries signal, in 100 ms blocks at the tracker's silence level."""
+    block = max(1, int(sample_rate * 0.1))
+    n = mono.shape[0] // block
+    if n == 0:
+        return 0.0
+    rms = np.sqrt(np.mean(mono[:n * block].reshape(n, block) ** 2, axis=1))
+    return float(np.count_nonzero(rms >= SILENCE_PEAK)) * 0.1
 
 
 def _notes_played(events: list[NoteEvent]) -> list[NotePlayed]:
@@ -2728,7 +2782,9 @@ def _resonances(audio: np.ndarray, sample_rate: int,
     partials look like, so on pitched material the three slots used to fill with the song's
     notes: a "resonance" at 439 Hz was the sung A4, the agent was told to notch it, the user
     was offered the notch, and the rule agent capped a match-EQ boost for it. `tuning` is
-    `_tuning`'s answer when the caller already has it (None = unpitched)."""
+    `_tuning`'s answer when the caller already has it (None = no tuning read). Material with
+    no tuning read but a key read is pitched all the same, on A440's grid: a finished master's
+    histogram smears under the tonal gate, and its D#, F# and G# were offered as rings."""
     from scipy.signal import find_peaks
     mono = audio.mean(axis=1)
     nperseg = _welch_nperseg(RESONANCE_NPERSEG, mono.shape[0], sample_rate)
@@ -2759,11 +2815,14 @@ def _resonances(audio: np.ndarray, sample_rate: int,
         return None
     if tuning is _TUNING_UNREAD:
         tuning = _tuning(mono, sample_rate)
+    offset = tuning[0] if tuning is not None else None
+    if offset is None and _key(mono, sample_rate) is not None:
+        offset = 0.0     # a master's tuning smears under the gate; a key read is pitched (A440)
     played: set[int] = set()
-    if tuning is not None:                          # pitched: its notes are not resonances
+    if offset is not None:                          # pitched: its notes are not resonances
         centres = np.array([_peak_centre_hz(freqs, power, log_f, level_db, int(p))
                             for p in peak_idx])
-        played = {int(p) for p, note in zip(peak_idx, _played_notes(centres, tuning[0])) if note}
+        played = {int(p) for p, note in zip(peak_idx, _played_notes(centres, offset)) if note}
     found: list[Resonance] = []
     kept_log_f: list[float] = []
     for p in sorted(peak_idx, key=lambda i: prominence[i], reverse=True):

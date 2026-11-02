@@ -617,7 +617,7 @@ def grade_structure(project: Path) -> list[Check]:
           f"{facts.muted_instrument_tracks} of 3 muted"),
         c("the master was mastered", bool(mastering),
           f"master chain: {', '.join(t for t in master_chain if t) or 'empty'}"),
-        c("the safety limiter is still there", "limiter" in master_chain,
+        c("a limiter on the master", "limiter" in master_chain,
           f"master chain: {', '.join(t for t in master_chain if t) or 'empty'}"),
         c("mix moves applied", bool(applied) or bool(state.get("coedit_log")),
           f"{len(applied)} applied proposals, "
@@ -1301,7 +1301,7 @@ def _mutations() -> list[tuple[str, object, str]]:
          "instrument tracks bounced to stems"),
         ("the tempo is not what was asked", wrong_tempo, "tempo is what was asked"),
         ("the song has no sections", no_sections, "labelled sections"),
-        ("nothing but the safety limiter on the master", hot_master,
+        ("nothing but a limiter on the master", hot_master,
          "the master was mastered"),
         ("the agent never exported", never_exported, "exported"),
         ("the agent never bounced", never_bounced, "bounced"),

@@ -116,10 +116,8 @@ def test_the_master_safety_rule_reads_the_same_three_commands():
 
 
 @pytest.mark.parametrize("command, args, limiter_on, refused", [
-    ("master.limiter", {"on": False}, True, True),
-    ("master.limiter", {"on": True}, False, False),
-    ("master.limiter", {}, True, True),                    # omitted = toggle: it is on, so off
-    ("master.limiter", {}, False, False),
+    ("device.remove", {"track": "master", "device": "limiter"}, True, True),
+    ("device.remove", {"track": "master", "device": "comp"}, True, False),
     ("device.enable", {"track": "master", "device": "limiter#0", "on": False}, True, True),
     ("device.enable", {"track": "master", "device": "limiter"}, True, True),
     ("device.enable", {"track": "master", "device": "limiter", "on": True}, True, False),
@@ -135,7 +133,7 @@ def test_the_master_safety_rule_reads_the_same_three_commands():
 ])
 def test_the_master_safety_rule_case_by_case(command, args, limiter_on, refused):
     """The cases `--agent-guard` drives on the C++ function, on the transcription."""
-    assert (D.master_safety_refusal(command, args, limiter_on) is not None) is refused
+    assert (D.master_safety_refusal(command, args) is not None) is refused
 
 
 #: a refusal the transcription makes -> the words of it that the C++ source must also hold

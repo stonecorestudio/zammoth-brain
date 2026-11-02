@@ -1,8 +1,8 @@
-"""The duck's audit, 2026-10-17 (the device-by-device audit) - the offline engine and the brain.
+"""The duck's audit, 2026-10-17 (the device-by-device audit) - the offline engine and the brain,
+re-pointed at the curve law of 2026-10-28 (duck_law; its own gates are test_duck_law.py).
 
 The native half is `--duck-audit`. Here:
-  * `dsp._duck` is `MonitorChain::applyDuck` transcribed (per-sample key level, the LOUDER
-    channel, the comp's recursion) - held to a literal loop of the native code;
+  * a trigger on ONE channel fires the duck (the detector reads the louder channel);
   * a deleted (excluded) trigger ducks nothing - the DAW has no such track to key from;
   * the DAW may key a duck from a track the brain holds no stem for (an instrument track):
     the brain keeps the key (it refused, and reverted the pick at its next chain push), renders
@@ -11,71 +11,52 @@ The native half is `--duck-audit`. Here:
 """
 from __future__ import annotations
 
-import math
-
 import numpy as np
 import pytest
+import soundfile as sf
 
 from mix_engine import dsp
 from mix_engine.session import Session
 
 SR = 48000
+ENTRY = {"type": "duck", "trigger": 1, "curve": 1, "length": 1, "mix": 1.0, "key_stem_id": "k"}
 
 
-def _native_loop(audio: np.ndarray, key: np.ndarray, e: dict) -> np.ndarray:
-    """MonitorChain::applyDuck's sidechain branch, line for line, in float32."""
-    a_att = np.float32(math.exp(-1.0 / (SR * e["attack_ms"] / 1000.0)))
-    a_rel = np.float32(math.exp(-1.0 / (SR * e["release_ms"] / 1000.0)))
-    red = np.float32(0.0)
-    out = audio.astype(np.float64).copy()
-    for i in range(audio.shape[0]):
-        k = np.float32(max(abs(np.float32(key[i, 0])), abs(np.float32(key[i, 1]))))
-        key_db = np.float32(20.0) * np.float32(math.log10(max(float(k), 1e-12)))
-        target = np.float32(e["depth_db"]) if key_db > e["threshold_db"] else np.float32(0.0)
-        coef = a_att if target > red else a_rel
-        red = coef * red + (np.float32(1.0) - coef) * target
-        out[i] *= float(np.float32(10.0 ** (-float(red) / 20.0)))
-    return out
-
-
-ENTRY = {"type": "duck", "threshold_db": -24.0, "depth_db": 6.0, "attack_ms": 5.0,
-         "release_ms": 150.0, "key_stem_id": "k"}
-
-
-def _signals():
-    t = np.arange(int(0.5 * SR)) / SR
-    audio = np.stack([0.3 * np.sin(2 * np.pi * 220 * t)] * 2, axis=1)
-    hits = (np.sin(2 * np.pi * 4 * t) > 0.6).astype(float)
-    tonal = 0.07 * np.sin(2 * np.pi * 100 * t)            # within ~3 dB of the threshold
-    key = np.stack([tonal + 0.2 * hits * np.sin(2 * np.pi * 60 * t), 0.2 * tonal], axis=1)
-    return audio, key
-
-
-def test_the_offline_duck_is_the_native_law():
-    audio, key = _signals()
-    for thr in (-24.0, -26.0, -30.0):
-        e = {**ENTRY, "threshold_db": thr}
-        ours = dsp._duck(audio, SR, key, e)
-        assert np.max(np.abs(ours - _native_loop(audio, key, e))) < 2e-3, thr
+def _kicks(n: int, every_s: float = 0.25) -> np.ndarray:
+    k = np.zeros(n)
+    tt = np.arange(int(0.2 * SR)) / SR
+    hit = 0.9 * np.sin(2 * np.pi * np.cumsum(50 + 100 * np.exp(-tt / 0.03)) / SR) * np.exp(-tt / 0.12)
+    for at in np.arange(0.0, n / SR, every_s):
+        i = int(at * SR); m = min(len(hit), n - i)
+        k[i:i + m] += hit[:m]
+    return k
 
 
 def test_a_key_on_one_channel_ducks():
-    audio, _ = _signals()
-    t = np.arange(audio.shape[0]) / SR
-    key = np.stack([0.1 * np.sin(2 * np.pi * 60 * t), np.zeros_like(t)], axis=1)   # -20 dBFS, left only
-    out = dsp._duck(audio, SR, key, ENTRY)
-    half = audio.shape[0] // 2
-    assert 20 * np.log10(np.sqrt(np.mean(out[half:] ** 2)) / np.sqrt(np.mean(audio[half:] ** 2))) < -5.0
+    n = SR
+    audio = np.stack([0.3 * np.sin(2 * np.pi * 220 * np.arange(n) / SR)] * 2, axis=1)
+    key = np.stack([_kicks(n), np.zeros(n)], axis=1)          # left only
+    out = dsp._duck(audio, SR, ENTRY, key_audio=key)
+    assert 20 * np.log10(np.sqrt(np.mean(out ** 2)) / np.sqrt(np.mean(audio ** 2))) < -3.0
 
 
-def _keyed(demo_project, key: str = "stem_a") -> Session:
-    s = Session(demo_project)
-    s.set_duck("stem_b", key, threshold_db=-60.0, depth_db=12.0)
+def _project(tmp_path):
+    project = tmp_path / "duck-audit"
+    project.mkdir()
+    t = np.arange(SR) / SR
+    sf.write(project / "stem_b.wav", (0.3 * np.sin(2 * np.pi * 80 * t)).astype(np.float32), SR)
+    sf.write(project / "stem_a.wav", _kicks(SR).astype(np.float32), SR)
+    return project
+
+
+def _keyed(project, key: str = "stem_a") -> Session:
+    s = Session(project)
+    s.set_duck("stem_b", key)
     return s
 
 
-def test_a_deleted_trigger_ducks_nothing(demo_project):
-    s = _keyed(demo_project)
+def test_a_deleted_trigger_ducks_nothing(tmp_path):
+    s = _keyed(_project(tmp_path))
     ducked, _ = dsp.render_stem(s, "stem_b")
     s.user_edit("stem_a", {"excluded": True})
     after, _ = dsp.render_stem(s, "stem_b")

@@ -11,8 +11,8 @@ import pytest
 from mix_engine import guardrails
 from mix_engine.dsp import MB_MAX_BOOST_DB
 from mix_engine.guardrails import LIMITS, _eq_band_peak_db, validate_proposal
-from mix_engine.models import (BAND_LABELS, BandWidthAction, EqAction, EqBand,
-                               ImagerAction, MatchEqAction, MbBand,
+from mix_engine.models import (BAND_LABELS, EqAction, EqBand,
+                               MatchEqAction, MbBand,
                                MultibandCompAction, ProposalRequest,
                                UtilityAction, WidthAction)
 
@@ -50,12 +50,12 @@ def test_a_resonant_cut_is_rejected():
 
 
 def test_the_engine_bound_removed_the_high_slope_hole():
-    """The other half: the band that used to measure +162 dB is now FLAT, so the
-    guardrail passing it is correct rather than a regression. If a future change
-    re-opened the cascade, this fails and `test_a_resonant_cut_is_rejected` would
-    still pass — which is why both exist."""
-    band = _eq(shape="lpf", freq_hz=3000.0, q=8.0, slope_db_oct=96).band
-    assert abs(_eq_band_peak_db(band)) < 1.0, "a high-slope cascade must run Butterworth"
+    """The other half: the band that used to measure +162 dB resonates as ONE section now (the
+    EQ's law, 2026-10-27: q acts on a steep cut's last section only) - a real resonance, which
+    the agent's rule refuses, and nowhere near the compounded one."""
+    action = _eq(shape="lpf", freq_hz=3000.0, q=8.0, slope_db_oct=96)
+    assert 6.0 < _eq_band_peak_db(action.band) < 40.0, "one section's resonance, not a compounded one"
+    assert "eq_resonance_max_db" in _rules(action)
 
 
 @pytest.mark.parametrize("band", [
@@ -64,7 +64,7 @@ def test_the_engine_bound_removed_the_high_slope_hole():
     dict(shape="lpf", freq_hz=12000.0, q=0.707, slope_db_oct=48),
     dict(shape="notch", freq_hz=1000.0, q=4.0),
     dict(shape="bandpass", freq_hz=1000.0, q=2.0),
-    dict(shape="hpf", freq_hz=120.0, q=1.5, slope_db_oct=12),   # mildly resonant, +4 dB
+    dict(shape="hpf", freq_hz=120.0, q=2.12, slope_db_oct=12),  # mildly resonant, +4 dB (the cookbook q 1.5)
 ])
 def test_ordinary_filters_still_pass(band):
     """The rule bounds the EFFECT, so musical filters — including a mildly
@@ -128,17 +128,17 @@ def test_mb_boost_constant_matches_the_engine():
 # overshoots the declared plateau, and the nominal-gain rules can't see it.
 
 def test_resonant_shelf_is_rejected():
-    """A legal-looking +6 dB low shelf at q=8 actually peaks at +18.3 dB."""
-    action = _eq(shape="low_shelf", freq_hz=200.0, gain_db=6.0, q=8.0)
+    """A legal-looking +6 dB low shelf at the top of its Q range peaks at +13 dB."""
+    action = _eq(shape="low_shelf", freq_hz=200.0, gain_db=6.0, q=40.0)
     assert _eq_band_peak_db(action.band) > 12.0          # the hole was real
     assert "eq_resonance_max_db" in _rules(action)
 
 
 def test_shelf_cut_that_boosts_is_rejected():
-    """Sign inversion: a −6 dB shelf CUT at q=8 measures +12.3 dB of BOOST —
+    """Sign inversion: a −6 dB shelf CUT at the top of its Q range measures +7 dB of BOOST —
     the agent asks for attenuation and the filter amplifies."""
-    action = _eq(shape="low_shelf", freq_hz=200.0, gain_db=-6.0, q=8.0)
-    assert _eq_band_peak_db(action.band) > 10.0
+    action = _eq(shape="low_shelf", freq_hz=200.0, gain_db=-6.0, q=40.0)
+    assert _eq_band_peak_db(action.band) > 6.0
     assert "eq_resonance_max_db" in _rules(action)
 
 
@@ -187,7 +187,7 @@ def test_zero_gain_band_with_output_trim_still_passes():
 # ---------- 2026-09-08 audit 07·F3: the master's stereo image had NO floor ----------
 # `validate_proposal` refused a 1.92 dB `balance` nudge on the master and accepted a
 # 12.39 dB mono-sum collapse (`invert_left`), a whole-mix `mono`, `width 0.0` and
-# `imager 0/0/0` — all with ZERO violations.
+# a 3-band imager at 0/0/0 — all with ZERO violations.
 
 
 def test_single_channel_polarity_flip_on_the_master_is_refused():
@@ -221,17 +221,8 @@ def test_single_channel_flip_on_a_stem_stays_legal():
     UtilityAction(stem_id="master", width=0.0),
     UtilityAction(stem_id="master", width=0.25),
     WidthAction(stem_id="master", width=0.0),
-    ImagerAction(stem_id="master", width_low=0.0, width_mid=0.0, width_high=0.0),
-    ImagerAction(stem_id="master", width_high=0.0),
-    ImagerAction(stem_id="master", width_mid=0.2),
-    # The lows exemption is not a keyhole: a "low" band reaching 4 kHz is not the lows.
-    ImagerAction(stem_id="master", width_low=0.0,
-                 crossover_lo_hz=4000.0, crossover_hi_hz=8000.0),
-    # ...nor is a band_width scrubbed across the whole spectrum.
-    BandWidthAction(stem_id="master", band="air", width=0.0,
-                    lo_hz=20.0, hi_hz=20000.0),
-    BandWidthAction(stem_id="master", band="presence", width=0.0),
-    # ...nor a Bass Mono above the lows: an LR8 split since the Utility audit (2026-10-21), and at
+    # The lows exemption is not a keyhole: a Bass Mono above the lows (an LR8 split since the
+    # Utility audit, 2026-10-21) at
     # 500 Hz it takes the side at 300 Hz to 0.02.
     UtilityAction(stem_id="master", bass_mono=True, bass_mono_hz=500.0),
 ])
@@ -240,32 +231,19 @@ def test_narrowing_the_masters_image_below_the_floor_is_refused(action):
 
 
 @pytest.mark.parametrize("action", [
-    # The documented club-safe move at the imager's own 150 Hz default crossover —
+    # The documented club-safe move: the Utility's own bass fold, up to the lows' edge (300 Hz) -
     # our prompts and knowledge file both recommend it, and it IMPROVES mono compat.
-    ImagerAction(stem_id="master", width_low=0.0),
-    ImagerAction(stem_id="master", width_low=0.0, width_high=1.4),
-    # A mid band that lives entirely in the lows is the same move under another name.
-    ImagerAction(stem_id="master", width_mid=0.0,
-                 crossover_lo_hz=30.0, crossover_hi_hz=200.0),
-    # The Utility's own bass fold, up to the lows' edge (300 Hz).
     UtilityAction(stem_id="master", bass_mono=True, bass_mono_hz=120.0),
     UtilityAction(stem_id="master", bass_mono=True, bass_mono_hz=300.0),
     # Tightening the image is not monoing it.
     UtilityAction(stem_id="master", width=0.5),
     WidthAction(stem_id="master", width=0.8),
-    ImagerAction(stem_id="master", width_high=1.3),
-    # Per-band mono of the bottom.
-    BandWidthAction(stem_id="master", band="sub", width=0.0),
-    BandWidthAction(stem_id="master", band="bass", width=0.0),
-    BandWidthAction(stem_id="master", band="air", width=0.0,
-                    lo_hz=25.0, hi_hz=90.0),
+    # The Imager's stereoize widens; it never narrows.
+    WidthAction(stem_id="master", width=1.4, stereoize=True, stereoize_ms=12.0),
     # ...and every one of these moves on a NON-master target: the floor binds the
     # deliverable, not the palette.
     UtilityAction(stem_id="stem_a", mono=True, width=0.0),
     WidthAction(stem_id="stem_a", width=0.0),
-    ImagerAction(stem_id="stem_a", width_low=0.0, width_mid=0.0, width_high=0.0),
-    BandWidthAction(stem_id="stem_a", band="air", width=0.0),
-    BandWidthAction(stem_id="drum_bus", band="presence", width=0.0),
 ])
 def test_the_floor_binds_only_the_master_and_only_its_image(action):
     assert _rules(action) == []
@@ -385,52 +363,6 @@ def _rules_multi(actions, chains=None):
     req = ProposalRequest(rationale="x", predicted_impact=[], actions=list(actions))
     return [v.rule for v in validate_proposal(req, {}, stem_chains=chains)]
 
-
-def _bw(width, band="mid", stem_id="master"):
-    return BandWidthAction(stem_id=stem_id, band=band, width=width)
-
-
-# ---------- band_width COMPOSES, so the master floor must judge the product ----------
-# utility / width / imager are native singletons session._mutate REPLACES, so a per-action floor
-# binds them. band_width APPENDS, and dsp._band_width_scale re-isolates the same mask each time,
-# so N entries multiply. Measured before the fix: eight legal 0.5s in ONE proposal (inside the
-# 8-action cap) took the mid band to a 0.0039 scale — -48 dB of side on a pure-side 600 Hz
-# signal — with ZERO violations, while a far milder single imager move was refused.
-
-def test_stacked_band_widths_cannot_mono_the_master():
-    assert "master_width_min" in _rules_multi([_bw(0.5), _bw(0.5)])          # 0.25, under the floor
-
-
-def test_eight_stacked_band_widths_are_refused():
-    assert "master_width_min" in _rules_multi([_bw(0.5) for _ in range(8)])
-
-
-def test_one_band_width_on_the_floor_stays_legal():
-    """The control that matters: the floor is 0.5 and a single 0.5 sits exactly ON it, so a
-    rule that simply refused band_width on the master would pass the test above and fail here."""
-    assert _rules_multi([_bw(0.5)]) == []
-
-
-def test_band_width_composes_with_what_the_chain_already_carries():
-    """…and across passes, not only within one proposal."""
-    chain = {"master": [{"type": "band_width", "band": "mid", "width": 0.5}]}
-    assert "master_width_min" in _rules_multi([_bw(0.5)], chain)
-
-
-def test_band_widths_on_different_bands_do_not_compose():
-    assert _rules_multi([_bw(0.5, "mid"), _bw(0.5, "air")]) == []
-
-
-def test_stacked_band_width_on_the_lows_stays_free():
-    """Folding the bottom to mono is the one narrowing move the floor exempts, at any depth."""
-    assert _rules_multi([_bw(0.0, "sub") for _ in range(4)]) == []
-
-
-def test_stacked_band_width_on_a_stem_is_not_bounded():
-    """The floor binds the DELIVERABLE. A stem may be monoed freely."""
-    assert _rules_multi([_bw(0.0, "mid", "vox") for _ in range(4)]) == []
-
-
 # ---------- a match_eq ACTION reserves the bank it will occupy ----------
 # eq_bands_in counts an APPLIED match_eq as the full fitted bank, but the propose-time tally
 # charged only eq/tilt — so the rule and the thing it guards disagreed by 8. Measured: a 25-band
@@ -484,6 +416,11 @@ def test_the_slot_limits_match_the_native_chain():
                          ("kMaxDeess", "deessers_per_stem_max")):
         m = re.search(rf"static constexpr int {cname}\s*=\s*(\d+)\s*;", src)
         assert m, f"could not find {cname} in MonitorChain.h — has the declaration moved?"
+        # Phase 65: the comp's is the agent's own policy now, held BELOW the engine's count (a
+        # rule above it would let a move through that the engine drops); the de-esser's is equal.
+        if cname == "kMaxComps":
+            assert LIMITS[limit] <= int(m.group(1)), (cname, m.group(1), LIMITS[limit])
+            continue
         assert int(m.group(1)) == LIMITS[limit], (
             f"{cname} is {m.group(1)} but LIMITS['{limit}'] is {LIMITS[limit]}")
 

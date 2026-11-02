@@ -57,9 +57,9 @@ MAX_TIMELINE_S = 48.0 * 60.0 * 60.0
 _INT32_MAX = 2147483647.0
 
 #: `dawcmd::agentMasterSafetyRefusal`'s one sentence, and the four commands it reads.
-MASTER_SAFETY_REFUSAL = ("the master safety limiter stays on for the engineer "
-                         "— only you can switch it off (⌥⌘L)")
-MASTER_SAFETY_COMMANDS = ("master.limiter", "device.enable", "device.remove", "device.move_to_track")
+MASTER_SAFETY_REFUSAL = ("a limiter on the master is not the engineer's to change "
+                         "— only you can switch it off, remove it or move it")
+MASTER_SAFETY_COMMANDS = ("device.enable", "device.remove", "device.move_to_track")
 
 
 # ---- the brain's half ---------------------------------------------------------------------
@@ -278,11 +278,11 @@ SCALAR_ARG_NAMES = ("track", "stem", "source", "return", "bus", "rack", "id", "n
                     "replace", "kind", "type", "format", "mode", "target", "from", "to",
                     "amount", "bars", "query", "scope", "tape", "tapes", "cards", "field", "print",
                     "preset", "category", "description", "overwrite", "clear_routes",
-                    "pack", "sound", "instrument", "zip")
+                    "pack", "sound", "instrument", "zip", "after_plugin")
 
 
 #: `dawcmd::isIndexArgName`: read with `(int)` by every handler, and never a name.
-INDEX_ARG_NAMES = ("clip", "scene", "index", "slot", "take", "chain", "occ")
+INDEX_ARG_NAMES = ("clip", "scene", "index", "slot", "take", "chain", "occ", "after_plugin")
 
 
 def bad_scalar_arg(args) -> Optional[str]:
@@ -327,17 +327,15 @@ def _truthy(x) -> bool:
     return bool(x)
 
 
-def master_safety_refusal(command: str, args, master_limiter_on: bool) -> Optional[str]:
-    """`dawcmd::agentMasterSafetyRefusal`: the agent may not switch the master's safety limiter
-    off, bypass it, or move it off the master. None lets the command through."""
+def master_safety_refusal(command: str, args) -> Optional[str]:
+    """`dawcmd::agentMasterSafetyRefusal`: the agent may not switch a limiter on the master off,
+    remove it, or move it off the master (the user's ceiling; the safety limiter and its
+    `master.limiter` switch went 2026-10-25, the guard stayed). None lets the command through."""
     args = args if isinstance(args, dict) else {}
 
     def text(key: str) -> str:
         return str(args.get(key) or "").strip()
 
-    if command == "master.limiter":
-        turns_on = _truthy(args["on"]) if "on" in args else not master_limiter_on   # omitted = toggle
-        return None if turns_on else MASTER_SAFETY_REFUSAL
     if (command == "device.enable" and text("track") == "master"
             and text("device").split("#", 1)[0] == "limiter"):
         return None if ("on" in args and _truthy(args["on"])) else MASTER_SAFETY_REFUSAL
@@ -349,3 +347,31 @@ def master_safety_refusal(command: str, args, master_limiter_on: bool) -> Option
         if text("from") in ("master", ""):       # an omitted `from` is the dock, which may be the master
             return MASTER_SAFETY_REFUSAL
     return None
+
+
+#: The dock's capacity door, as `device.add` meets it (DeviceChainView::capacityRefusal, asked by
+#: the command's handler - App.cpp - after `invokeCommand`'s own door). Phase 65: a chain holds
+#: CHAIN_MAX_DEVICES devices, as many of one kind as that allows, and only a track's Width - the
+#: channel strip's one width - stays one per chain (`isCoeditSingletonType`, DeviceSpecs.h). The
+#: names and the words are pinned against the C++ by test_phase65_instance_prompts.py. The space
+#: devices' and the slot families' own counts are not transcribed: no eval case reaches them.
+SINGLETON_DEVICE_TYPES = ("width",)
+CHAIN_MAX_DEVICES = 128
+DEVICE_LABELS = {"width": "Imager"}
+
+
+def device_add_refusal(command: str, args, chain_types) -> Optional[str]:
+    """Why `device.add` is refused for this track's chain (`chain_types`: the types of the
+    entries on it, in order), or None. A second compressor is taken; a second Width is not."""
+    if command != "device.add" or not isinstance(args, dict):
+        return None
+    where = str(args.get("track") or "")
+    kind = str(args.get("type") or "")
+    types = list(chain_types or ())
+    if len(types) + 1 > CHAIN_MAX_DEVICES:
+        return (f"{where} already holds {len(types)} devices \u2014 a chain holds "
+                f"{CHAIN_MAX_DEVICES}; remove one first")
+    if kind in SINGLETON_DEVICE_TYPES and types.count(kind) + 1 > 1:
+        return f"{where} already has an {DEVICE_LABELS.get(kind, kind)} \u2014 one per chain"
+    return None
+

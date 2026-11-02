@@ -1,14 +1,15 @@
 """Technique evals (Phase 48 — docs/05-roadmap.md): does the agent execute
 advanced mixing/mastering techniques WELL, judged on the re-rendered audio?
 
-Ten cases against the purpose-built `technique_demo` fixture
+Nine cases (ten until 2026-10-28, when the Duck became a curve restarted by hits and the
+sidechain-ducking case was retired) against the purpose-built `technique_demo` fixture
 (`orchestrator/technique_fixture.py` — synthesis + every constant the graders
 read). Each case is a real `run_session` LLM run, graded by two deterministic
 layers (no LLM judge anywhere):
 
 - PLAN — the applied actions name the right tool with sane params (comp
   `mix` < 1 for parallel, a duck keyed by the named stem, band-selective
-  dynamics for a time-varying boom, imager/band-width for mono-safe lows,
+  dynamics for a time-varying boom, a widen with a bass-mono guard for mono-safe lows,
   a send/return or low-mix short reverb for space).
 - OUTCOME — windowed, band-limited measurements on the re-rendered
   stems/master (ducking depth inside known lead phrases, swell-window boom
@@ -27,7 +28,7 @@ thresholds — no baseline diff.
     python -m orchestrator.technique_eval --list        # the corpus (free)
     python -m orchestrator.technique_eval --self-test   # grader validity (free)
     python -m orchestrator.technique_eval               # full run — BILLED
-    python -m orchestrator.technique_eval --case duck_pads_under_lead  # one case
+    python -m orchestrator.technique_eval --case deess_lead   # one case
     python -m orchestrator.technique_eval --repeat 3 --check           # the gate
 
 Grader validity (`--self-test`, free, no LLM): every case ships a golden
@@ -57,7 +58,7 @@ from .loop import EngineClient, run_session
 from .technique_fixture import (BAND_BASS_TOP, BAND_BOOM, BAND_MELODY,
                                 BAND_PAD_HIGH, BAND_PAD_LOW, BAND_PAD_MID,
                                 BAND_SIB, BAND_TAIL, BASS_H3_HZ, BASS_STEADY,
-                                BASS_SWELLS, HARSH_HZ, LEAD_AIR_HZ, LEAD_GAPS,
+                                BASS_SWELLS, HARSH_HZ, LEAD_AIR_HZ,
                                 LEAD_LOUD_IDX, LEAD_PHRASES, PAD_LOW_HZ,
                                 SIB_DUR_S, SIBILANT_S, STEM_NAMES,
                                 TAIL_WINDOWS, write_fixture)
@@ -192,8 +193,6 @@ def measure(project: Path) -> dict:
         "drums_rms_db": _rms_db(drums),
         "drums_peak_db": _peak_db(drums),
         "drums_crest_db": _peak_db(drums) - _rms_db(drums),
-        "pads_phrase_rms_db": _windows_rms_db(pads_mono, sr, LOUD_INNER),
-        "pads_gap_rms_db": _windows_rms_db(pads_mono, sr, LEAD_GAPS),
         "pads_low_corr": _corr(low_l, low_r),
         "pads_high_side_mid_db": (
             _rms_db(_band(side, sr, *BAND_PAD_HIGH))
@@ -319,28 +318,6 @@ def _out_parallel(b: dict, a: dict) -> list[str]:
     return fails
 
 
-def _plan_duck(actions: list[dict]) -> list[str]:
-    if any(a.get("type") == "duck" and a.get("stem_id") == "pads"
-           and a.get("key_stem_id") == "lead"
-           and a.get("depth_db", 0.0) >= 2.0 for a in actions):
-        return []
-    return ["no sidechain duck on 'pads' keyed by 'lead' "
-            "(type 'duck', depth_db >= 2)"]
-
-
-def _out_duck(b: dict, a: dict) -> list[str]:
-    fails = []
-    depth = ((a["pads_gap_rms_db"] - a["pads_phrase_rms_db"])
-             - (b["pads_gap_rms_db"] - b["pads_phrase_rms_db"]))
-    if depth < 2.0:
-        fails.append(f"ducking depth {depth:+.1f} dB during lead phrases "
-                     "(want >= 2)")
-    if a["pads_gap_rms_db"] < b["pads_gap_rms_db"] - 1.0:
-        fails.append("pads dropped in the gaps too — that is a fader move, "
-                     "not a duck")
-    return fails
-
-
 def _plan_deess(actions: list[dict]) -> list[str]:
     if any((a.get("type") == "deess" and a.get("stem_id") == "lead"
             and 3500.0 <= a.get("freq_hz", 0.0) <= 10000.0)
@@ -429,29 +406,17 @@ def _out_master(b: dict, a: dict) -> list[str]:
 
 
 def _plan_width(actions: list[dict]) -> list[str]:
-    imager_ok = any(a.get("type") == "imager" and a.get("stem_id") == "pads"
-                    and a.get("width_high", 1.0) >= 1.1
-                    and a.get("width_low", 1.0) <= 1.0 for a in actions)
-    bw_ok = any(a.get("type") == "band_width" and a.get("stem_id") == "pads"
-                and a.get("band") in ("high_mid", "presence", "brilliance",
-                                      "air")
-                and a.get("width", 1.0) >= 1.1 for a in actions)
-    low_guard = any(
-        (a.get("type") == "utility" and a.get("stem_id") == "pads"
-         and a.get("bass_mono"))
-        or (a.get("type") == "imager" and a.get("stem_id") == "pads"
-            and a.get("width_low", 1.0) < 1.0)
-        or (a.get("type") == "band_width" and a.get("stem_id") == "pads"
-            and a.get("band") in ("sub", "bass")
-            and a.get("width", 1.0) < 1.0) for a in actions)
-    naive = any(a.get("type") == "width" and a.get("stem_id") == "pads"
+    # One stereo device since 2026-10-28 (the Imager = `width`, with stereoize): band-limited
+    # width is a widen of the pads WITH a low-end guard - a Utility's bass mono on the pads.
+    low_guard = any(a.get("type") == "utility" and a.get("stem_id") == "pads"
+                    and a.get("bass_mono") for a in actions)
+    widen = any(a.get("type") == "width" and a.get("stem_id") == "pads"
                 and a.get("width", 1.0) > 1.05 for a in actions)
-    if imager_ok or bw_ok or (naive and low_guard):
+    if widen and low_guard:
         return []
-    return ["no band-selective width on 'pads': want an imager "
-            "(width_high > 1, width_low <= 1), a high band_width, or a "
-            "full-band widen WITH a low-end guard (bass_mono / narrowed "
-            "lows) — naked full-band width loosens the low end"]
+    return ["no band-selective width on 'pads': want the Imager widening them (width > 1, "
+            "stereoize optional) WITH a low-end guard (a Utility's bass_mono on 'pads') - "
+            "naked full-band width loosens the low end"]
 
 
 def _out_width(b: dict, a: dict) -> list[str]:
@@ -602,22 +567,16 @@ CASES: tuple[TechCase, ...] = (
           "makeup_db": 6.0, "mix": 0.6},),   # makeup 6 = the guardrail cap
         cheat=({"type": "gain", "stem_id": "drums", "delta_db": 3.0},),
         moves=("drums",)),
-    TechCase(
-        "duck_pads_under_lead", "sidechain ducking",
-        "duck the pads under the lead so the lead always stays on top",
-        _plan_duck, _out_duck,
-        ({"type": "duck", "stem_id": "pads", "key_stem_id": "lead",
-          "threshold_db": -35.0, "depth_db": 6.0, "attack_ms": 5.0,
-          "release_ms": 150.0},),
-        cheat=({"type": "gain", "stem_id": "pads", "delta_db": -6.0},),
-        moves=("pads",)),
+    # (duck_pads_under_lead retired 2026-10-28, James: the Duck became a drawn curve restarted by HITS
+    # (duck_law) - its sustained, partly quiet lead never fires one, so "duck the pads while the lead
+    # sings" is no longer a Duck job and the case measured nothing the product does.)
     TechCase(
         "deess_lead", "de-essing",
         "the lead has piercing sibilance - de-ess it without dulling "
         "the melody",
         _plan_deess, _out_deess,
         ({"type": "deess", "stem_id": "lead", "threshold_db": -48.0,
-          "freq_hz": 5000.0, "ratio": 8.0},),
+          "freq_hz": 5000.0, "range_db": -12.0},),
         cheat=({"type": "eq", "stem_id": "lead", "band": {"shape": "high_shelf", "freq_hz": 4500.0, "gain_db": -9.0, "q": 0.7}},),
         moves=("lead",)),
     TechCase(
@@ -626,7 +585,7 @@ CASES: tuple[TechCase, ...] = (
         "losing the steady low end or dulling its top",
         _plan_boom, _out_boom,
         ({"type": "dynamic_eq", "stem_id": "bassline", "freq_hz": 55.0,
-          "gain_db": -8.0, "q": 1.0, "threshold_db": -24.0, "ratio": 6.0,
+          "gain_db": -8.0, "q": 1.0, "threshold_db": -24.0,
           "attack_ms": 10.0, "release_ms": 120.0},),
         cheat=({"type": "eq", "stem_id": "bassline", "band": {"shape": "peak", "freq_hz": 55.0, "gain_db": -8.0, "q": 1.0}},),
         moves=("bassline",)),
@@ -645,9 +604,8 @@ CASES: tuple[TechCase, ...] = (
         "make the pads wider and more spacious, but keep the low end "
         "mono and club-safe",
         _plan_width, _out_width,
-        ({"type": "imager", "stem_id": "pads", "width_low": 0.5,
-          "width_mid": 1.0, "width_high": 1.6, "crossover_lo_hz": 150.0,
-          "crossover_hi_hz": 2000.0},),
+        ({"type": "width", "stem_id": "pads", "width": 1.6},
+         {"type": "utility", "stem_id": "pads", "bass_mono": True, "bass_mono_hz": 150.0}),
         cheat=({"type": "width", "stem_id": "pads", "width": 1.6},),
         moves=("pads",)),
     TechCase(
@@ -681,7 +639,7 @@ CASES: tuple[TechCase, ...] = (
         "without dulling the quiet phrases",
         _plan_dynharsh, _out_dynharsh,
         ({"type": "dynamic_eq", "stem_id": "lead", "freq_hz": 3200.0,
-          "gain_db": -9.0, "q": 2.0, "threshold_db": -33.0, "ratio": 6.0,
+          "gain_db": -9.0, "q": 2.0, "threshold_db": -33.0,
           "attack_ms": 5.0, "release_ms": 120.0},),
         cheat=({"type": "eq", "stem_id": "lead", "band": {"shape": "peak", "freq_hz": 3200.0, "gain_db": -9.0, "q": 2.0}},),
         moves=("lead",)),
@@ -690,8 +648,10 @@ CASES: tuple[TechCase, ...] = (
         "add some tape-style warmth to the bassline - harmonic richness, "
         "but don't push its peak level",
         _plan_sat, _out_sat,
+        # output_db -3 since 2026-10-26: the level law (44f77f8d) and the tape tone's low bump
+        # lift this bass +3.1 dB at drive 9 - the right answer now takes it back.
         ({"type": "saturation", "stem_id": "bassline", "drive_db": 9.0,
-          "curve": "warm"},),
+          "curve": "warm", "output_db": -3.0},),
         cheat=({"type": "gain", "stem_id": "bassline", "delta_db": 3.0},),
         moves=("bassline",)),
 )

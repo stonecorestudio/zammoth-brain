@@ -26,7 +26,13 @@ def test_set_duck_shared_control_round_trip(tmp_path):
     project.mkdir()
     t = np.arange(int(1.0 * SR)) / SR
     _write(project, "bass", 0.30 * np.sin(2 * np.pi * 80.0 * t))    # the ducked stem
-    _write(project, "kick", 0.50 * np.sin(2 * np.pi * 60.0 * t))    # the key (loud, > -30 dBFS)
+    # the key: a kick every quarter (since 2026-10-28 a duck restarts its curve on HITS - a steady
+    # tone has none)
+    kick = np.zeros_like(t)
+    for at in np.arange(0.0, 1.0, 0.25):
+        i = int(at * SR); n = min(int(0.2 * SR), len(t) - i); tt = np.arange(n) / SR
+        kick[i:i + n] = 0.9 * np.sin(2 * np.pi * np.cumsum(50 + 100 * np.exp(-tt / 0.03)) / SR) * np.exp(-tt / 0.12)
+    _write(project, "kick", kick)
 
     assert set(Session(project).stems) == {"bass", "kick"}
     dry, _ = dsp.render_master(Session(project))                     # no duck yet
@@ -41,9 +47,10 @@ def test_set_duck_shared_control_round_trip(tmp_path):
     assert not np.array_equal(wet, dry)                              # kick now ducks bass
 
     # re-keying replaces (still one duck), not stacks
-    Session(project).set_duck("bass", "kick", threshold_db=-40.0, depth_db=9.0)
+    Session(project).set_master_device_param("duck", 0, "mix", 0.4, target="bass")
+    Session(project).set_duck("bass", "kick")
     again = [e for e in Session(project).stems["bass"]["chain"] if e["type"] == "duck"]
-    assert len(again) == 1 and again[0]["depth_db"] == 9.0
+    assert len(again) == 1 and again[0]["mix"] == 0.4
 
     # "none" DISARMS the duck (the entry stays, unkeyed, with its tuning — 2026-09-04 duck
     # audit: the device box must not vanish when the user picks "Trigger: none") → an unkeyed
@@ -51,7 +58,7 @@ def test_set_duck_shared_control_round_trip(tmp_path):
     cleared = Session(project).set_duck("bass", "none")
     assert cleared["key_stem_id"] is None
     left = [e for e in Session(project).stems["bass"]["chain"] if e["type"] == "duck"]
-    assert len(left) == 1 and left[0]["key_stem_id"] == "" and left[0]["depth_db"] == 9.0
+    assert len(left) == 1 and left[0]["key_stem_id"] == "" and left[0]["mix"] == 0.4
     cut, _ = dsp.render_master(Session(project))
     assert np.array_equal(cut, dry)
 

@@ -311,7 +311,7 @@ CORPUS: tuple[QACase, ...] = (
            "shape both exist — 'we can't' is the bluff here"),
     _q("my limiter is eating the punch out of my drums on the master - "
        "what do i change?",
-       needs=("lookahead|release|style|transparent|punchy",
+       needs=("lookahead|release|style|character|clean|loud|glue",
               "back off|lower the target|less limiting|reduce|ceiling|"
               "gain reduction|over-limit|over limit",),
        why="limiter craft on OUR limiter: lookahead/release/style are its "
@@ -329,12 +329,12 @@ CORPUS: tuple[QACase, ...] = (
               "compress a problem|feeds the",),
        why="the classic ordering rationale: what the comp hears changes what "
            "it does — cut the problem before the detector reacts to it"),
-    _q("whats the difference between ducking the pads under the vocal and "
-       "just turning the pads down?",
-       needs=("duck|sidechain", "only when|only while|when the vocal|"
-              "comes back|releases|=gap|static|constant",),
-       why="dynamic-vs-static is the whole point: a duck moves only while the "
-           "key is present, a fader move costs the pads everywhere"),
+    _q("whats the difference between ducking the bass under the kick and "
+       "just turning the bass down?",
+       needs=("duck|sidechain", "each hit|every hit|each kick|every kick|on the kick|"
+              "comes back|returns|recover|=gap|static|constant|everywhere",),
+       why="dynamic-vs-static is the whole point: a duck dips at each kick hit and "
+           "comes back, a fader move costs the bass everywhere"),
     _q("what does glue compression on a bus do that compressing each track "
        "doesn't?",
        needs=("together|as one|one unit|cohes|=sum|whole bus|react to each",

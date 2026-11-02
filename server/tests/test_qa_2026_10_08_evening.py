@@ -26,19 +26,19 @@ def _low_bass_with_a_blip() -> np.ndarray:
     return np.concatenate(parts)[:, np.newaxis]
 
 
-def test_a_low_bass_with_a_few_tracked_frames_is_told_the_floor():
+def test_a_low_bass_with_a_few_tracked_frames_is_read():
     """D51. Tune Notes on a bass loop at 55 Hz and 32.7 Hz answered "no note held long enough to
     measure - the source may be polyphonic, percussive, or heavily slurred". The sentence
     written for exactly that part ("this part plays below the 65 Hz tracking floor ... nothing
     here says the source is polyphonic") was reached only when NOTHING at all tracked - and a
-    real bass always has a few frames that do."""
+    real bass always has a few frames that do. Since the final QA of 2026-10-30 such a part is
+    read on the low tracker instead of being told the floor."""
     audio = _low_bass_with_a_blip()
     f0, _, _ = analysis._f0_track(audio.mean(axis=1), SR)
     assert np.any(f0 > 0), "the fixture must have frames that track, or it is the older case"
     result = analysis.analyze_notes(audio, SR, "bass")
-    assert result.notes == [] and result.reason
-    assert "65 Hz" in result.reason, result.reason
-    assert "polyphonic, percussive" not in result.reason, result.reason
+    assert result.reason is None and result.notes_found, result.reason
+    assert {s.note_name[:-1] for s in result.sequence} & {"A", "C"}
 
 
 def test_a_part_above_the_floor_with_no_held_note_is_still_told_so():

@@ -57,8 +57,9 @@ def test_ott_input_band_and_output_gain_add(demo_project):
     assert level_charge_db(stacked) == 18.0
     result = _propose(session, [stacked])
     assert not result.accepted and "gain_per_stem_per_pass_db" in _rules(result)
-    # control: one stage at the whole budget is still a legal move
-    _apply(session, [{"type": "ott", "stem_id": "stem_b", "depth": 0.2, "in_gain_db": 6.0}])
+    # control: one stage at the whole budget is still a legal move (at depth 0: since ott_law,
+    # 2026-10-28, a depth also charges the band makeup it lifts by)
+    _apply(session, [{"type": "ott", "stem_id": "stem_b", "depth": 0.0, "in_gain_db": 6.0}])
 
 
 # ---------- D9·R2: the upward multiband worst case is the cap ----------
@@ -249,7 +250,8 @@ def test_a_full_eq_bank_reports_no_room(demo_project):
 def test_a_refused_duck_key_in_a_batch_leaves_the_duck(demo_project):
     from orchestrator.daw_bridge import apply_coedits
     session = Session(demo_project)
-    session.set_duck("stem_b", "stem_a", threshold_db=-24.0, depth_db=9.0)
+    session.set_duck("stem_b", "stem_a")
+    session.set_master_device_param("duck", 0, "mix", 0.3, target="stem_b")   # its tuning
     before = [e for e in Session(demo_project).stems["stem_b"]["chain"] if e["type"] == "duck"]
     assert len(before) == 1 and before[0]["key_stem_id"] == "stem_a"
 
@@ -269,7 +271,8 @@ def test_a_refused_duck_key_in_a_batch_leaves_the_duck(demo_project):
     assert Session(demo_project).set_duck("stem_b", "none")["key_stem_id"] is None
     rekeyed = Session(demo_project)
     assert [e["key_stem_id"] for e in rekeyed.stems["stem_b"]["chain"] if e["type"] == "duck"] == [""]
-    assert rekeyed.set_duck("stem_b", "stem_a")["threshold_db"] == -24.0
+    rekeyed.set_duck("stem_b", "stem_a")
+    assert [e["mix"] for e in Session(demo_project).stems["stem_b"]["chain"] if e["type"] == "duck"] == [0.3]
     assert len([e for e in Session(demo_project).stems["stem_b"]["chain"] if e["type"] == "duck"]) == 1
 
 

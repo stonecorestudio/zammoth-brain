@@ -55,18 +55,18 @@ def test_steeper_slope_attenuates_more_below_cutoff():
     ("lpf", LowpassFilter, 4000.0),
 ])
 def test_slope6_bit_identical_to_pedalboard(shape, cls, freq):
-    """Since 2026-10-17 (the EQ audit) the legacy 1st-order cut is the native's own coefficients in
-    float64 (`dsp._rbj_band`), not Pedalboard's: bit-identical to that law, and within a hair of
-    Pedalboard's filter, which it replaced."""
+    """A 6 dB/oct cut (and an unset slope) is the EQ law's one-pole (`eq_law`, 2026-10-27: matched,
+    so it holds its shape to the top of the band) - bit-identical to that section, and within a
+    hair of Pedalboard's bilinear one-pole on a tone far below Nyquist."""
     from scipy.signal import lfilter
 
-    from mix_engine.reference_monitor import biquad_coeffs
+    from mix_engine.eq_law import band_sections
     sig = _tone(300.0, seconds=0.5)
     audio = np.stack([sig, sig])
-    b, a = biquad_coeffs(shape, SR, freq, 0.707, 0.0)
+    (b, a), = band_sections(shape, SR, freq, 0.707, 0.0, 6)
     ref = lfilter(b, a, audio.astype(np.float64), axis=-1).astype(audio.dtype)
     pedal = Pedalboard([cls(cutoff_frequency_hz=freq)])(audio, SR)
-    assert np.max(np.abs(ref - pedal)) < 1e-4
+    assert np.max(np.abs(ref - pedal)) < 5e-3   # a 0.5 tone: the two one-poles part by under -40 dB
 
     band_explicit = {"shape": shape, "freq_hz": freq, "gain_db": 0.0, "q": 0.707,
                      "slope_db_oct": 6}

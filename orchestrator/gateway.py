@@ -1360,13 +1360,14 @@ class Gateway:
     async def _chat_propose(self, req: dict) -> dict:
         """Chat's mutation path: the same engine proposal lifecycle as the
         loop. Returns immediately; the user approves/rejects in the UI."""
+        from mix_engine.guardrails import pass_cap_among
+
         result = await self.engine.call("propose_actions", {"req": req})
-        if (not result["accepted"] and result["violations"]
-                and all(v["rule"] == "proposals_per_pass"
-                        for v in result["violations"])):
+        if not result["accepted"] and pass_cap_among(result["violations"]):
             # A stale pass (aborted run, old session) exhausted the per-pass
             # proposal budget; conversational moves start a fresh pass
-            # instead of failing on leftovers.
+            # instead of failing on leftovers - whenever the cap is among the
+            # violations, so the model reads only what the fresh pass refuses.
             await self.engine.call("advance_pass")
             result = await self.engine.call("propose_actions", {"req": req})
         if not result["accepted"]:
@@ -1532,7 +1533,7 @@ class Gateway:
                 "For a whole 'just mix/master it' brief, `auto_mix` is fine (it "
                 "builds and applies a full chain); otherwise apply the moves "
                 "directly. The live monitor now reflects eq / dynamic_eq / comp / "
-                "mb_comp / saturation / de-ess / transient / width / band_width / "
+                "mb_comp / saturation / de-ess / transient / width / "
                 "limiter — the user hears those moves live; only pitch (tune / "
                 "transpose) prints "
                 "into the exported render without a live preview. So reach for any "
@@ -1936,7 +1937,7 @@ class Gateway:
 
     async def add_stem_device(self, target: str, device_type: str) -> dict:
         """Phase 40 per-track co-edit: add a stem-only COLOR device (transient /
-        de-ess / band_width) to a captured track. User channel — no proposal."""
+        de-ess) to a captured track. User channel — no proposal."""
         if self.engine is None:
             raise RuntimeError("no project open")
         result = await self.engine.call(
@@ -1991,25 +1992,6 @@ class Gateway:
         self.request_render()
         await self.broadcast_snapshot(stale_ok=True)
         return {"ok": True, "shape": shape}
-
-    async def set_device_band(self, occurrence: int, band: str,
-                              target: str = "master",
-                              lo_hz: float | None = None,
-                              hi_hz: float | None = None) -> dict:
-        """Band-width band selector (2026-07-05): the user picks the device's band
-        LABEL — immediate, no proposal. `target` = master or a stem/bus id.
-        2026-07-19: explicit lo_hz/hi_hz place the band freely (override the label)."""
-        if self.engine is None:
-            raise RuntimeError("no project open")
-        await self.engine.call("set_device_band",
-                               {"occurrence": occurrence, "band": band,
-                                "lo_hz": lo_hz, "hi_hz": hi_hz,
-                                "target": target})
-        self.recent_device = ("band_width", occurrence)
-        self.bounce_rev += 1
-        self.request_render()
-        await self.broadcast_snapshot(stale_ok=True)
-        return {"ok": True, "band": band}
 
     async def set_device_channel(self, device_type: str, occurrence: int,
                                  channel: str, target: str = "master") -> dict:
@@ -2755,7 +2737,7 @@ def create_app(project_dir: Optional[str | Path] = None,
     async def add_device(device_type: str, stem: str = "master") -> dict:
         """Phase 40 (native VST co-edit): the native rail adds a device. `stem` =
         master (default → eq/comp/limiter/dynamic_eq/saturation/width/mb_comp) or a
-        track id (the COLOR sub-rail → transient/de-ess/band_width on that stem).
+        track id (the COLOR sub-rail → transient/de-ess on that stem).
         User channel — no proposal."""
         try:
             if stem and stem != "master":
@@ -2806,20 +2788,6 @@ def create_app(project_dir: Optional[str | Path] = None,
         `stem` = master or a track/bus id."""
         try:
             return await gateway.set_device_channel(device_type, occurrence, channel, stem)
-        except ValueError as exc:
-            raise HTTPException(400, str(exc))
-
-    @app.post("/api/device_band")
-    async def device_band(occurrence: int = 0, band: str = "presence",
-                          stem: str = "master",
-                          lo_hz: float | None = None,
-                          hi_hz: float | None = None) -> dict:
-        """Band-width band selector (2026-07-05): the user picks the device's band
-        LABEL — or, 2026-07-19, explicit lo_hz/hi_hz to place the band freely.
-        `stem` = master or a track/bus id."""
-        try:
-            return await gateway.set_device_band(occurrence, band, stem,
-                                                 lo_hz=lo_hz, hi_hz=hi_hz)
         except ValueError as exc:
             raise HTTPException(400, str(exc))
 

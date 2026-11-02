@@ -52,8 +52,8 @@ def plane(monkeypatch):
     return p
 
 
-def test_the_trial_is_said_as_three_days_and_read_from_the_service(plane):
-    assert "3-day trial" in license_state.MSG_SIGN_IN
+def test_the_trial_is_said_as_thirty_days_and_read_from_the_service(plane):
+    assert "30-day trial" in license_state.MSG_SIGN_IN
     assert "product key" in license_state.MSG_EXPIRED
     _sign_in()
     st = license_state.state(force=True)

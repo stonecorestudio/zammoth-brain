@@ -29,10 +29,12 @@ def test_a_low_shelf_at_a_high_rate_plays_its_design():
     sr = 96000
     freqs = np.geomspace(10, 2000, 200)
     band = {"shape": "tilt_shelf", "freq_hz": 30.0, "q": 8.0, "gain_db": 12.0}
+    # the design is the EQ's law's ANALOG prototype (eq_law, 2026-10-27): matched to it, not bent
+    from mix_engine import eq_law
     design = np.ones(len(freqs), complex)
-    for shape, g in (("low_shelf", -6.0), ("high_shelf", 6.0)):
-        b, a = biquad_coeffs(shape, sr, 30.0, 8.0, g)
-        design *= freqz(b, a, worN=freqs, fs=sr)[1]
+    for num, den in eq_law.analog_sections("tilt_shelf", 12.0, 8.0):
+        s = 1j * freqs / 30.0
+        design *= (num[0] * s * s + num[1] * s + num[2]) / (den[0] * s * s + den[1] * s + den[2])
     err = np.max(np.abs(_response_db(sr, band, freqs) - 20 * np.log10(np.abs(design))))
     assert err < 0.05, err
 

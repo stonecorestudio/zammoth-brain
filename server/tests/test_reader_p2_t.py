@@ -675,21 +675,11 @@ def test_the_chat_door_and_the_plan_door_both_take_the_library_step():
 # E2·R5 - the ninth band-width device was stored and never played
 # ====================================================================================
 
-def test_the_ninth_band_width_is_refused(demo_project):
-    session = Session(demo_project)
-    for _ in range(8):
-        session.add_stem_device("stem_a", "band_width")
-    with pytest.raises(ValueError, match="already has 8 band_width"):
-        session.add_stem_device("stem_a", "band_width")
-    assert _devices(demo_project, "stem_a", "band_width") == 8
-    session.add_stem_device("stem_b", "band_width")                 # control: per chain
-
-
 def test_the_co_edit_door_says_the_refusal(demo_project):
     Session(demo_project)
-    add = "/api/add_device?stem=stem_a&device_type=band_width"
-    res = B.apply_coedits(demo_project, [add] * 9)
-    assert res["applied"] == 8 and res["failed"] == 1 and "8 band_width" in res["errors"][0]
+    add = "/api/add_device?stem=stem_a&device_type=dynamic_eq"
+    res = B.apply_coedits(demo_project, [add] * 7)
+    assert res["applied"] == 6 and res["failed"] == 1 and "6 dynamic_eq" in res["errors"][0]
 
 
 # ====================================================================================

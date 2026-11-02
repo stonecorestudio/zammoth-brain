@@ -9,9 +9,9 @@ drums up to 4.7 dB apart in level — the agent measured one compressor and the
 user heard and exported another.
 
 `reference_monitor._compress` is the Python model of the native law (a plain
-loop); these tests hold the offline engine to it, and hold the fast path
-(`_gr_ballistics_db`, which runs the recursion inside Pedalboard's follower) to
-the loop it replaces. Every test here but the two passthrough ones fails on the
+loop; the CLEAN law since 2026-10-25, test_comp_clean_law.py); these tests hold
+the offline engine to it, and hold the fast path (`_gr_ballistics_db`, which
+runs the recursion inside Pedalboard's follower) to the loop it replaces. Every test here but the two passthrough ones fails on the
 Pedalboard law.
 """
 from __future__ import annotations
@@ -103,10 +103,10 @@ def test_the_offline_comp_is_the_native_law_on_drums(params):
         > (0.5 if params.get("mix", 1.0) == 1.0 and not params.get("makeup_db") else -10.0)
 
 
-def test_attack_and_release_are_literal_time_constants():
-    """A step from −40 to −6 dBFS: the reduction is 63 % of the way in after
-    `attack_ms`, and 63 % of the way out `release_ms` after the step ends. On
-    the Pedalboard law those were 0.96 ms and 21.7 ms."""
+def test_the_held_reduction_is_the_static_law():
+    """A step from -40 to -6 dBFS held for 0.4 s comes down by the static law's 13.5 dB. (The
+    one-pole law's literal time constants were pinned here until 2026-10-25; the CLEAN law's timing
+    is test_comp_clean_law.py's.)"""
     n = SR
     step_on, step_off = int(0.2 * SR), int(0.6 * SR)
     level = np.full(n, 10.0 ** (-40.0 / 20.0))
@@ -116,10 +116,6 @@ def test_attack_and_release_are_literal_time_constants():
     gr_db = 20.0 * np.log10(out[0].astype(np.float64) / audio[0].astype(np.float64))
     full = (-6.0 + 24.0) * 0.75                                # 13.5 dB of reduction
     assert gr_db[step_off - 1] == pytest.approx(-full, abs=0.05)
-    attack_at = int(np.argmax(gr_db[step_on:] <= -full * (1.0 - np.exp(-1.0)))) / SR * 1000.0
-    release_at = int(np.argmax(gr_db[step_off:] >= -full * np.exp(-1.0))) / SR * 1000.0
-    assert attack_at == pytest.approx(10.0, abs=0.3)
-    assert release_at == pytest.approx(100.0, abs=1.5)
 
 
 def test_the_detector_is_linked_across_the_channels():

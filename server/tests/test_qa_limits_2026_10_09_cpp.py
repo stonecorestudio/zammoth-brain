@@ -148,7 +148,9 @@ def test_strips_and_headers_name_their_controls_after_their_channel():
 def test_a_dock_knob_is_named_for_its_parameter_and_its_device():
     dock = (SRC / "DeviceChainView.h").read_text(encoding="utf-8")
     assert "dawui::speakAs (*k, dawui::spokenParamName (sp.param), deviceLabel (type));" in dock
-    assert 'dawui::speakAs (*k, dawui::spokenParamName (sp.param), deviceLabel ("dynamic_eq"));' in dock
+    # The dynamic EQ's box has no knob row since its face A (2026-10-27): its knobs are the face's foot
+    # cells, and a screen reader is told them through the face's zones, like the EQ's.
+    assert 'dynEqBox->spokenFace.sync (dynEqBox->graph, spokenZonesOfFace (dynEqBox->graph, deviceLabel ("dynamic_eq")));' in dock
 
 
 def test_the_app_names_every_unnamed_control_in_every_window_it_has():

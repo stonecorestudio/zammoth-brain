@@ -130,8 +130,7 @@ def test_duck_key_renders_once_per_master_render(demo_project):
     session = Session(demo_project)
     for target in ("stem_b", "stem_c"):  # both duck off the same key
         session.stems[target]["chain"].append({
-            "type": "duck", "key_stem_id": "stem_a", "threshold_db": -30.0,
-            "depth_db": 6.0, "attack_ms": 5.0, "release_ms": 150.0})
+            "type": "duck", "key_stem_id": "stem_a", "trigger": "track", "mix": 0.5})
     reset_render_counts()
     dsp.render_master(session)
     # 3 mix stems + ONE shared duck-free key render (was 2 pre-memo)

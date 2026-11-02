@@ -77,10 +77,13 @@ def test_saturation_keeps_the_wanted_harmonics():
 
 def test_saturation_oversample_1_is_bit_identical_to_the_legacy_path():
     """1 (the default) must not change a single sample of any older render."""
+    # an entry with no key runs at the default (dsp.SAT_OVERSAMPLE_DEFAULT, 2026-10-24); 1 is the
+    # elementwise legacy path, bit for bit
     entry = {"type": "saturation", "stem_id": "a", "drive_db": 6.0, "curve": 0}
-    legacy = dsp._saturate(_tone(), dict(entry), SR)              # no key at all
     explicit = dsp._saturate(_tone(), dict(entry, oversample=1), SR)
-    assert np.array_equal(legacy, explicit)
+    assert np.array_equal(explicit, dsp._waveshape(_tone(), 6.0, 0))
+    unkeyed = dsp._saturate(_tone(), dict(entry), SR)
+    assert np.array_equal(unkeyed, dsp._saturate(_tone(), dict(entry, oversample=dsp.SAT_OVERSAMPLE_DEFAULT), SR))
 
 
 def test_saturation_monotonic_in_the_factor():
@@ -117,11 +120,13 @@ def test_overdrive_oversampling_removes_the_fold_back():
         f"8x did not suppress the fold-back: 1x {alias_1x:.1f} dB -> 8x {alias_8x:.1f} dB")
 
 
-def test_overdrive_oversample_1_is_bit_identical_to_the_legacy_path():
+def test_an_unkeyed_overdrive_runs_at_the_default_factor():
+    # dsp.OD_OVERSAMPLE_DEFAULT since 2026-10-24 (the voicing changed then too, so there is no
+    # "legacy path" left to be bit-identical to)
     entry = {"type": "overdrive", "stem_id": "a", "drive_db": 12.0, "tone": 0.5}
-    legacy = dsp._overdrive(_tone(), SR, dict(entry))
-    explicit = dsp._overdrive(_tone(), SR, dict(entry, oversample=1))
-    assert np.array_equal(legacy, explicit)
+    unkeyed = dsp._overdrive(_tone(), SR, dict(entry))
+    explicit = dsp._overdrive(_tone(), SR, dict(entry, oversample=dsp.OD_OVERSAMPLE_DEFAULT))
+    assert np.array_equal(unkeyed, explicit)
 
 
 def test_overdrive_tone_filter_still_runs_when_oversampled():
@@ -166,15 +171,21 @@ def test_models_reject_a_non_power_of_two_factor():
         with pytest.raises(ValueError):
             cls(stem_id="a", oversample=3)
         assert cls(stem_id="a", oversample=4).oversample == 4
-        assert cls(stem_id="a").oversample == 1
+    assert OverdriveAction(stem_id="a").oversample == dsp.OD_OVERSAMPLE_DEFAULT
+    assert SaturationAction(stem_id="a").oversample == dsp.SAT_OVERSAMPLE_DEFAULT
 
 
-def test_multiband_saturation_ignores_the_factor_for_now():
-    """The multiband path splits with an FFT and is NOT oversampled (documented).
-    Asserted so the day it gains one, this test fails and the docs get updated."""
-    band = {"drive_db": 9.0, "output_db": 0.0, "mix": 1.0}
+def test_multiband_saturation_oversampling_removes_the_fold_back():
+    """Since 2026-10-24 the multiband form runs its whole split and its shapers at the factor
+    (it ignored it, and this test asserted so until the day it gained one)."""
+    band = {"drive_db": 18.0, "output_db": 0.0, "mix": 1.0}
     entry = {"type": "saturation", "stem_id": "a", "drive_db": 9.0,
              "low": dict(band), "mid": dict(band), "high": dict(band)}
-    a = dsp._saturate(_tone(), dict(entry, oversample=1), SR)
-    b = dsp._saturate(_tone(), dict(entry, oversample=8), SR)
-    assert np.array_equal(a, b)
+    # a stored 1 (every multiband made before 2026-10-24; the form has no OS control) runs at the floor
+    stored1 = dsp._saturate(_tone(), dict(entry, oversample=1), SR)
+    assert np.array_equal(stored1, dsp._saturate(_tone(), dict(entry, oversample=dsp.SAT_OVERSAMPLE_DEFAULT), SR))
+    # ...and against the old 1x path, built here (the split and the curve at the base rate):
+    x = np.ascontiguousarray(_tone().T)
+    old = sum(dsp._waveshape(b, 18.0, 0) for b in dsp._lr4_three_way(x, SR, 150.0, 2000.0)).T
+    a, b = _band_db(old, ALIAS_HZ), _band_db(stored1, ALIAS_HZ)
+    assert b < a - 20.0, f"4x did not suppress the fold-back: 1x {a:.1f} dB -> 4x {b:.1f} dB"

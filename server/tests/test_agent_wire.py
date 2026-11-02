@@ -38,8 +38,7 @@ def test_plan_json_validates_against_engine_schema():
              "ceiling_dbtp": -1.0, "target_lufs_i": -14.0},
             {"type": "gain", "stem_id": "vox", "delta_db": 3.0,
              "time_range_s": [8.0, 16.0]},
-            {"type": "duck", "stem_id": "bass", "key_stem_id": "kick",
-             "threshold_db": -30.0, "depth_db": 6.0},
+            {"type": "duck", "stem_id": "bass", "key_stem_id": "kick", "trigger": "track", "mix": 0.5},
             {"type": "saturation", "stem_id": "drums", "drive_db": 6.0},
         ],
     }

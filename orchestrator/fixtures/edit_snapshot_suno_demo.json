@@ -2278,13 +2278,6 @@
       "user_only": true
     },
     {
-      "key": "master.limiter",
-      "name": "Master Safety Limiter",
-      "category": "Mix",
-      "wants_args": true,
-      "args": "{ on?: bool (omit = toggle) } - the master SAFETY limiter: a ceiling-only -1 dBTP limiter (no loudness makeup) on the master chain; new projects seed one"
-    },
-    {
       "key": "view.gate_tape",
       "name": "Gate Towers/Tape View",
       "category": "View",
@@ -2356,10 +2349,10 @@
     },
     {
       "key": "view.width_field",
-      "name": "Width Stage/Field View",
+      "name": "Imager Scope View",
       "category": "View",
       "wants_args": true,
-      "args": "{ field?: bool (omit = toggle) } - the stereo width face's picture: the STAGE (a top-down listening position - every sample of the master a point in a fan in front of the listener, mono a bright column straight ahead, wide out to the two speaker marks at +-30 degrees, anti-phase past the red rays; the input as a ghost fan, twelve seconds of correlation along the floor) or the FIELD (width per frequency - each band's Side-against-Mid opening as a column mirrored about the centre line, the input a dim ghost, the output lit, red where a band crosses into anti-phase)"
+      "args": "{ scope?: \"polar\"|\"level\"|\"lissa\" (omit = the next) } - the Imager's scope view: POLAR SAMPLE (each sample of the channel a dot in a half-disc - mono straight up, one side alone on the diagonals, L and R at its foot, out of phase below them), POLAR LEVEL (the loudest sample in each direction, a ray each) or LISSAJOUS (the classic diamond); the input a faint ghost under the output in every view. The reply says the view it left (scope)"
     },
     {
       "key": "view.spectrogram_view",

@@ -17,8 +17,11 @@ Usage::
 
     python -m orchestrator.daw_export_oracle [project_dir] [--daw-bin PATH]
 
-Three profiles (``--profile``): ``linear`` (the path gate), ``nonlinear`` (the approximation tier
-end to end), and ``instrument`` (2026-09-02 — the MIDI half: the console SYNTHESIZES a sampler track
+Profiles (``--profile``): ``stacked`` (Phase 65: two compressors, gates, transient shapers and ducks, each its own instance),
+``stacked2`` (two limiters, multiband compressors, OTTs and clippers),
+``stacked3`` (two saturators, overdrives, choruses, flangers, Auto Filters and utilities),
+``linear`` (the path gate), ``nonlinear`` (the approximation tier
+end to end), ``stereo``, and ``instrument`` (2026-09-02 — the MIDI half: the console SYNTHESIZES a sampler track
 from a fixed MIDI figure; phase 1 renders it dry in isolation and that render is registered as the stem
 the offline engine mixes; phase 2 bounces the mix with the synth LIVE through its chain, so the synth,
 its native devices, the sum and the master are compared against the offline reference of the same
@@ -65,7 +68,7 @@ TP_TOL_DB = 0.6        # contractual true peak of the full render (compare(): "T
 LEN_TOL_S = 0.1        # export length vs the reference — the metrics above cannot see a truncated bounce
 
 # The SIDE axis (2026-09-08). Every metric above is computed on the MONO downmix, and the 2026-09-08
-# device audit found the consequence: the whole stereo family — width, band_width, imager, utility —
+# device audit found the consequence: the whole stereo family — the Imager (width) and the utility —
 # is mono-sum-preserving to 0.000000000 dB by construction, so NO divergence in any of them could
 # ever register here. The audit measured `band_width` at width 0 removing 6.89 dB of a band's side
 # natively where the offline reference removes all of it, and no gate in the repo could see it.
@@ -113,6 +116,15 @@ PROFILES = {
     # (run_oracle asserts it: _stem_dynamics_engage). Measured: dLUFS 0.04 dB, band corr
     # 1.0000, max band d 0.11 dB, true peak d 0.04 dB, side d 0.55 dB.
     "nonlinear": {"lufs_tol_db": 0.3, "band_corr_min": 0.999, "band_tol_db": 0.5},
+    # Phase 65 (2026-10-24): two each of comp / gate / transient / duck, each its own native instance -
+    # the nonlinear profile's tolerances (the same compressor law, twice).
+    "stacked": {"lufs_tol_db": 0.3, "band_corr_min": 0.999, "band_tol_db": 0.5},
+    # ...and the third family - the limiter, the multiband compressor, OTT and the clipper - in a
+    # profile of its own: beside the second family's pairs each masked another's negative control.
+    "stacked2": {"lufs_tol_db": 0.3, "band_corr_min": 0.999, "band_tol_db": 0.5},
+    # ...and the last family - saturation, overdrive, chorus, flanger, Auto Filter, utility - in a
+    # third
+    "stacked3": {"lufs_tol_db": 0.3, "band_corr_min": 0.999, "band_tol_db": 0.5},
     # The synth signal is the SAME render on both sides (phase 1's dry bounce is the reference's stem),
     # so the instrument profile is a linear-tier path gate too: the linear tolerances apply.
     "instrument": {"lufs_tol_db": LUFS_TOL_DB, "band_corr_min": BAND_CORR_MIN, "band_tol_db": BAND_TOL_DB},
@@ -173,12 +185,9 @@ def _stereo_chain(session, *, widths: bool = True) -> None:
     axis through the gains alone and would have reported "the reference without the width devices
     DIVERGES (as it must)" with the side comparison deleted outright (2026-09-08 pre-merge review).
 
-    `band_width` is here since 2026-10-21 (the band width audit closed 07-stereo-utility.md F4: both
-    engines run one LR8 split; it took the band's side 6.9 dB down natively where the offline FFT
-    mask took all of it), on the stem that carries the image, 300 Hz - 3 kHz narrowed at width 0 (a wide band, so the old
-    law's 6.9 dB is a divergence this axis cannot miss).
-    The `imager` is here since 2026-10-21 too (the imager audit closed F4 for it: both engines run the
-    same LR8 split): on the master, the lows folded and the highs widened."""
+    The Imager (`width`, the one stereo device since 2026-10-28) is on the master with its
+    STEREOIZE on: side made from the mid (the centre lead has almost none of its own), through the
+    one tap table both engines build (stereoize_law)."""
     # A stem's width is the CHANNEL-STRIP SCALAR, not a chain insert: "width" is not in
     # session._STEM_KINDS, so `chain.append({"type": "width", ...})` was filtered straight back out
     # by effective_chain and never rendered. Only the master utility was ever under test, and the
@@ -196,10 +205,6 @@ def _stereo_chain(session, *, widths: bool = True) -> None:
         if name in stems:
             stems[name]["gain_db"] = gain_db
             stems[name]["width"] = width if widths else 1.0
-    if "wide_pad" in stems:
-        stems["wide_pad"].setdefault("chain", []).append(
-            {"type": "band_width", "stem_id": "wide_pad", "band": "custom", "lo_hz": 300.0, "hi_hz": 3000.0,
-             "width": 0.0 if widths else 1.0})
     # EVERY stage of the Utility is under test (2026-10-21, the Utility audit; 07-F5): until then only
     # its gain and width were, and its DC block, one-channel polarity, Bass Mono and balance were
     # compared native against offline nowhere. One channel flipped on the pad's companion (a STEM
@@ -214,8 +219,8 @@ def _stereo_chain(session, *, widths: bool = True) -> None:
         {"type": "utility", "stem_id": "master", "gain_db": -1.0,
          "width": 0.6 if widths else 1.0, "dc_filter": True,
          "bass_mono": bool(widths), "bass_mono_hz": 400.0, "balance": 0.25 if widths else 0.0},
-        {"type": "imager", "stem_id": "master", "width_low": 0.0 if widths else 1.0, "width_mid": 1.0,
-         "width_high": 1.6 if widths else 1.0, "crossover_lo_hz": 250.0, "crossover_hi_hz": 3000.0},
+        {"type": "width", "stem_id": "master", "width": 1.6 if widths else 1.0,
+         "stereoize": True, "stereoize_ms": 10.0},
     ]
 
 
@@ -358,8 +363,8 @@ def _nonlinear_chain(session) -> None:
             # nothing here could catch the failure a modulation device actually has — the two
             # engines landing on DIFFERENT points of the LFO sweep. Both derive the phase from
             # the host timeline; if that ever diverges, the band correlation falls here.
-            {"type": "chorus", "stem_id": first, "rate_hz": 1.0, "depth": 0.3,
-             "delay_ms": 18.0, "mix": 0.4, "voices": 2, "stereo_deg": 90.0},
+            {"type": "chorus", "stem_id": first, "mode": 2, "stereo": 1.0, "mix": 0.4,
+             "output_db": -4.0},   # chorus_law (2026-10-28): both lines, its lift taken back
             # …and a time-varying device with a FEEDBACK LOOP (2026-09-06). The chorus proves
             # the two engines agree on the sweep; only this proves they agree on a RECURSION.
             # The native side runs it per sample, the offline side in blocks that track the
@@ -388,7 +393,7 @@ def _nonlinear_chain(session) -> None:
             # engagement is asserted with the comp's (_stem_dynamics_engage). LAST: ahead of the
             # saturation it took enough top end that the saturation no longer engaged.
             {"type": "deess", "stem_id": first, "freq_hz": 5000.0, "threshold_db": -40.0,
-             "ratio": 4.0, "attack_ms": 1.0, "release_ms": 60.0, "range_db": -12.0},
+             "range_db": -12.0},   # the de-esser has no ratio / attack / release since 2026-10-27 (deess_law)
             # A LIMITER WORKING HARD at a slow release (2026-10-17, the limiter audit): the two
             # engines' limiters were two laws - read ~3 dB apart at release 300 - and the master's
             # limiter here barely limits. +18 dB into a -6 dBTP stem ceiling takes ~8 dB off the hits.
@@ -467,9 +472,9 @@ def _nonlinear_chain(session) -> None:
                 # engines ran different bands and detectors, and every entry folded into the first
                 # one's step and range. The second is ranged: the first must not take its range.
                 {"type": "dynamic_eq", "stem_id": fourth, "freq_hz": 2500.0, "q": 1.5,
-                 "threshold_db": -45.0, "ratio": 4.0, "attack_ms": 5.0, "release_ms": 100.0, "gain_db": -9.0},
+                 "threshold_db": -45.0, "attack_ms": 5.0, "release_ms": 100.0, "gain_db": -9.0},
                 {"type": "dynamic_eq", "stem_id": fourth, "freq_hz": 300.0, "q": 1.0, "time_range_s": [2.0, 5.0],
-                 "threshold_db": -45.0, "ratio": 4.0, "attack_ms": 5.0, "release_ms": 100.0, "gain_db": -9.0},
+                 "threshold_db": -45.0, "attack_ms": 5.0, "release_ms": 100.0, "gain_db": -9.0},
                 # A MULTIBAND SATURATION (2026-10-17, the multiband saturation audit): no profile carried
                 # one, and the engines split it differently (the native by the complement). The low band
                 # driven, the mid and high dry - where the complement put a low tone into the "mid".
@@ -483,13 +488,260 @@ def _nonlinear_chain(session) -> None:
          "attack_ms": 20.0, "release_ms": 200.0, "makeup_db": 0.0, "mix": 1.0},
         # OVERSAMPLED, and low enough to bite (2026-10-17, the clipper audit): at -1 dB / 1x the
         # oversampled path - the two engines' different filters and the latency - had no case.
-        {"type": "clip", "stem_id": "master", "threshold_db": -10.0, "hardness": 0.5, "oversample": 4},
+        # -16 since 2026-10-26: the comp ahead of it runs the fitted CLEAN law (c19ec480), which holds
+        # this fixture's peaks lower, and at -10 the clipper changed only -43 dBFS RMS (the control's
+        # floor is -40). Since 2026-10-28 (clip_law) the ceiling is CLIP 25 % = -12 dB, which is what
+        # the old -16 was held to, at the law's 2x.
+        {"type": "clip", "stem_id": "master", "clip_pct": 25.0, "softness": 0.5, "oversample": 2},
         # release 300 (2026-10-17, the limiter audit): at the default 50 the two engines' limiters
         # - then two different laws - read within 0.04 dB; at 300 they read ~3 dB apart.
         {"type": "limiter", "stem_id": "master", "ceiling_dbtp": -1.0, "target_lufs_i": -14.0,
          "release_ms": 300.0},
     ])
     return first if stems else None
+
+
+def STACKED_COMPS(stem: str) -> list[dict]:
+    """The stacked profile's pair (Phase 65): a fast heavy comp, then a slow gentle one (the other
+    way round the second absorbs the first's absence, and a dropped instance is invisible), with
+    thresholds low enough for the demo's quiet drums (-37.6 dBFS RMS) and nothing past full scale
+    (a trim that lifted them clipped at the DAW's master limiter, when the master had one, and read as a divergence)."""
+    return [
+        {"type": "comp", "stem_id": stem, "threshold_db": -50.0, "ratio": 6.0,
+         "attack_ms": 0.5, "release_ms": 50.0, "makeup_db": 4.0, "mix": 1.0},
+        {"type": "comp", "stem_id": stem, "threshold_db": -62.0, "ratio": 2.0,
+         "attack_ms": 30.0, "release_ms": 300.0, "makeup_db": 2.0, "mix": 1.0},
+    ]
+
+
+STACKED_COMP_GR_MIN_DB = 1.0   # each of the pair must take at least this much off its own input
+
+
+def STACKED_PAIRS(session, hot: str) -> dict[str, tuple[str, list[dict]]]:
+    """The second family's pairs (Phase 65), each on a stem of its own so no device's check reads
+    through another's, and each where a dropped instance moves the MASTER past the gate: two gates
+    on the loudest stem (the demo's vocal, -12 dBFS RMS), two transient shapers and two ducks
+    (keyed from `hot`, the drums) on the two quiet ones, each lifted first by a Utility (the bass
+    sits at -31 dBFS RMS, a steady tone; "other" at -26) - peaks stay well under full scale."""
+    import soundfile as sf
+
+    def rms(sid: str) -> float:
+        rec = session._state["stems"][sid]
+        a, _ = sf.read(str(session.project_dir / rec["path"]), always_2d=True)
+        return float(20.0 * np.log10(np.sqrt(np.mean(a ** 2)) + 1e-12))
+
+    others = sorted((sid for sid in session._state["stems"] if sid != hot), key=rms)   # quietest first
+    pairs: dict[str, tuple[str, list[dict]]] = {}
+    if len(others) >= 3:
+        loud = others[-1]
+        pairs["gate"] = (loud, [
+            # thresholds near the top of the vocal (peak -5.6 dBFS): the first is shut but for its
+            # loudest moments, the second below it; nearer the vocal's body they barely acted
+            {"type": "gate", "stem_id": loud, "threshold_db": 0.0, "ratio": 4.0, "attack_ms": 1.0,
+             "release_ms": 60.0, "hold_ms": 10.0, "range_db": -6.0, "hysteresis_db": 0.0},
+            {"type": "gate", "stem_id": loud, "threshold_db": -10.0, "ratio": 10.0, "attack_ms": 1.0,
+             "release_ms": 60.0, "hold_ms": 10.0, "range_db": -12.0, "hysteresis_db": 0.0}])
+        q = others[0]
+        pairs["duck"] = (q, [
+            {"type": "utility", "stem_id": q, "gain_db": 18.0},
+            # one on the song's grid, one restarted by the hot stem's hits (duck_law, 2026-10-28)
+            {"type": "duck", "stem_id": q, "key_stem_id": hot, "trigger": 0, "curve": 1, "length": 1,
+             "mix": 0.5},
+            {"type": "duck", "stem_id": q, "key_stem_id": hot, "trigger": 1, "curve": 3, "length": 0,
+             "mix": 0.7, "band": True, "band_hz": 400.0}])
+        m = others[1]
+        pairs["transient"] = (m, [
+            {"type": "utility", "stem_id": m, "gain_db": 12.0},
+            {"type": "transient", "stem_id": m, "attack_db": 6.0, "sustain_db": -3.0, "speed": 1.0, "output_db": 0.0},
+            {"type": "transient", "stem_id": m, "attack_db": -4.0, "sustain_db": 4.0, "speed": 2.0, "output_db": 0.0}])
+    return pairs
+
+
+def STACKED2_PAIRS(session, hot: str) -> dict[str, tuple[str, list[dict], bool]]:
+    """The third family's pairs (Phase 65: the limiter, the multiband compressor, OTT and the
+    clipper) - a profile of their own (`stacked2`): beside the second family's pairs on the same
+    four stems, each new pair masked another's negative control (one master comparison cannot
+    stay sensitive to eight families at once). (stem, entries, in front of the chain?) per kind.
+    A pair of one kind in series absorbs the first one's absence unless the first does something
+    the second cannot undo - a slow, pumping first limiter; a soft first clipper with gain in front; a
+    whole-range first multiband ahead of a high-band one."""
+    import soundfile as sf
+
+    def rms(sid: str) -> float:
+        rec = session._state["stems"][sid]
+        a, _ = sf.read(str(session.project_dir / rec["path"]), always_2d=True)
+        return float(20.0 * np.log10(np.sqrt(np.mean(a ** 2)) + 1e-12))
+
+    others = sorted((sid for sid in session._state["stems"] if sid != hot), key=rms)   # quietest first
+    pairs: dict[str, tuple[str, list[dict], bool]] = {}
+    if len(others) < 3:
+        return pairs
+    quiet, mid, loud = others[0], others[1], others[-1]
+    pairs["limiter"] = (loud, [
+        {"type": "limiter", "stem_id": loud, "ceiling_dbtp": -20.0, "release_ms": 1000.0},
+        {"type": "utility", "stem_id": loud, "gain_db": 12.0},
+        {"type": "limiter", "stem_id": loud, "ceiling_dbtp": -10.0, "release_ms": 20.0}], True)
+    pairs["clip"] = (hot, [
+        {"type": "clip", "stem_id": hot, "gain_db": 6.0, "clip_pct": 50.0, "softness": 1.0, "oversample": 2},
+        {"type": "clip", "stem_id": hot, "clip_pct": 35.5, "oversample": 2}], True)
+    pairs["mb_comp"] = (mid, [
+        {"type": "utility", "stem_id": mid, "gain_db": 12.0},
+        {"type": "mb_comp", "stem_id": mid, "attack_ms": 5.0, "release_ms": 120.0,
+         "crossover_lo_hz": 200.0, "crossover_hi_hz": 3000.0,
+         "low": {"threshold_db": -32.0, "ratio": 3.0, "makeup_db": 0.0},
+         "mid": {"threshold_db": -32.0, "ratio": 3.0, "makeup_db": 0.0},
+         "high": {"threshold_db": -32.0, "ratio": 3.0, "makeup_db": 0.0}},
+        {"type": "mb_comp", "stem_id": mid, "attack_ms": 5.0, "release_ms": 120.0,
+         "crossover_lo_hz": 200.0, "crossover_hi_hz": 3000.0,
+         "low": {"threshold_db": 0.0, "ratio": 1.0, "makeup_db": 0.0},
+         "mid": {"threshold_db": 0.0, "ratio": 1.0, "makeup_db": 0.0},
+         "high": {"threshold_db": -45.0, "ratio": 4.0, "makeup_db": 0.0}}], False)
+    pairs["ott"] = (quiet, [
+        {"type": "utility", "stem_id": quiet, "gain_db": 18.0},
+        {"type": "ott", "stem_id": quiet, "depth": 1.0, "time": 1.0, "in_gain_db": 0.0, "out_gain_db": 0.0,
+         "crossover_lo_hz": 150.0, "crossover_hi_hz": 2000.0,
+         "low": {"up": 1.0, "down": 1.0, "gain_db": 0.0}, "mid": {"up": 0.0, "down": 0.0, "gain_db": 0.0},
+         "high": {"up": 0.0, "down": 0.0, "gain_db": 0.0}},
+        {"type": "ott", "stem_id": quiet, "depth": 0.6, "time": 0.5, "in_gain_db": 0.0, "out_gain_db": 0.0,
+         "crossover_lo_hz": 150.0, "crossover_hi_hz": 2000.0,
+         "low": {"up": 0.0, "down": 1.0, "gain_db": 0.0}, "mid": {"up": 1.0, "down": 0.0, "gain_db": 0.0},
+         "high": {"up": 0.0, "down": 0.0, "gain_db": 0.0}}], False)
+    return pairs
+
+
+def _stacked2_session(session, hot: str, drop_first_of: str | None = None) -> None:
+    """Lay the third family's pairs onto `session` (the `stacked2` profile), or - for its negative
+    control - the same with the FIRST of one kind dropped. The master comes down 4 dB first, so no
+    peak reaches the DAW's master SAFETY limiter (-1 dBTP), which the offline render does not have."""
+    session._state["master_gain_db"] = float(session._state.get("master_gain_db", 0.0)) - 4.0
+    for kind, (pstem, entries, front) in STACKED2_PAIRS(session, hot).items():
+        if kind == drop_first_of:
+            first = next(i for i, e in enumerate(entries) if e["type"] == kind)
+            entries = entries[:first] + entries[first + 1:]
+        chain = session._state["stems"][pstem]["chain"]
+        if front:
+            chain[:0] = entries
+        else:
+            chain.extend(entries)
+
+
+def STACKED3_PAIRS(session, hot: str) -> dict[str, tuple[str, list[dict], bool]]:
+    """The last family's pairs (Phase 65: saturation, overdrive, chorus, flanger, Auto Filter,
+    utility) - the `stacked3` profile, two kinds to a stem. (stem, entries, in front?) per kind.
+    Each first instance does something the second cannot undo: a hard saturation at 4x with a trim
+    ahead of a half-wet tube one at 2x (a Utility between drives it) (the two oversamplers' latencies add), a filtered, trimmed overdrive ahead of a half-wet plain one,
+    a slow chorus ahead of a fast one, a fully wet resonant flanger ahead of a half-wet negative one, a low-
+    pass Auto Filter ahead of a swept high-pass, a +9 dB utility ahead of a -3 dB one."""
+    import soundfile as sf
+
+    def rms(sid: str) -> float:
+        rec = session._state["stems"][sid]
+        a, _ = sf.read(str(session.project_dir / rec["path"]), always_2d=True)
+        return float(20.0 * np.log10(np.sqrt(np.mean(a ** 2)) + 1e-12))
+
+    others = sorted((sid for sid in session._state["stems"] if sid != hot), key=rms)   # quietest first
+    pairs: dict[str, tuple[str, list[dict], bool]] = {}
+    if len(others) < 3:
+        return pairs
+    quiet, mid, loud = others[0], others[1], others[-1]
+    pairs["saturation"] = (hot, [
+        {"type": "saturation", "stem_id": hot, "drive_db": 12.0, "curve": "hard", "output_db": -6.0, "oversample": 4, "mix": 1.0},
+        {"type": "utility", "stem_id": hot, "gain_db": 12.0},
+        {"type": "saturation", "stem_id": hot, "drive_db": 6.0, "curve": "tube", "output_db": -12.0, "oversample": 2, "mix": 0.5}], False)
+    pairs["utility"] = (quiet, [
+        {"type": "utility", "stem_id": quiet, "gain_db": 9.0},
+        {"type": "utility", "stem_id": quiet, "gain_db": -3.0}], True)
+    pairs["chorus"] = (loud, [
+        {"type": "chorus", "stem_id": loud, "mode": 2, "stereo": 1.0, "mix": 0.5, "output_db": -6.0},
+        {"type": "chorus", "stem_id": loud, "mode": 1, "stereo": 0.0, "mix": 0.4, "output_db": -3.0}], False)
+    # on the vocal, behind its stereo modulation: the steep low-pass empties the side's top octaves,
+    # where the bounce once kept a floor the offline render did not - a render's warm-up glide and
+    # a plain clip playing 2 samples late (engine patch 0059), magnified by the resonant flangers
+    pairs["auto_filter"] = (loud, [
+        {"type": "auto_filter", "stem_id": loud, "filter_type": 0, "slope_db_oct": 24, "cutoff_hz": 900.0,
+         "resonance": 0.6, "lfo_amount_oct": 0.0, "mix": 1.0},   # 0.6 since auto_filter_law (2026-10-27): at 0.2 the law's plain cut moved the master 0.30 LU, at the gate's own tolerance
+        {"type": "auto_filter", "stem_id": loud, "filter_type": 1, "slope_db_oct": 12, "cutoff_hz": 150.0,
+         "resonance": 0.3, "lfo_amount_oct": 1.0, "lfo_rate_hz": 0.5, "lfo_shape": 1, "mix": 1.0}], False)
+    pairs["overdrive"] = (mid, [
+        {"type": "overdrive", "stem_id": mid, "drive_db": 18.0, "filter_on": True, "freq_hz": 800.0, "q": 1.5,
+         "tone": 0.3, "output_db": -6.0, "mix": 1.0, "oversample": 2},
+        {"type": "utility", "stem_id": mid, "gain_db": 15.0},
+        {"type": "overdrive", "stem_id": mid, "drive_db": 18.0, "tone": 0.9, "output_db": -12.0, "mix": 0.5}], False)
+    pairs["flanger"] = (loud, [
+        {"type": "flanger", "stem_id": loud, "rate_hz": 0.3, "depth": 0.7, "delay_ms": 3.0, "feedback": 0.8,
+         "mix": 1.0, "stereo_deg": 90.0},
+        {"type": "flanger", "stem_id": loud, "rate_hz": 1.1, "depth": 0.6, "delay_ms": 4.0, "feedback": -0.7,
+         "mix": 0.5, "stereo_deg": 0.0}], True)
+    return pairs
+
+
+def _stacked3_session(session, hot: str, drop_first_of: str | None = None) -> None:
+    """Lay the last family's pairs onto `session` (the `stacked3` profile), or - for its negative
+    control - the same with the FIRST of one kind dropped; the master 24 dB down. A fully wet flanger
+    with feedback raises the vocal, and since 2026-10-28 the chorus's law LIFTS (its dry stays full):
+    at 10 dB down the offline master peaked at +10 dBTP, the DAW's fixed-point file clamped at full
+    scale, and the profile read a 1.2 dB / 42 dB-side divergence that was the clamp alone (at 24 dB
+    down the two match to 0.00 dB; the pre-merge review of 2026-10-29). The master has no ceiling
+    since the safety limiter went (2026-10-25), so the headroom is the fixture's to keep."""
+    session._state["master_gain_db"] = float(session._state.get("master_gain_db", 0.0)) - 24.0
+    for kind, (pstem, entries, front) in STACKED3_PAIRS(session, hot).items():
+        if kind == drop_first_of:
+            first = next(i for i, e in enumerate(entries) if e["type"] == kind)
+            entries = entries[:first] + entries[first + 1:]
+        chain = session._state["stems"][pstem]["chain"]
+        if front:
+            chain[:0] = entries
+        else:
+            chain.extend(entries)
+
+
+def _instance_engage(session, stem: str, kind: str) -> list[float]:
+    """What each `kind` instance on `stem` does to ITS OWN input (dBFS RMS of the difference):
+    the chain cut at it, with and without it."""
+    import copy
+
+    from mix_engine import dsp
+    out = []
+    at_list = [i for i, e in enumerate(session._state["stems"][stem]["chain"]) if e.get("type") == kind]
+    for at in at_list:
+        def rendered(keep_it: bool) -> np.ndarray:
+            probe = copy.copy(session)
+            probe._state = copy.deepcopy(session._state)
+            chain = probe._state["stems"][stem]["chain"]
+            del chain[at + 1:]
+            if not keep_it:
+                chain.pop()
+            audio, _ = dsp.render_stem(probe, stem)
+            return np.asarray(audio, dtype=np.float64)
+        w, d = rendered(True), rendered(False)
+        n = min(len(w), len(d))
+        out.append(float(_rms_db(w[:n] - d[:n])))
+    return out
+
+
+def _stacked_engage(session, stem: str) -> list[float]:
+    """Each stacked comp's gain reduction on ITS OWN input (dB): the chain cut at it with its makeup
+    off, against the chain cut just before it. Serial compressors absorb each other's removal, so
+    "what changes when one is dropped" cannot see the first of two."""
+    import copy
+
+    from mix_engine import dsp
+    out = []
+    comps = [i for i, e in enumerate(session._state["stems"][stem]["chain"]) if e.get("type") == "comp"]
+    for at in comps[-2:]:
+        def rendered(keep_it: bool) -> np.ndarray:
+            probe = copy.copy(session)
+            probe._state = copy.deepcopy(session._state)
+            chain = probe._state["stems"][stem]["chain"]
+            del chain[at + 1:]
+            if keep_it:
+                chain[at]["makeup_db"] = 0.0
+            else:
+                chain.pop()
+            audio, _ = dsp.render_stem(probe, stem)
+            return np.asarray(audio, dtype=np.float64)
+        out.append(float(_rms_db(rendered(False)) - _rms_db(rendered(True))))
+    return out
 
 
 def _hottest_stem(session) -> str:
@@ -735,7 +987,7 @@ def compare(ref_mono: np.ndarray, ref_sr: int,
         lines.append(f"[oracle]   true peak {ref_tp_dbtp:6.2f} vs {daw_tp_dbtp:6.2f} dBTP "
                      f"-> d {d_tp:.2f} dB (tol {tp_tol})")
     # THE SIDE AXIS. Everything above is the mono sum, and the whole stereo device family is
-    # mono-sum-preserving by construction — so without this, a width/imager/band_width/utility
+    # mono-sum-preserving by construction — so without this, a width/utility
     # divergence of any size passes. Skipped, loudly, when the material has no side to measure:
     # a silent side would otherwise "agree" perfectly and read as coverage.
     if ref_side is not None and daw_side is not None:
@@ -878,6 +1130,61 @@ def run_oracle(project: Path, daw_bin: Path, profile: str = "linear") -> int:
             without_full, without_sr = dsp.render_master(probe, report={})
             without_mono, without_side = _mid_side(without_full)
             _stereo_chain(session)
+        elif profile == "stacked":
+            # Phase 65 (2026-10-24): two compressors in a row on the hottest stem, set differently,
+            # each its own native instance. Alone in this profile - beside the nonlinear profile's
+            # devices they pulled those devices' own engagement checks under their floors.
+            _controlled_chain(session)
+            hot = _hottest_stem(session)
+            session._state["stems"][hot]["chain"].extend(STACKED_COMPS(hot))
+            pairs = STACKED_PAIRS(session, hot)
+            for kind, (pstem, entries) in pairs.items():
+                session._state["stems"][pstem]["chain"].extend(entries)
+            for kind, (pstem, _entries) in pairs.items():
+                eng = _instance_engage(session, pstem, kind)
+                if len(eng) != 2 or min(eng) < STEM_MBCOMP_CHANGE_MIN_DBFS:
+                    print(f"[oracle] FAIL - negative control: the stacked {kind}s on {pstem!r} change "
+                          f"{[round(x, 1) for x in eng]} dBFS RMS of their own inputs (min {STEM_MBCOMP_CHANGE_MIN_DBFS}): "
+                          f"a device that does nothing agrees in any engine", file=sys.stderr)
+                    return 1
+                print(f"[oracle] [stacked] negative control: the two {kind}s on {pstem!r} change "
+                      f"{eng[0]:.1f} and {eng[1]:.1f} dBFS RMS of their own inputs (both engage, as they must)")
+            grs = _stacked_engage(session, hot)
+            if len(grs) != 2 or min(grs) < STACKED_COMP_GR_MIN_DB:
+                print(f"[oracle] FAIL - negative control: the stacked compressors on {hot!r} take "
+                      f"{[round(g, 2) for g in grs]} dB off their own inputs (min {STACKED_COMP_GR_MIN_DB}): "
+                      f"a compressor that does nothing agrees in any engine", file=sys.stderr)
+                return 1
+            print(f"[oracle] [stacked] negative control: on {hot!r} the first compressor takes {grs[0]:.2f} dB "
+                  f"and the second {grs[1]:.2f} dB off their own inputs (both engage, as they must)")
+        elif profile == "stacked2":
+            # Phase 65 (2026-10-24): the third family, two of each, each its own native instance - on
+            # the bare stems: the controlled chain's master Match EQ (a min-phase approximation
+            # natively, the linear profile's 0.5 dB tier) alone read 0.20 dB of loudness apart here
+            hot = _hottest_stem(session)
+            _stacked2_session(session, hot)
+            for kind, (pstem, _entries, _front) in STACKED2_PAIRS(session, hot).items():
+                eng = _instance_engage(session, pstem, kind)
+                if len(eng) != 2 or min(eng) < STEM_MBCOMP_CHANGE_MIN_DBFS:
+                    print(f"[oracle] FAIL - negative control: the stacked {kind}s on {pstem!r} change "
+                          f"{[round(x, 1) for x in eng]} dBFS RMS of their own inputs (min {STEM_MBCOMP_CHANGE_MIN_DBFS}): "
+                          f"a device that does nothing agrees in any engine", file=sys.stderr)
+                    return 1
+                print(f"[oracle] [stacked2] negative control: the two {kind}s on {pstem!r} change "
+                      f"{eng[0]:.1f} and {eng[1]:.1f} dBFS RMS of their own inputs (both engage, as they must)")
+        elif profile == "stacked3":
+            # Phase 65: the last family, two of each, each its own native instance, on the bare stems
+            hot = _hottest_stem(session)
+            _stacked3_session(session, hot)
+            for kind, (pstem, _entries, _front) in STACKED3_PAIRS(session, hot).items():
+                eng = _instance_engage(session, pstem, kind)
+                if len(eng) != 2 or min(eng) < STEM_MBCOMP_CHANGE_MIN_DBFS:
+                    print(f"[oracle] FAIL - negative control: the stacked {kind}s on {pstem!r} change "
+                          f"{[round(x, 1) for x in eng]} dBFS RMS of their own inputs (min {STEM_MBCOMP_CHANGE_MIN_DBFS}): "
+                          f"a device that does nothing agrees in any engine", file=sys.stderr)
+                    return 1
+                print(f"[oracle] [stacked3] negative control: the two {kind}s on {pstem!r} change "
+                      f"{eng[0]:.1f} and {eng[1]:.1f} dBFS RMS of their own inputs (both engage, as they must)")
         elif profile == "nonlinear":
             hot = _nonlinear_chain(session)
             # VACUITY GUARD (reader E4·R5): the stem tier has to DO something on this fixture.
@@ -949,6 +1256,76 @@ def run_oracle(project: Path, daw_bin: Path, profile: str = "linear") -> int:
             print(f"[oracle] [stereo] negative control: side {side_db:.1f} dBFS RMS; the reference "
                   f"without the width devices DIVERGES (as it must)")
 
+        if profile == "stacked3":
+            # VACUITY GUARD, per kind: the reference with the FIRST of the pair dropped must fail the gate
+            for kind in STACKED3_PAIRS(session, hot):
+                probe = Session(proj)
+                probe._state["stems"].pop(MASTER, None)
+                _stacked3_session(probe, hot, drop_first_of=kind)
+                last_full, last_sr = dsp.render_master(probe, report={})
+                last_mono, _last_side = _mid_side(last_full)
+                vac_ok, _vac_lines = compare(ref_mono, ref_sr, last_mono, last_sr, profile)
+                if vac_ok:
+                    print(f"[oracle] FAIL - negative control: the reference with only the LAST {kind} passes the "
+                          f"gate, so this profile cannot see a dropped {kind}", file=sys.stderr)
+                    return 1
+                print(f"[oracle] [stacked3] negative control: the reference with only the last {kind} DIVERGES (as it must)")
+
+        if profile == "stacked2":
+            # VACUITY GUARD, per kind: the reference with the FIRST of the pair dropped (what a native
+            # chain that ran only the last of a kind would play) must fail this profile's gate
+            for kind in STACKED2_PAIRS(session, hot):
+                probe = Session(proj)
+                probe._state["stems"].pop(MASTER, None)
+                _stacked2_session(probe, hot, drop_first_of=kind)
+                last_full, last_sr = dsp.render_master(probe, report={})
+                last_mono, _last_side = _mid_side(last_full)
+                vac_ok, _vac_lines = compare(ref_mono, ref_sr, last_mono, last_sr, profile)
+                if vac_ok:
+                    print(f"[oracle] FAIL - negative control: the reference with only the LAST {kind} passes the "
+                          f"gate, so this profile cannot see a dropped {kind}", file=sys.stderr)
+                    return 1
+                print(f"[oracle] [stacked2] negative control: the reference with only the last {kind} DIVERGES (as it must)")
+
+        if profile == "stacked":
+            # VACUITY GUARD: what a native chain that ran only the LAST compressor would play - the
+            # reference with the first one dropped - must fail this profile's gate, or the gate
+            # could not see the thing it exists for.
+            probe = Session(proj)
+            probe._state["stems"].pop(MASTER, None)
+            _controlled_chain(probe)
+            probe._state["stems"][hot]["chain"].extend(STACKED_COMPS(hot)[1:])
+            for kind, (pstem, entries) in STACKED_PAIRS(probe, hot).items():
+                probe._state["stems"][pstem]["chain"].extend(entries)
+            last_full, last_sr = dsp.render_master(probe, report={})
+            last_mono, _last_side = _mid_side(last_full)
+            vac_ok, _vac_lines = compare(ref_mono, ref_sr, last_mono, last_sr, profile)
+            if vac_ok:
+                print("[oracle] FAIL - negative control: the reference with only the LAST compressor passes "
+                      "the gate, so this profile cannot see a dropped instance", file=sys.stderr)
+                return 1
+            print("[oracle] [stacked] negative control: the reference with only the last compressor "
+                  "DIVERGES (as it must)")
+            # ...and for each pair of the second family: only its last one
+            for kind in STACKED_PAIRS(session, hot):
+                probe = Session(proj)
+                probe._state["stems"].pop(MASTER, None)
+                _controlled_chain(probe)
+                probe._state["stems"][hot]["chain"].extend(STACKED_COMPS(hot))
+                for k2, (pstem, entries) in STACKED_PAIRS(probe, hot).items():
+                    if k2 == kind:   # only the LAST of the pair (the utility in front stays)
+                        first = next(i for i, e in enumerate(entries) if e["type"] == kind)
+                        entries = entries[:first] + entries[first + 1:]
+                    probe._state["stems"][pstem]["chain"].extend(entries)
+                last_full, last_sr = dsp.render_master(probe, report={})
+                last_mono, _last_side = _mid_side(last_full)
+                vac_ok, _vac_lines = compare(ref_mono, ref_sr, last_mono, last_sr, profile)
+                if vac_ok:
+                    print(f"[oracle] FAIL - negative control: the reference with only the LAST {kind} passes the "
+                          f"gate, so this profile cannot see a dropped {kind}", file=sys.stderr)
+                    return 1
+                print(f"[oracle] [stacked] negative control: the reference with only the last {kind} DIVERGES (as it must)")
+
         if profile == "instrument":
             vac_ok, _vac_lines = compare(ref_mono, ref_sr, without_mono, without_sr, profile)
             if vac_ok:
@@ -961,7 +1338,7 @@ def run_oracle(project: Path, daw_bin: Path, profile: str = "linear") -> int:
         # resolve the same mix into the DAW's monitor-chain contracts + the loudness-correct makeup
         makeup_db = float(report.get("limiter_makeup_db", 0.0) or 0.0)
         chains = resolve_chains(session._state, makeup_db, report.get("pre_limiter_lufs_i"),
-                                sample_rate=session.project_sample_rate())
+                                sample_rate=session.project_sample_rate(), session=session)
         (proj / "daw_chains.json").write_text(json.dumps(chains))
         # The offline reference applies `target_lufs_i - pre_lufs` of makeup at RENDER time; the
         # DAW can only match it if that resolved value reached the chain we just pushed. On the

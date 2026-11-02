@@ -239,12 +239,11 @@ def test_the_masters_own_widening_is_blamed_on_the_master_chain(tmp_path):
     _mono_bed(tmp_path)
     left, right = _pad(40, 0.5)
     _write(tmp_path, "pad", left, right, level=0.2)
-    _apply(Session(tmp_path), [{"type": "imager", "stem_id": "master", "width_mid": 2.0,
-                                "width_high": 2.0}])
+    _apply(Session(tmp_path), [{"type": "width", "stem_id": "master", "width": 2.0}])
     reading = _reading(tmp_path)
     master = [i for i in reading.issues if i.target == "master"]
     assert master and {i.cause for i in master} == {"master_chain"}
-    assert "imager" in master[0].fix
+    assert "width" in master[0].fix
 
 
 def test_two_stems_in_opposite_polarity_are_a_conflict_with_a_flip(tmp_path):
@@ -294,6 +293,61 @@ def test_naming_stems_reads_only_those_and_the_master(tmp_path):
 
 
 # ---------------------------------------------------------------- the render's flag + the tool
+
+def _hats(seed: int, tick_db: float = None, pan: str = "centre") -> tuple[np.ndarray, np.ndarray]:
+    """A hat on every beat at 128 BPM: a bright noise hit, decaying. `tick_db` adds the fault
+    the 2026-11-02 EDM loop had - a low-mid tick 8 ms after each hit on the RIGHT side only,
+    that many dB under the hit's peak. `pan="right"`: the whole hit on the right."""
+    n = int(SECONDS * SR)
+    rng = np.random.default_rng(seed)
+    left, right = np.zeros(n), np.zeros(n)
+    hit_n = int(0.06 * SR)
+    env = np.exp(-np.arange(hit_n) / (0.012 * SR))
+    tick_n = int(0.006 * SR)
+    for k in range(int(SECONDS / (60.0 / 128.0))):
+        at = int(k * 60.0 / 128.0 * SR)
+        if at + hit_n >= n:
+            break
+        hit = np.diff(rng.standard_normal(hit_n + 1)) * env       # differenced noise: bright
+        left[at:at + hit_n] += 0.0 if pan == "right" else hit
+        right[at:at + hit_n] += hit
+        if tick_db is not None:
+            t0 = at + int(0.008 * SR)
+            tick = np.sin(2 * np.pi * 900.0 * np.arange(tick_n) / SR) * np.hanning(tick_n)
+            right[t0:t0 + tick_n] += tick * np.abs(hit).max() * 10 ** (-tick_db / 20.0)
+    return left, right
+
+
+def test_a_tick_on_one_side_of_a_centred_hit_is_found_with_its_side(tmp_path):
+    """2026-11-02 (before/after round 5): every hit of an EDM hats loop carried a low-mid tick on
+    the right side only; the engineer lifted the hats' attack and top end and made it louder,
+    and the user heard "a very annoying hi hat sample that clicks loudly in the right ear".
+    Nothing in analyze_phase could see it: the hat itself is centred and nothing cancels."""
+    _mono_bed(tmp_path)
+    left, right = _hats(91, tick_db=6.0)
+    _write(tmp_path, "hats", left, right, level=0.2)
+    reading = _reading(tmp_path)
+    hats = next(t for t in reading.targets if t.target == "hats")
+    assert hats.one_sided_clicks is not None
+    assert hats.one_sided_clicks.side == "right" and hats.one_sided_clicks.count >= 20
+    assert not reading.clean
+    bed = next(t for t in reading.targets if t.target == "bed")
+    assert bed.one_sided_clicks is None
+
+
+def test_a_clean_hat_a_panned_hat_and_a_leaning_bass_are_not_clicks(tmp_path):
+    _mono_bed(tmp_path)
+    left, right = _hats(92)
+    _write(tmp_path, "clean_hats", left, right, level=0.2)
+    left, right = _hats(93, pan="right")                     # the whole sound on one side
+    _write(tmp_path, "panned_hats", left, right, level=0.2)
+    bass = _noise(94, 300.0, 900.0)                          # dark, and leaning left
+    _write(tmp_path, "bass", bass, 0.1 * bass, level=0.2)
+    reading = _reading(tmp_path)
+    for name in ("clean_hats", "panned_hats", "bass"):
+        row = next(t for t in reading.targets if t.target == name)
+        assert row.one_sided_clicks is None, (name, row.one_sided_clicks)
+
 
 def test_the_render_flag_is_the_masters_rule(tmp_path):
     left, right = _pad(81, 0.0)
@@ -366,10 +420,10 @@ async def test_a_width_move_comes_back_with_what_it_did_to_the_phase(tmp_path):
 
 def test_the_stereo_moves_are_the_ones_that_move_the_stereo_picture():
     from orchestrator.turn_host import stereo_targets
-    moves = [{"type": "imager", "stem_id": "master", "width_high": 1.2},
+    moves = [{"type": "width", "stem_id": "master", "width": 1.2, "stereoize": True},
              {"type": "eq", "stem_id": "vox", "channel": "side", "band": {}},
              {"type": "eq", "stem_id": "gtr", "band": {}},
-             {"type": "band_width", "stem_id": "keys", "band": "mid", "width": 1.3},
+             {"type": "width", "stem_id": "keys", "width": 1.3},
              {"type": "comp", "stem_id": "drums"},
              {"type": "utility", "stem_id": "bass", "invert": True}]
     assert stereo_targets({"actions": moves}) == ["master", "vox", "keys", "bass"]

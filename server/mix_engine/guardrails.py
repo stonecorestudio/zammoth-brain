@@ -5,13 +5,14 @@ See docs/03-mcp-tools.md for the rule table.
 """
 from __future__ import annotations
 
+import contextlib
+import math
 from typing import Optional
 
-from .models import (BAND_EDGES_HZ, BAND_LABELS, imager_crossovers,
-                     BandWidthAction,
+from .models import (BAND_EDGES_HZ, BAND_LABELS,
                      ClipAction, CompAction, DeessAction, DynamicEqAction, EqAction,
                      GainAction,
-                     GateAction, ImagerAction, LimiterAction, MatchEqAction,
+                     GateAction, LimiterAction, MatchEqAction,
                      MultibandCompAction,
                      ProposalRequest, ReturnConvolutionAction, ReturnDelayAction,
                      ReturnReverbAction,
@@ -56,8 +57,26 @@ def level_charge_db(action) -> Optional[float]:
         return float(d.get("delta_db") or 0.0)
     if t == "utility":
         return float(d.get("gain_db") or 0.0)
-    if t in ("eq", "tilt", "overdrive", "clip"):
+    if t == "overdrive":
+        # An amp character keeps its level as it is driven (od_characters.level_db, the pre-merge
+        # review of 2026-10-26): its small-signal lift is +3.3..+6.5 dB at drive 0 and rises past its
+        # ceiling - a lift no trim shows, charged like the saturation's. The pedal's is 0.
+        from . import od_characters as odc
+        ch = odc.character_index(d.get("character", odc.DEFAULT))
+        drive = float(d.get("drive_db") if d.get("drive_db") is not None else 12.0)
+        return pos(odc.level_db(drive, ch) + float(d.get("output_db") or 0.0))
+    if t == "clip":
+        # The clipper's GAIN is before the clip, and nothing takes it back out after (clip_law,
+        # 2026-10-28): what sits under the knee comes out that much louder.
+        from .clip_law import lift_db
+        return pos(lift_db(d))
+    if t in ("eq", "tilt"):
         return pos(d.get("output_db"))
+    if t == "chorus":
+        # The chorus's law (chorus_law, 2026-10-28): its MIX curve keeps the dry full and lays the
+        # wet on top (+4.5 dB on music at 0.5, +6.6 for I+II) - a lift no knob shows - plus VOLUME.
+        from .chorus_law import lift_db
+        return pos(lift_db(d))
     if t == "transient":
         # The shaper applies `attack_db * t + sustain_db * (1 - t)` and THEN the output trim
         # (dsp._transient): attack and sustain both at +6 is a flat +6 dB no wallet saw, and a
@@ -66,11 +85,22 @@ def level_charge_db(action) -> Optional[float]:
         return (pos(max(float(d.get("attack_db") or 0.0), float(d.get("sustain_db") or 0.0)))
                 + pos(d.get("output_db")))
     if t == "saturation":
-        return pos(max([d.get("output_db") or 0.0]
-                       + [b.get("output_db") or 0.0 for b in blocks("low", "mid", "high")]))
+        # The character's level law lifts with drive (sat_characters.LEVEL, 2026-10-26: +0.8..+4 dB
+        # at drive 0, up to ~+8 on a band at 24 dB, TUBE +13) - a lift no trim shows. entry_lift_db reads the
+        # drives as the render does (a band's own output trim included); the entry's own trim adds.
+        from .sat_characters import entry_lift_db
+        if blocks("low", "mid", "high"):
+            # The multiband form plays each band's own trim and NOT the flat one (dsp's and the
+            # native's multiband paths ignore it): a flat -12 must not cancel three bands at +12
+            # it never plays against (pre-merge review 2026-10-26).
+            return pos(entry_lift_db(d))
+        return pos(entry_lift_db(d) + float(d.get("output_db") or 0.0))
     if t == "ott":
-        band = max([b.get("gain_db") or 0.0 for b in blocks("low", "mid", "high")] or [0.0])
-        return pos(d.get("in_gain_db")) + pos(band) + pos(d.get("out_gain_db"))
+        # OTT's law (ott_law, 2026-10-28) lifts every band by a FIXED makeup x depth (+14 / +9 / +14 dB
+        # at full depth) before its downward side cuts loud material back: that lift is charged with
+        # the band's own gain, the largest band, in series with the input and output gains.
+        from .ott_law import makeup_lift_db
+        return pos(d.get("in_gain_db")) + pos(makeup_lift_db(d)) + pos(d.get("out_gain_db"))
     if t == "comp":
         return max([pos(d.get("makeup_db"))]
                    + [pos(b.get("makeup_db")) for b in blocks("mid", "side")])
@@ -104,6 +134,9 @@ LIMITS = {
     # divergence between the monitor/bounce and the offline render. The native now gives each
     # entry its own slot; these refuse the N+1th here, the way eq_bands_max does, so the overflow
     # is a violation the agent can read rather than an entry that silently vanishes.
+    # Since Phase 65 the native chain runs a comp per entry (kMaxComps = 128): this is now the
+    # AGENT's own bound on how many compressors its moves leave on a chain, entries already there
+    # counted - a policy, held below the engine's count (test_guardrail_holes).
     "comps_per_stem_max": 4,
     "deessers_per_stem_max": 4,
     "gain_per_stem_per_pass_db": 6.0,
@@ -135,7 +168,7 @@ LIMITS = {
     # 2026-09-08 device audit (07·F3): the master's stereo image had NO floor, only the
     # schema's 0..2 range — and the range includes total destruction. Measured on a
     # synthetic master, validate_proposal accepted `utility mono`, `width 0.0` and
-    # `imager 0/0/0` with ZERO violations while refusing a 1.92 dB `balance` nudge; the
+    # a 3-band imager at 0/0/0 with ZERO violations while refusing a 1.92 dB `balance` nudge; the
     # 12.39 dB mono-sum collapse was free and the milder move was banned. Half the side
     # is a real "tighten the image" mastering move; below it the agent is monoing the
     # deliverable, which is never an automatic decision. Binds the AGENT only — the
@@ -149,12 +182,13 @@ LIMITS = {
     "master_true_peak_max_dbtp": -1.0,
     "master_comp_makeup_max_db": 0.0,  # only the limiter pushes loudness (Phase 6)
     "saturation_drive_max_db": 12.0,   # Phase 7
-    # OTT's UPWARD side lifts quiet material by up to dsp.OTT_MAX_BOOST_DB (24) x depth, and no
-    # wallet charges it: at the old cap of 0.8 that was 19 dB (a -45 dB stem measured +8.4 with
-    # every gain at 0). Charging the worst case would take OTT on a stem away from the agent, as
-    # it did for upward multiband; the cap is set instead so that worst case IS the per-pass
-    # rail - 24 x 0.25 = 6 dB (James, 2026-10-05, reader D9·R6). The RUN's cap only: the
-    # device's own range, and the user's knob, still go to 1.
+    # OTT's UPWARD side lifts quiet material, and no wallet charges it: at the old cap of 0.8 that
+    # was 19 dB (a -45 dB stem measured +8.4 with every gain at 0). Charging the worst case would
+    # take OTT on a stem away from the agent, as it did for upward multiband; the cap is set instead
+    # so the uncharged lift stays near the per-pass rail (James, 2026-10-05, reader D9·R6). Under
+    # ott_law (2026-10-28) the FIXED makeup (+14 dB x depth at most, 3.5 at 0.25) is charged as gain
+    # (level_charge_db); the upward side beyond it at 0.25 is 3-4 dB for a band 15 dB below its
+    # threshold and 6-7 for one 30 dB below. The RUN's cap only: the user's knob goes to 1.
     "ott_depth_max": 0.25,
     "overdrive_drive_max_db": 24.0,    # 2026-07-07: agent overdrive (user knob to 36)
     # 2026-09-06 modulation: the agent may THICKEN, not swirl. Chorus is the one device
@@ -169,17 +203,19 @@ LIMITS = {
     "flanger_feedback_max": 0.7,       # |feedback|; the user knob still goes to 0.95
     # Phase 63: the Auto Filter. Its RESONANCE is a static lift at the cutoff that no wallet
     # charges (a swept peak is not an EQ boost the composed rail can hold), so the cap is sized
-    # to the pass rail instead (CLAUDE.md batch Py1 rule 2): at 0.3 the peak is 5.4 dB at 12
-    # dB/oct and 4.0 at 24 - inside eq_resonance_max_db's 6. Its sweep is capped to keep
+    # to the pass rail instead (CLAUDE.md batch Py1 rule 2): at 0.64 the peak is 5.95 dB at 12
+    # dB/oct and 5.6 at 24 - inside eq_resonance_max_db's 6 (auto_filter_law since 2026-10-27; it was
+    # 0.3 on the old exponential Q). Its sweep is capped to keep
     # "movement" movement: three octaves either way from the LFO, three from the envelope.
-    "auto_filter_resonance_max": 0.3,  # the user knob still goes to 1 (Q 16)
+    "auto_filter_resonance_max": 0.64,  # the user knob still goes to 1 (Q 27)
     "auto_filter_lfo_amount_max_oct": 3.0,
     "auto_filter_env_amount_max_oct": 3.0,   # |env_amount_oct|
     "clip_threshold_min_db": -6.0,     # Phase 41: agent can't clip deeper than -6 dBFS
     "gate_threshold_max_db": -20.0,    # gate v2: an agent gate above -20 dBFS eats program
                                        # material, not bleed (the user knob still goes to 0)
     "tilt_max_db": 6.0,                # Phase 41: agent tilt capped at ±6 (like eq boosts)
-    "duck_depth_max_db": 12.0,         # Phase 7
+    "duck_depth_max_db": 12.0,         # Phase 7: the most a duck may cut, at its curve's deepest
+                                       # (duck_law: 1 - mix at a curve's 0 - so a mix of at most 0.75)
     "spectral_denoise_reduction_max_db": 24.0,  # Phase 29 repair de-noise gate depth
     "tune_cents_max": 100.0,  # Phase 31: max |tuning correction|, a semitone
     "transpose_semitones_max": 12,  # Phase 32: max |whole-song transpose|, an octave
@@ -198,6 +234,90 @@ LIMITS = {
     "actions_per_proposal": 8,
     "proposals_per_pass": 3,
 }
+
+
+def pass_cap_among(violations) -> bool:
+    """Whether the per-pass proposal cap is AMONG `violations` (Violation models or their dicts).
+
+    Every door that heals a full pass (the live engineer, Ask's chat, a plan's preview, the
+    transpose helper) opens a fresh pass and asks again when this is true, and the answer it
+    returns is the fresh pass's. Until 2026-11-02 they healed only when the cap was the ONLY
+    violation: a move that also broke a per-pass budget came back "too many proposals this
+    pass" first, and the engineer told the user it had hit a cap and made the same move with
+    a direct fader write, outside every guardrail."""
+    for v in violations or ():
+        rule = v.get("rule") if isinstance(v, dict) else getattr(v, "rule", None)
+        if rule == "proposals_per_pass":
+            return True
+    return False
+
+
+#: The device types the user may stack on one chain (Phase 65) that a mix proposal REPLACES rather
+#: than adds - a proposal of one is refused on a channel that holds two (rule instance_which).
+INSTANCE_KINDS = ("comp", "gate", "transient", "duck", "limiter", "mb_comp", "ott", "clip",
+                  "saturation", "overdrive", "chorus", "flanger", "auto_filter", "utility")
+
+
+def _field(action, name: str):
+    return action.get(name) if isinstance(action, dict) else getattr(action, name, None)
+
+
+def _after_last_limiter(chain, entry) -> bool:
+    """Whether `entry` stands after the last limiter of `chain` (the master's user-only tail)."""
+    chain = list(chain or ())
+    lims = [i for i, e in enumerate(chain) if e.get("type") == "limiter"]
+    at = next((i for i, e in enumerate(chain) if e is entry), None)
+    return bool(lims) and at is not None and at > lims[-1]
+
+
+def replaced_entries(chain, action) -> list[dict]:
+    """The entries of `chain` a whole-file proposal of an INSTANCE_KINDS type replaces
+    (session._mutate_one): no `instance` = every whole-file one of its type (the guardrails
+    refuse that where there are two or more), `instance: N` = the type's N-th entry (counted
+    over every entry, as `comp#N` is) when it is whole-file, `"new"` = none."""
+    kind = _field(action, "type")
+    if kind not in INSTANCE_KINDS or _field(action, "time_range_s") is not None:
+        return []
+    inst = _field(action, "instance")
+    of_type = [e for e in (chain or ()) if e.get("type") == kind]
+    if inst == "new":
+        return []
+    if inst is None:
+        return [e for e in of_type if not e.get("time_range_s")]
+    if 0 <= inst < len(of_type) and not of_type[inst].get("time_range_s"):
+        return [of_type[inst]]
+    return []
+
+
+def instance_slot(kind: str, uid) -> str:
+    """The ledger's key for one instance of a replacing type: `type@uid` once the entry has an
+    identity, the bare type for a record from before identities (it stands for any of them)."""
+    return f"{kind}@{uid}" if isinstance(uid, int) else kind
+
+
+def slot_replaced(slot: str, replaced) -> bool:
+    """Whether the ledger slot `slot` is one the proposal replaces: `replaced` holds slots
+    (`type@uid`) and bare types (every instance of the type)."""
+    kind, _, uid = slot.partition("@")
+    if slot in replaced or kind in replaced:
+        return True
+    return not uid and any(r.partition("@")[0] == kind for r in replaced)
+
+
+def replaced_slots(chain, action) -> set[str]:
+    """The ledger slots one action replaces on its target: the replaced entries' identities,
+    or the bare type for a replace whose entry has none (or nothing yet stands)."""
+    kind = _field(action, "type")
+    if _field(action, "time_range_s") is not None:
+        return set()
+    if kind not in INSTANCE_KINDS:
+        return {kind}
+    if _field(action, "instance") == "new":
+        return set()
+    gone = replaced_entries(chain, action)
+    if _field(action, "instance") is None and not gone:
+        return {kind}
+    return {instance_slot(kind, e.get("uid")) for e in gone}
 
 
 def _comp_coverage(stem_chains: Optional[dict[str, list[dict]]],
@@ -232,11 +352,10 @@ def _wet_insert_mix(i: int, action) -> list[Violation]:
 
 
 # The one narrowing move that is NOT destruction: folding the bottom to mono. Our own
-# prompt and knowledge file recommend it by name ("imager width_low 0 = tight, club-safe
-# bottom"; "utility bass_mono"), and it IMPROVES mono compatibility rather than costing
-# it. So the master width floor exempts a band whose TOP EDGE sits at or below this — and
-# only that band: `imager crossover_lo_hz 4000 / width_low 0`, or a `band_width` scrubbed
-# to 20 Hz–20 kHz, is the same destruction wearing the exemption's clothes. 300 Hz is
+# prompt and knowledge file recommend it by name ("utility bass_mono"), and it IMPROVES mono
+# compatibility rather than costing it. So the master width floor exempts a band whose TOP EDGE
+# sits at or below this — and only that band: a bass mono pushed to 4 kHz would be the same
+# destruction wearing the exemption's clothes (the Utility holds it to 500 Hz). 300 Hz is
 # generous against the 120–200 Hz mono-maker defaults; above it lives the stereo image.
 _MASTER_MONO_LOWS_MAX_HZ = 300.0
 
@@ -260,8 +379,7 @@ def _master_narrowing(i: int, what: str, width: float,
                  f"{LIMITS['master_width_min']:.2f} floor — monoing the deliverable is "
                  f"the user's call, not an automatic move. Folding the LOWS is still "
                  f"free (a band ending at or below {_MASTER_MONO_LOWS_MAX_HZ:.0f} Hz: "
-                 "imager width_low at its default crossover, utility bass_mono, "
-                 "band_width on sub/bass)."),
+                 "utility bass_mono)."),
         limit=LIMITS["master_width_min"], value=width)]
 
 
@@ -285,35 +403,10 @@ def _action_eq_bands(action) -> int:
     return 0
 
 
-def _band_width_key(band, lo_hz, hi_hz):
-    """Which band a band_width entry narrows. A free lo/hi scrub is its own band; otherwise the
-    fixed label. Entries sharing a key COMPOSE (see _master_band_width_scales)."""
-    return (float(lo_hz), float(hi_hz)) if (lo_hz is not None and hi_hz is not None) else band
-
-
-def _master_band_width_scales(
-        stem_chains: Optional[dict[str, list[dict]]]) -> dict:
-    """The band_width scale the MASTER already carries, per band, as a PRODUCT.
-
-    Unlike utility / width / imager — native singletons session._mutate REPLACES — a band_width
-    entry APPENDS (session.py: "eq / ... / band_width append") and dsp._band_width_scale
-    re-isolates the same mask each time, so N entries multiply. A per-action floor therefore
-    bound nothing: eight legal 0.5s inside ONE proposal took the mid band to 0.0039 (-48 dB of
-    side) with zero violations, while a milder single imager move was refused (2026-09-08
-    pre-merge review)."""
-    acc: dict = {}
-    for entry in (stem_chains or {}).get("master", []):
-        if entry.get("type") != "band_width":
-            continue
-        key = _band_width_key(entry.get("band"), entry.get("lo_hz"), entry.get("hi_hz"))
-        acc[key] = acc.get(key, 1.0) * float(entry.get("width", 1.0))
-    return acc
-
-
-#: The devices that scale the master's SIDE, and the three of them a chain holds ONE of (a new
-#: one replaces the old - session._mutate); band_width appends.
-_MASTER_WIDTH_KINDS = ("width", "utility", "imager", "band_width")
-_MASTER_WIDTH_SINGLETONS = ("width", "utility", "imager")
+#: The devices that scale the master's SIDE - the Imager (`width`) and the Utility - each one a
+#: proposal replaces (session._mutate). The 3-band imager and band width were retired 2026-10-28.
+_MASTER_WIDTH_KINDS = ("width", "utility")
+_MASTER_WIDTH_SINGLETONS = ("width", "utility")
 _WIDTH_TOP_HZ = 20000.0
 
 
@@ -328,20 +421,6 @@ def _side_pieces(d: dict) -> list[tuple[float, float, float]]:
         return [(0.0, top, float(d.get("width", 1.0)))]
     if t == "utility":                      # `mono` IS width 0 downstream (dsp._utility)
         return [(0.0, top, 0.0 if d.get("mono") else float(d.get("width", 1.0)))]
-    if t == "imager":
-        lo, hi = imager_crossovers(d.get("crossover_lo_hz", 150.0), d.get("crossover_hi_hz", 2000.0))
-        return [(0.0, lo, float(d.get("width_low", 1.0))),
-                (lo, hi, float(d.get("width_mid", 1.0))),
-                (hi, top, float(d.get("width_high", 1.0)))]
-    if t == "band_width":
-        if d.get("lo_hz") is not None and d.get("hi_hz") is not None:
-            lo, hi = float(d["lo_hz"]), float(d["hi_hz"])
-        elif d.get("band") in BAND_LABELS:
-            k = BAND_LABELS.index(d["band"])
-            lo, hi = float(BAND_EDGES_HZ[k]), float(BAND_EDGES_HZ[k + 1])
-        else:
-            return []
-        return [(lo, hi, float(d.get("width", 1.0)))]
     return []
 
 
@@ -350,23 +429,34 @@ def _master_composed_width(req: ProposalRequest,
     """The master's stereo floor, on the PRODUCT (reader D9·R10).
 
     Each device was held at `master_width_min` alone, and they are in series: width 0.5 x
-    utility 0.5 x imager 0.5 x band_width 0.5 is 0.0625 of the side in the mids - the
+    utility 0.5 x a 3-band imager 0.5 x band width 0.5 was 0.0625 of the side in the mids - the
     deliverable mono-folded (07·F3) from four legal moves, in one accepted proposal. The side
     scale the master would carry is composed here per frequency: what its chain holds, with a
-    proposed width / utility / imager REPLACING the one there (as `session._mutate` does) and
-    a band_width multiplying in. Judged above `_MASTER_MONO_LOWS_MAX_HZ` only, and only where
+    proposed width / utility REPLACING the one there (as `session._mutate` does). Judged above `_MASTER_MONO_LOWS_MAX_HZ` only, and only where
     THIS proposal narrows - the user's own narrowing is never the agent's refusal, so an EQ
     or a widening move on a master the user has narrowed still lands."""
     proposed = [(i, a.model_dump()) for i, a in enumerate(req.actions)
                 if getattr(a, "stem_id", None) == "master" and a.type in _MASTER_WIDTH_KINDS]
     if not proposed:
         return []
-    replaced = {d["type"] for _, d in proposed if d["type"] in _MASTER_WIDTH_SINGLETONS}
-    standing = [e for e in (stem_chains or {}).get("master", [])
-                if e.get("type") in _MASTER_WIDTH_KINDS and e.get("type") not in replaced]
-    last = {d["type"]: i for i, d in proposed if d["type"] in _MASTER_WIDTH_SINGLETONS}
+    master_chain = (stem_chains or {}).get("master", [])
+
+    def gone_with(d: dict) -> list[dict]:
+        if d["type"] == "width":      # the master's width device stays one per chain
+            return [e for e in master_chain if e.get("type") == "width"]
+        return replaced_entries(master_chain, d)
+
+    replaced = {id(e) for _, d in proposed if d["type"] in _MASTER_WIDTH_SINGLETONS
+                for e in gone_with(d)}
+    standing = [e for e in master_chain
+                if e.get("type") in _MASTER_WIDTH_KINDS and id(e) not in replaced]
+    # Two moves on the same device: the later one is what lands. "new" moves each add one.
+    def slot(i: int, d: dict):
+        return (d["type"], d.get("instance")) if d.get("instance") != "new" else (d["type"], "new", i)
+
+    last = {slot(i, d): i for i, d in proposed if d["type"] in _MASTER_WIDTH_SINGLETONS}
     moves = [(i, d) for i, d in proposed
-             if d["type"] not in _MASTER_WIDTH_SINGLETONS or last[d["type"]] == i]
+             if d["type"] not in _MASTER_WIDTH_SINGLETONS or last[slot(i, d)] == i]
     chain_pieces = [p for e in standing for p in _side_pieces(e)]
     move_pieces = [(i, p) for i, d in moves for p in _side_pieces(d)]
     # ...and what the master carries NOW, the device a proposal replaces included: a width
@@ -404,18 +494,10 @@ def _master_composed_width(req: ProposalRequest,
     return [Violation(
         action_index=index, rule="master_width_min",
         message=(f"the master's width devices are in series and would compose to {scale:.2f} "
-                 f"of its side at {span}, below the {floor:.2f} floor - width, utility, imager "
-                 "and band_width multiply. Narrow with ONE of them, or less with each; "
+                 f"of its side at {span}, below the {floor:.2f} floor - the Imager's width and the "
+                 "Utility's multiply. Narrow with ONE of them, or less with each; "
                  "monoing the deliverable is the user's call"),
         limit=floor, value=round(scale, 3))]
-
-
-def _band_top_hz(action: BandWidthAction) -> float:
-    """Upper edge of a band_width's band — the free lo_hz/hi_hz scrub if it carries
-    one (2026-07-19), otherwise the fixed label's edge. Mirrors dsp._band_width_scale."""
-    if action.lo_hz is not None and action.hi_hz is not None:
-        return float(action.hi_hz)
-    return float(BAND_EDGES_HZ[BAND_LABELS.index(action.band) + 1])
 
 
 _RESONANT_SHAPES = ("hpf", "lpf", "notch", "bandpass")
@@ -428,21 +510,11 @@ _SHELF_SHAPES = ("low_shelf", "high_shelf", "tilt_shelf")
 
 def _eq_band_sections(shape: str, freq_hz, q, gain_db, slope_db_oct,
                       sample_rate: float = 48000.0) -> list:
-    """One EQ band's biquad sections, built exactly as `dsp._eq_band` renders it (the same
-    coefficient makers). Shared by the single-band resonance rail and the composed rail."""
-    from .reference_monitor import biquad_coeffs, slope_cascade_coeffs
-
-    freq_hz, q = float(freq_hz), float(q)
-    gain_db = float(gain_db or 0.0)   # ignored by the cut shapes, real for shelves
-    slope = int(slope_db_oct or 6)
-    if shape in ("hpf", "lpf") and slope > 6:
-        return slope_cascade_coeffs(shape, sample_rate, freq_hz, q, slope)
-    if shape == "tilt_shelf":
-        # exactly apply_eq_band's construction: a matched low-shelf (−g/2) +
-        # high-shelf (+g/2) pair at the pivot, sharing the band's q
-        return [biquad_coeffs("low_shelf", sample_rate, freq_hz, q, -gain_db / 2.0),
-                biquad_coeffs("high_shelf", sample_rate, freq_hz, q, gain_db / 2.0)]
-    return [biquad_coeffs(shape, sample_rate, freq_hz, q, gain_db)]
+    """One EQ band's biquad sections, built exactly as `dsp._eq_band` renders it (`eq_law`, the
+    EQ's law since 2026-10-27). Shared by the single-band resonance rail and the composed rail."""
+    from .eq_law import band_sections
+    return band_sections(shape, sample_rate, float(freq_hz), float(q), float(gain_db or 0.0),
+                         int(slope_db_oct or 6))
 
 
 def _eq_band_peak_db(band, sample_rate: float = 48000.0) -> float:
@@ -475,16 +547,27 @@ EQ_FAMILY = ("eq", "tilt", "match_eq")
 # What the COMPOSED EQ rail charges a curve for: the EQ family, and the overdrive's TONE - a
 # first-order high shelf around 3 kHz that lifts the top by up to +6 dB (2026-10-17, the overdrive
 # audit: it was charged nowhere, so drive 0 / tone 1 was a +6 dB treble boost outside the rail).
-EQ_CURVE_TYPES = EQ_FAMILY + ("overdrive",)
+EQ_CURVE_TYPES = EQ_FAMILY + ("overdrive", "saturation")
 #: The curve types that REPLACE the target's entry of their type (a whole-file singleton, as the
 #: gain wallet's session._TRIM_SINGLETONS): the ledger holds the ONE that stands - and the one
 #: that stood when the pass began - never every one applied (the pre-merge review of 2026-10-20:
 #: the agent re-proposing its own tone-1 overdrive was refused at +12 dB, the first one counted
 #: as if it were still there beside the second).
-EQ_CURVE_SINGLETONS = ("overdrive",)
-_EQ_GRID_N = 512          # 20 Hz..20 kHz, ~51 points/octave: a q=8 bell's peak reads within 0.05 dB
-_EQ_GRID_RATE = 48000.0   # the stand-in rate _eq_band_peak_db uses, for the same reason
-_EQ_TOL_DB = 0.05         # dB are 0.1-quantized in this engine; admit the limit itself
+EQ_CURVE_SINGLETONS = ("overdrive", "saturation")
+_EQ_GRID_N = 4096         # 20 Hz..20 kHz, ~411 points/octave: a q=40 bell's peak reads within 0.02 dB
+                          # (512 read a +6 dB q=40 bell as +5.21 - the agent's q reaches 40 since the EQ law)
+_EQ_GRID_RATE = 48000.0   # the rate with no project to ask (a caller with no session)
+#: The rate the rails measure at: the project's, when validate_proposal is told it (the EQ law's
+#: response near Nyquist moves with the rate - an 18 kHz shelf at q 8 read 5.69 dB at 48 kHz and
+#: played 6.58 at 44.1, the pre-merge review of 2026-10-28).
+import contextvars as _contextvars
+_RAIL_RATE: "_contextvars.ContextVar[float]" = _contextvars.ContextVar("rail_rate", default=_EQ_GRID_RATE)
+
+
+def _rail_rate() -> float:
+    return float(_RAIL_RATE.get())
+_EQ_TOL_DB = 0.1          # dB are 0.1-quantized in this engine, and the EQ law's matched sections sit within
+                          # ~0.05 dB of their knob (eq_law, 2026-10-27): admit the limit itself
 #: Where a proposal pushes less than this, the point is a bell's SKIRT, not the move (audit
 #: follow-ups 2026-09-11, item 2): a q=0.707 +6 dB bell at 8 kHz puts 0.16 dB on 1 kHz, and a
 #: 1 kHz band already at the +12 session rail refused the whole move for a tail nobody hears.
@@ -497,7 +580,22 @@ _EQ_SKIRT_SLACK_DB = 1.0
 def _eq_grid():
     import numpy as np
     f = np.logspace(np.log10(20.0), np.log10(20000.0), _EQ_GRID_N)
-    return f, 2.0 * np.pi * f / _EQ_GRID_RATE
+    return f, 2.0 * np.pi * f / _rail_rate()
+
+
+def on_eq_grid(curve):
+    """A stored curve on the rail's grid: one kept on a grid of another size (session.json's
+    `trimmed_eq_curves_db`, written before the grid became 4096 points) is read across in log
+    frequency, the grid's own spacing - never added point for point to a grid it does not match."""
+    import numpy as np
+    c = np.asarray(curve, dtype=np.float64)
+    if c.shape == (_EQ_GRID_N,):
+        return c
+    if c.ndim != 1 or c.size < 2:
+        return np.zeros(_EQ_GRID_N)
+    old = np.linspace(0.0, 1.0, c.size)
+    new = np.linspace(0.0, 1.0, _EQ_GRID_N)
+    return np.interp(new, old, c)
 
 
 def eq_family_curves_db(action):
@@ -517,8 +615,11 @@ def eq_family_curves_db(action):
     if d.get("type") not in EQ_CURVE_TYPES:
         return None
     key = json.dumps({k: d.get(k) for k in ("type", "band", "tilt_db", "pivot_hz",
-                                            "band_gains_db", "tone")}, sort_keys=True, default=str)
-    boost, cut = _curves_cached(key)
+                                            "band_gains_db", "tone", "character", "curve")}
+                     | {k: {"curve": d[k].get("curve")} for k in ("low", "mid", "high")
+                        if isinstance(d.get(k), dict)}, sort_keys=True, default=str)
+    # (`low` / `mid` / `high` above are the bands' CURVES only: the key is what the curve reads)
+    boost, cut = _curves_cached(f"{_rail_rate():.1f}|{key}")
     # `spent_only` (reader D9·R5): the session ledger's mark on a move whose chain entry the
     # user has since deleted, zeroed or switched off - what it lifted or cut is still spent,
     # and nothing of it is credit, exactly as for a ranged move.
@@ -546,7 +647,7 @@ def _compute_curves(key: str):
     import numpy as np
     from scipy.signal import freqz
 
-    d = json.loads(key)
+    d = json.loads(key.partition("|")[2])
     _, w = _eq_grid()
 
     def db(sections):
@@ -559,7 +660,7 @@ def _compute_curves(key: str):
         band = d["band"]
         resp = db(_eq_band_sections(band["shape"], band["freq_hz"], band["q"],
                                     band.get("gain_db", 0.0), band.get("slope_db_oct", 6),
-                                    _EQ_GRID_RATE))
+                                    _rail_rate()))
         if band["shape"] in _RESONANT_SHAPES:
             return np.maximum(resp, 0.0), np.zeros_like(resp)
         return resp, resp
@@ -567,8 +668,8 @@ def _compute_curves(key: str):
         from .dsp import TILT_Q   # exactly dsp._tilt: low shelf −tilt + high shelf +tilt
         from .reference_monitor import biquad_coeffs
         tilt, pivot = float(d.get("tilt_db") or 0.0), float(d.get("pivot_hz") or 1000.0)
-        resp = db([biquad_coeffs("low_shelf", _EQ_GRID_RATE, pivot, TILT_Q, -tilt),
-                   biquad_coeffs("high_shelf", _EQ_GRID_RATE, pivot, TILT_Q, tilt)])
+        resp = db([biquad_coeffs("low_shelf", _rail_rate(), pivot, TILT_Q, -tilt),
+                   biquad_coeffs("high_shelf", _rail_rate(), pivot, TILT_Q, tilt)])
         return resp, resp
     if d["type"] == "overdrive":
         # the tone tilt, exactly dsp._overdrive: lp + 2 tone (x - lp) around a 1st-order low-pass at
@@ -576,12 +677,38 @@ def _compute_curves(key: str):
         from .dsp import OD_TONE_HZ
         from .reference_monitor import biquad_coeffs
         tone = min(max(float(d.get("tone", 0.5) if d.get("tone") is not None else 0.5), 0.0), 1.0)
-        b, a = biquad_coeffs("lpf", _EQ_GRID_RATE, OD_TONE_HZ, 0.707, 0.0)
+        b, a = biquad_coeffs("lpf", _rail_rate(), OD_TONE_HZ, 0.707, 0.0)
         lp = freqz(b, a, worN=w)[1]
         resp = 20.0 * np.log10(np.abs(lp + 2.0 * tone * (1.0 - lp)) + 1e-12)
+        # ...and an amp character's own voicing (b5549bad): its small-signal response with its
+        # trim is up to +12.5 dB at 6 kHz - a treble boost no rail saw (pre-merge review 2026-10-26).
+        from . import od_characters as odc
+        ch = odc.character_index(d.get("character", 0))
+        if ch > 0:
+            f, _ = _eq_grid()
+            secs = odc.pre_sections(ch, _rail_rate()) + odc.post_sections(ch, _rail_rate())
+            amp = odc._cascade_response(secs, _rail_rate(), f) * odc._taps_response(ch, f)
+            resp = resp + 20.0 * np.log10(np.abs(amp) + 1e-12) + odc.TRIMS_DB[ch]
+        return np.maximum(resp, 0.0), np.zeros_like(resp)
+    if d["type"] == "saturation":
+        # a TAPE / TUBE character's fixed tone (sat_characters.tone_sections) - +1.7..+2.3 dB near
+        # 50 Hz that the level law's charge leaves out. A multiband form takes the most any of its
+        # bands' characters lifts. Its LIFT only, as the overdrive's tone.
+        from . import od_characters as odc
+        from . import sat_characters as sc
+        f, _ = _eq_grid()
+        bands = [d[k] for k in ("low", "mid", "high") if isinstance(d.get(k), dict)]
+        flat = d.get("curve", 0)
+        curves = [flat if b.get("curve") is None else b["curve"] for b in bands] or [flat]
+        resp = np.zeros(len(f))
+        for c in curves:
+            secs = sc.tone_sections(c, _rail_rate())
+            if secs:
+                resp = np.maximum(resp, 20.0 * np.log10(np.abs(odc._cascade_response(
+                    secs, _rail_rate(), f)) + 1e-12))
         return np.maximum(resp, 0.0), np.zeros_like(resp)
     from .dsp import match_eq_fir   # the rendered FIR itself, so this cannot drift from it
-    fir = match_eq_fir(d.get("band_gains_db") or {}, int(_EQ_GRID_RATE))
+    fir = match_eq_fir(d.get("band_gains_db") or {}, int(_rail_rate()))
     resp = 20.0 * np.log10(np.abs(freqz(fir, [1.0], worN=w)[1]) + 1e-12)
     return resp, resp
 
@@ -592,7 +719,7 @@ def _ledger_curves(ledger: dict, target: str, replaced=()):
 
     A singleton (`EQ_CURVE_SINGLETONS`) is the entry that STANDS in the session, and in the pass
     what it moved since the pass began (`standing` - `prior`, the gain wallet's delta). `replaced`
-    names the singleton types the caller's proposal brings its own entry of: what stands leaves
+    names the singleton slots (`instance_slot`) the caller's proposal brings its own entry of: what stands leaves
     the session, and the pass is charged against what stood when it began."""
     import numpy as np
     zero = np.zeros(_EQ_GRID_N)
@@ -613,10 +740,10 @@ def _ledger_curves(ledger: dict, target: str, replaced=()):
     sb, sc = summed("session")
     carry = (ledger.get("trimmed") or {}).get(target)
     if carry:
-        sb, sc = sb + np.asarray(carry["boost"]), sc + np.asarray(carry["cut"])
+        sb, sc = sb + on_eq_grid(carry["boost"]), sc + on_eq_grid(carry["cut"])
     for kind, slot in ((ledger.get("singletons") or {}).get(target) or {}).items():
         (s_b, s_c), (p_b, p_c) = curves_of(slot.get("standing")), curves_of(slot.get("prior"))
-        if kind in replaced:
+        if slot_replaced(kind, replaced):   # `kind` is the instance's slot (Phase 65)
             pb, pc = pb - p_b, pc - p_c
         else:
             sb, sc = sb + s_b, sc + s_c
@@ -764,7 +891,8 @@ def _composed_eq_violations(req: ProposalRequest, ledger: dict,
         slot[0] = slot[0] + curves[0]
         slot[1] = slot[1] + curves[1]
         if action.type in EQ_CURVE_SINGLETONS and getattr(action, "time_range_s", None) is None:
-            replaces.setdefault(action.stem_id, set()).add(action.type)
+            replaces.setdefault(action.stem_id, set()).update(replaced_slots(
+                (ledger.get("chains") or {}).get(action.stem_id, ()), action))
 
     zero = np.zeros(_EQ_GRID_N)
     held: dict[tuple, tuple] = {}
@@ -871,7 +999,26 @@ def _composed_eq_violations(req: ProposalRequest, ledger: dict,
 FADER_DB_RANGE = (-60.0, 6.0)
 
 
-def validate_proposal(
+@contextlib.contextmanager
+def rail_rate(sample_rate):
+    """Measure the EQ rails at `sample_rate` (the project's) inside the block; None = the stand-in."""
+    if sample_rate is None:
+        yield
+        return
+    tok = _RAIL_RATE.set(float(sample_rate))
+    try:
+        yield
+    finally:
+        _RAIL_RATE.reset(tok)
+
+
+def validate_proposal(*args, sample_rate: Optional[float] = None, **kwargs) -> list[Violation]:
+    """`_validate_proposal` with its EQ rails measured at `sample_rate` (the project's rate)."""
+    with rail_rate(sample_rate):
+        return _validate_proposal(*args, **kwargs)
+
+
+def _validate_proposal(
     req: ProposalRequest,
     cumulative_gain_this_pass_db: dict[str, float],
     accepted_proposals_this_pass: int = 0,
@@ -938,7 +1085,6 @@ def validate_proposal(
     ranged_session_w = {k: tuple(v) for k, v in (ranged_gain_session_db or {}).items()}
     coverage = _comp_coverage(stem_chains)
     deess_coverage = _comp_coverage(stem_chains, "deess")
-    master_bw_scales = _master_band_width_scales(stem_chains)
 
     def _charge_gain(i: int, stem_id: str, delta_db: float,
                      note: str = "", in_range: bool = False) -> None:
@@ -973,7 +1119,66 @@ def validate_proposal(
                 net_w[stem_id] = net
 
     faders = dict(fader_db or {})
+    added_new: dict[str, int] = {}
     for i, action in enumerate(req.actions):
+        # A whole-file proposal of a device the user may stack (Phase 65: INSTANCE_KINDS) REPLACES
+        # the target's one (session._mutate_one). On a channel that already carries two or more
+        # it says which (`instance: N`, the type's N-th entry as `comp#N` counts them) or adds one
+        # (`instance: "new"`); without either it cannot say which: refused, with the way to say it.
+        kind = getattr(action, "type", None)
+        inst = getattr(action, "instance", None)
+        if kind in INSTANCE_KINDS:
+            chain_now = (stem_chains or {}).get(getattr(action, "stem_id", ""), ())
+            of_type = [e for e in chain_now if e.get("type") == kind]
+            whole_now = sum(1 for e in of_type if not e.get("time_range_s"))
+            if inst is not None and getattr(action, "time_range_s", None) is not None:
+                violations.append(Violation(
+                    action_index=i, rule="instance_ranged",
+                    message=f"a time-ranged {kind} is placed beside the others by its range; "
+                            "leave `instance` off a time-ranged move",
+                    limit=0, value=1))
+            elif isinstance(inst, int) and not 0 <= inst < len(of_type):
+                violations.append(Violation(
+                    action_index=i, rule="instance_missing",
+                    message=f"'{action.stem_id}' has no {kind}#{inst}: it carries {len(of_type)} "
+                            f"{kind} device(s), {kind}#0 the first - or give instance \"new\" "
+                            "to add one",
+                    limit=max(len(of_type) - 1, 0), value=inst))
+            elif isinstance(inst, int) and of_type[inst].get("time_range_s"):
+                violations.append(Violation(
+                    action_index=i, rule="instance_ranged",
+                    message=f"{kind}#{inst} on '{action.stem_id}' is time-ranged; a whole-file "
+                            f"proposal does not replace it - name a whole-file {kind}, or add "
+                            "one with instance \"new\"",
+                    limit=0, value=inst))
+            elif (isinstance(inst, int) and getattr(action, "stem_id", None) == "master"
+                  and kind != "limiter" and _after_last_limiter(chain_now, of_type[inst])):
+                # After the master's limiter is the USER'S (James, 2026-10-05). A replace with
+                # `instance` keeps the entry where it stands, so naming one past the limiter would
+                # put the agent's move behind the ceiling (pre-merge review 2026-10-26).
+                violations.append(Violation(
+                    action_index=i, rule="post_limiter",
+                    message=f"{kind}#{inst} on the master plays after its limiter, which is the "
+                            "user's; change a device in front of the limiter, or add one with "
+                            "instance \"new\"",
+                    limit=0, value=inst))
+            elif inst == "new":
+                from .session import CHAIN_MAX_ENTRIES
+                added_new[action.stem_id] = added_new.get(action.stem_id, 0) + 1
+                if len(chain_now) + added_new[action.stem_id] > CHAIN_MAX_ENTRIES:
+                    violations.append(Violation(
+                        action_index=i, rule="chain_full",
+                        message=f"'{action.stem_id}' already holds {len(chain_now)} devices; a "
+                                f"chain holds {CHAIN_MAX_ENTRIES} - change one that is there",
+                        limit=CHAIN_MAX_ENTRIES, value=len(chain_now) + added_new[action.stem_id]))
+            elif inst is None and getattr(action, "time_range_s", None) is None and whole_now >= 2:
+                violations.append(Violation(
+                    action_index=i, rule="instance_which",
+                    message=f"'{action.stem_id}' carries {whole_now} {kind} devices; say which one "
+                            f"this proposal changes with \"instance\": N ({kind}#0 is the first, "
+                            f"{kind}#1 the next), or add one with \"instance\": \"new\" - or change "
+                            f"one by hand with device.set {kind}#N",
+                    limit=1, value=whole_now))
         if isinstance(action, GainAction):
             _charge_gain(i, action.stem_id, action.delta_db, in_range=is_ranged(action))
             # The fader's own top. A time-ranged move is a ride over the fader, not its level;
@@ -1056,34 +1261,6 @@ def validate_proposal(
                 violations += _master_narrowing(i, "master width", action.width,
                                                 up_to_hz=float("inf"))
 
-        elif isinstance(action, ImagerAction):
-            if action.stem_id == "master":
-                # Each band judged by its OWN top edge: the low band ends at
-                # crossover_lo_hz (150 Hz by default — "mono the lows", free), the mid at
-                # crossover_hi_hz, the high at Nyquist. A low band pushed up to 4 kHz is
-                # not the lows and gets no exemption; a mid band sitting under 200 Hz is.
-                xlo, xhi = imager_crossovers(action.crossover_lo_hz, action.crossover_hi_hz)
-                for name, width, top in (
-                        ("width_low", action.width_low, xlo),
-                        ("width_mid", action.width_mid, xhi),
-                        ("width_high", action.width_high, float("inf"))):
-                    violations += _master_narrowing(i, f"imager {name}", width,
-                                                    up_to_hz=top)
-
-        elif isinstance(action, BandWidthAction):
-            if action.stem_id == "master":
-                # CUMULATIVE: band_width appends and composes multiplicatively, so the floor is
-                # judged on the product -- across passes (seeded from the chain) and within this
-                # proposal. Judging each action alone bound nothing.
-                key = _band_width_key(action.band, action.lo_hz, action.hi_hz)
-                scale = master_bw_scales.get(key, 1.0) * action.width
-                master_bw_scales[key] = scale
-                what = (f"band_width {action.band!r} width" if scale == action.width
-                        else f"band_width {action.band!r} width, {scale:.3f} once it composes "
-                             f"with the band_width already on the master,")
-                violations += _master_narrowing(i, what, scale,
-                                                up_to_hz=_band_top_hz(action))
-
         # Pydantic field constraints already reject out-of-range raw values;
         # the EQ/comp checks below are defense-in-depth (the doc'd rule table
         # must hold even if a schema bound drifts), and the HPF rule is
@@ -1119,7 +1296,7 @@ def validate_proposal(
                 # gain_db is IGNORED for the cut shapes, and for shelves q is a
                 # real resonance term the nominal gain doesn't describe; bound
                 # what the band actually does to the signal instead.
-                peak_db = _eq_band_peak_db(action.band)
+                peak_db = _eq_band_peak_db(action.band, _rail_rate())
                 # +0.05: a max-legal shelf's PLATEAU sits exactly on the limit
                 # (eq_boost_max_db == eq_resonance_max_db == 6.0), so admit the
                 # plateau itself and reject only a resonant lip above it — dB
@@ -1191,8 +1368,11 @@ def validate_proposal(
                                 "undo them first or stay time-ranged",
                         limit=LIMITS["whole_file_comps_per_stem"],
                         value=len(ranged) + 1))
-                else:
-                    covered[:] = [None]  # replaces any existing whole-file comp
+                elif getattr(action, "instance", None) == "new":
+                    covered.append(None)  # one more whole-file comp beside the others (Phase 65)
+                elif getattr(action, "instance", None) is None:
+                    covered[:] = [c for c in covered if c is not None] + [None]   # replaces THE one
+                # an `instance: N` replaces that one: the count does not move
             else:
                 clashes = [r for r in covered
                            if r is None or (r[0] < new_range[1]
@@ -1215,7 +1395,7 @@ def validate_proposal(
                 violations.append(Violation(
                     action_index=i, rule="comps_per_stem_max",
                     message=f"'{action.stem_id}' would carry {len(covered)} compressors; "
-                            f"the engine holds {LIMITS['comps_per_stem_max']} per chain — "
+                            f"a mix run adds at most {LIMITS['comps_per_stem_max']} per chain — "
                             "widen the ranges or undo one",
                     limit=LIMITS["comps_per_stem_max"], value=len(covered)))
 
@@ -1282,10 +1462,9 @@ def validate_proposal(
                 _charge_gain(i, action.stem_id, action.output_db,
                              note=" (incl. overdrive output)")
 
-        # Chorus (2026-09-06): bound the WET BLEND, the one knob that decides whether this
-        # thickens a source or replaces it. Nothing to charge to the gain budget — chorus has
-        # no gain control (though dry+wet can sum a few dB at some frequencies, which is what
-        # the mix cap also keeps in hand).
+        # Chorus (chorus_law, 2026-10-28): bound the MIX, the knob that decides whether this thickens
+        # a source or replaces it, and charge what it adds in level: the reference's curve keeps the
+        # dry full and lays the wet on top, so it LIFTS (level_charge_db: + VOLUME).
         elif isinstance(action, ChorusAction):
             if action.mix > LIMITS["chorus_mix_max"]:
                 violations.append(Violation(
@@ -1293,6 +1472,9 @@ def validate_proposal(
                     message=f"chorus mix {action.mix:.2f} exceeds limit "
                             f"(that is an effect, not a thickener)",
                     limit=LIMITS["chorus_mix_max"], value=action.mix))
+            lift = level_charge_db(action)
+            if lift:
+                _charge_gain(i, action.stem_id, lift, note=" (the chorus's dry + wet, and its volume)")
 
         # Flanger (2026-09-06): the same wet-blend bound as the chorus, plus the one the
         # chorus does not need — the return path. Both are the agent's ceiling only.
@@ -1347,20 +1529,24 @@ def validate_proposal(
                              note=" (incl. tilt output)")
 
         elif isinstance(action, ClipAction):
-            # Clipping deeper than the floor crushes the master — bind the agent (not
-            # the user, who can dial the knob further; guardrails bind the agent only).
-            if action.threshold_db < LIMITS["clip_threshold_min_db"]:
+            # Clipping deeper than the floor crushes the master — bind the agent (not the user, who
+            # can dial the knobs further; guardrails bind the agent only). The depth is where the
+            # ceiling sits under the input's full scale: CLIP in dB minus GAIN (clip_law.crush_db).
+            from .clip_law import crush_db
+            crush = crush_db(action.model_dump())
+            if crush < LIMITS["clip_threshold_min_db"]:
                 violations.append(Violation(
                     action_index=i, rule="clip_threshold_min_db",
-                    message=f"clip threshold {action.threshold_db:+.1f} dB is too aggressive",
-                    limit=LIMITS["clip_threshold_min_db"], value=action.threshold_db,
+                    message=(f"a clip of {action.clip_pct:.0f} % after {action.gain_db:+.1f} dB of gain puts "
+                             f"the ceiling {crush:+.1f} dB under the input's full scale: too aggressive"),
+                    limit=LIMITS["clip_threshold_min_db"], value=crush,
                 ))
-            # A positive output trim (level makeup, up to +12) adds level and slams the
-            # limiter harder — charge it to the same gain wallet as tilt/transient/sat
-            # output (a cut is free). Without this an agent gets +12 dB/pass off-budget.
-            if action.output_db > 0:
-                _charge_gain(i, action.stem_id, action.output_db,
-                             note=" (incl. clip output)")
+            # GAIN (up to +12) adds level and slams what follows harder — charge it to the same
+            # gain wallet as tilt / transient / saturation output (a cut is free). Without this an
+            # agent gets +12 dB a pass off-budget.
+            if action.gain_db > 0:
+                _charge_gain(i, action.stem_id, action.gain_db,
+                             note=" (incl. the clipper's gain)")
 
         # Transient v2: a positive output trim adds level — charge it to the same
         # gain wallet as gain moves / comp makeup / saturation output (a cut is free).
@@ -1371,8 +1557,8 @@ def validate_proposal(
                 _charge_gain(i, action.stem_id, lift,
                              note=" (incl. the transient shaper's lift and output)")
 
-        # De-ess v2: the freed ratio obeys the same dynamics ceiling as compressors
-        # and dynamic EQ (the schema allows 20 for the user's hand knob).
+        # The de-esser (2026-10-27, deess_law): no ratio to bound - its depth is range_db, at most 24 dB
+        # in the schema; what is bounded here is how many a chain holds.
         elif isinstance(action, DeessAction):
             # Same slot bound as the comp above: Phase 35 emits up to two ranged de-essers per
             # pass on sibilant bursts, and they accumulate across passes.
@@ -1390,15 +1576,9 @@ def validate_proposal(
                 violations.append(Violation(
                     action_index=i, rule="deessers_per_stem_max",
                     message=f"'{action.stem_id}' would carry {len(de_covered)} de-essers; "
-                            f"the engine holds {LIMITS['deessers_per_stem_max']} per chain — "
+                            f"a mix run adds at most {LIMITS['deessers_per_stem_max']} per chain — "
                             "widen the ranges or undo one",
                     limit=LIMITS["deessers_per_stem_max"], value=len(de_covered)))
-            if action.ratio > LIMITS["comp_ratio_max"]:
-                violations.append(Violation(
-                    action_index=i, rule="comp_ratio_max",
-                    message=f"de-ess ratio {action.ratio:.1f}:1 exceeds limit",
-                    limit=LIMITS["comp_ratio_max"], value=action.ratio,
-                ))
 
         # Gate v2: a threshold up in program-level territory mutes wanted signal,
         # not bleed — bind the agent (the user's hand knob still spans the model
@@ -1415,12 +1595,40 @@ def validate_proposal(
                 ))
 
         elif isinstance(action, SidechainDuckAction):
-            if action.depth_db > LIMITS["duck_depth_max_db"]:
+            # duck_law: gain = 1 - mix x (1 - curve), and every curve reaches (about) 0 - so the
+            # deepest cut is 1 - mix, held to the agent's 12 dB (2026-10-28: the depth knob went)
+            mix_max = 1.0 - 10.0 ** (-LIMITS["duck_depth_max_db"] / 20.0)
+            if action.mix > mix_max + 1e-9:
                 violations.append(Violation(
                     action_index=i, rule="duck_depth_max_db",
-                    message=f"duck depth {action.depth_db:+.1f} dB exceeds limit",
-                    limit=LIMITS["duck_depth_max_db"], value=action.depth_db,
+                    message=(f"duck mix {action.mix:.2f} cuts "
+                             f"{-20.0 * math.log10(max(1e-6, 1.0 - action.mix)):.1f} dB at the curve's "
+                             f"deepest - over the agent's {LIMITS['duck_depth_max_db']:.0f} dB "
+                             f"(mix {mix_max:.2f} at most)"),
+                    limit=round(mix_max, 3), value=action.mix,
                 ))
+            if action.trigger == 1 and not action.key_stem_id:
+                violations.append(Violation(
+                    action_index=i, rule="duck_track_needs_key",
+                    message="a duck on trigger 'track' names its trigger track (key_stem_id)",
+                    limit=0.0, value=0.0,
+                ))
+            # A replace that names neither a key nor a trigger, over a duck keyed by a track: every
+            # field a proposal leaves out takes its default, and the default is SYNC - the kick's
+            # duck became a grid pump (the pre-merge review of 2026-10-28). Said, not guessed.
+            if (not action.key_stem_id and "trigger" not in action.model_fields_set
+                    and stem_chains is not None):
+                from . import duck_law
+                keyed = [e for e in replaced_entries(stem_chains.get(action.stem_id, []), action)
+                         if duck_law.trigger_index(e.get("trigger", 0)) == 1 and e.get("key_stem_id")]
+                if keyed:
+                    violations.append(Violation(
+                        action_index=i, rule="duck_keeps_trigger",
+                        message=(f"this replaces the duck on {action.stem_id} that listens to "
+                                 f"{keyed[0]['key_stem_id']!r}: name key_stem_id to keep that trigger, "
+                                 "or trigger 'sync' to make it a grid pump"),
+                        limit=0.0, value=0.0,
+                    ))
 
         # Phase 29: the repair de-noise gate depth is capped (defense-in-depth;
         # the schema bound le=24 is the first line). master/bus targets are
@@ -1476,9 +1684,9 @@ def validate_proposal(
                                 f"{gain_db:+.1f} dB exceeds limit",
                         limit=LIMITS["eq_cut_min_db"], value=gain_db))
 
-        # Phase 38: dynamic EQ is downward-only and follows the same dynamics
-        # ratio ceiling as compressors. Schema bounds are still the first line;
-        # these are the executable rule table.
+        # Phase 38: the agent's dynamic EQ is downward-only and bounded in depth (it has no ratio
+        # since 2026-10-27: dyneq_law). Schema bounds are still the first line; these are the
+        # executable rule table.
         elif isinstance(action, DynamicEqAction):
             if action.gain_db < LIMITS["dynamic_eq_cut_min_db"]:
                 violations.append(Violation(
@@ -1491,12 +1699,6 @@ def validate_proposal(
                     action_index=i, rule="dynamic_eq_downward_only",
                     message="dynamic EQ is downward-only; use ordinary EQ for boosts",
                     limit=0.0, value=action.gain_db,
-                ))
-            if action.ratio > LIMITS["comp_ratio_max"]:
-                violations.append(Violation(
-                    action_index=i, rule="comp_ratio_max",
-                    message=f"dynamic EQ ratio {action.ratio:.1f}:1 exceeds limit",
-                    limit=LIMITS["comp_ratio_max"], value=action.ratio,
                 ))
 
         # Phase 15: each multiband-comp band obeys the comp rule table; on

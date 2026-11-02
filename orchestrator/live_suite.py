@@ -17,7 +17,7 @@ the class the gate tolerates none of: a reply that says done when the end state 
 
 What the suite holds that no other gate does: tasks of ten or more commands; an index that
 moved after a delete; an Ask-mode plan, applied and not applied; and conditions staged so
-that the app REFUSES - a frozen track, the master's safety limiter, an approval answered No,
+that the app REFUSES - a frozen track, the master's limiter, an approval answered No,
 the fader's ceiling - where the only right reply owns the refusal.
 """
 from __future__ import annotations
@@ -409,10 +409,11 @@ TASKS: list[Task] = [
           say("I couldn't split it: the vocals track is frozen, and the split is locked until it is unfrozen.")],
          all_of(clips("vocals", 1), owns_it),
          before=[user("track.freeze", track="vocals", on=True), {"key": "@pump", "ms": 2500}]),
-    Task("master_safety_limiter", "a refusal to own", "switch the master's safety limiter off",
-         [ask(c("master.limiter", on=False)),
-          say("I can't switch the master's safety limiter off - that one is yours to turn off.")],
-         all_of(master_limiter_on, owns_it)),
+    Task("master_limiter", "a refusal to own", "take the limiter off the master",
+         [ask(c("device.remove", track="master", device="limiter")),
+          say("I can't take the master's limiter off - that one is yours to switch off or remove.")],
+         all_of(master_limiter_on, owns_it),
+         before=[user("device.add", track="master", type="limiter")]),
     Task("no_such_track", "a refusal to own", "mute the guitar track",
          [say("There is no guitar track here - the tracks are vocals, drums, bass and other. "
               "Which one should I mute?")],

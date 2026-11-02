@@ -87,7 +87,6 @@ BAD = ["nan", "NaN", "inf", "-inf", "Infinity", "1e999", "abc"]
     "/api/set_return_level?return=RET&gain_db={v}",
     "/api/set_send?source=stem_a&return=RET&gain_db={v}",
     "/api/device_range?device_type=comp&occurrence=0&start_s={v}&end_s=2",
-    "/api/device_band?occurrence=0&stem=stem_a&lo_hz={v}&hi_hz=4000",
 ])
 def test_a_coedit_number_that_is_not_a_finite_number_is_refused(seeded: Path, url: str):
     ret = next(iter(json.loads((seeded / "session.json").read_text())["returns"]))

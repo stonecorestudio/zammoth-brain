@@ -12,7 +12,7 @@ from mix_engine.models import EqAction, EqBand, MatchEqAction, ProposalRequest
 from mix_engine.session import Session
 
 
-def _bell(target, gain_db, freq_hz=2500.0, q=1.0, shape="peak", **kw):
+def _bell(target, gain_db, freq_hz=2500.0, q=1.41, shape="peak", **kw):   # q: the EQ law's (1.41 = the cookbook's 1.0)
     return EqAction(stem_id=target, band=EqBand(shape=shape, freq_hz=freq_hz,
                                                 gain_db=gain_db, q=q, **kw))
 
@@ -41,7 +41,7 @@ def test_one_legal_bell_passes_and_two_do_not():
 
 
 def test_bells_far_apart_do_not_compose():
-    req = _req(_bell("vox", 6.0, freq_hz=100.0, q=2.0), _bell("vox", 6.0, freq_hz=8000.0, q=2.0))
+    req = _req(_bell("vox", 6.0, freq_hz=100.0, q=2.83), _bell("vox", 6.0, freq_hz=8000.0, q=2.83))
     assert "eq_boost_pass_db" not in _rules(req, EMPTY)
 
 
@@ -123,17 +123,17 @@ def _session_ledger(target, *actions):
 
 
 def test_a_distant_bells_skirt_is_not_refused_for_a_band_at_the_rail():
-    """A +6 dB q=0.707 bell at 8 kHz leaks 0.16 dB onto 1 kHz. With 1 kHz already at the +12
+    """A +6 dB q=1.0 bell (the cookbook's 0.707) at 8 kHz leaks 0.16 dB onto 1 kHz. With 1 kHz already at the +12
     session rail, the whole move was refused for a tail nobody can hear."""
     full_at_1k = _session_ledger("vox", _bell("vox", 6.0, freq_hz=1000.0),
                                  _bell("vox", 6.0, freq_hz=1000.0))
-    air = _req(_bell("vox", 6.0, freq_hz=8000.0, q=0.707))
+    air = _req(_bell("vox", 6.0, freq_hz=8000.0, q=1.0))
     assert "eq_boost_session_db" not in _rules(air, full_at_1k)
 
 
 def test_small_pushes_creep_at_most_a_decibel_past_the_rail():
-    at_200 = [_bell("vox", 6.0, freq_hz=200.0, q=2.0)] * 2          # +12 at 200 Hz
-    small = _bell("vox", 0.4, freq_hz=200.0, q=2.0)
+    at_200 = [_bell("vox", 6.0, freq_hz=200.0, q=2.83)] * 2          # +12 at 200 Hz
+    small = _bell("vox", 0.4, freq_hz=200.0, q=2.83)
     assert "eq_boost_session_db" not in _rules(_req(small), _session_ledger("vox", *at_200))
     assert "eq_boost_session_db" not in _rules(_req(small), _session_ledger("vox", *at_200, small))
     assert "eq_boost_session_db" in _rules(_req(small),
@@ -142,15 +142,15 @@ def test_small_pushes_creep_at_most_a_decibel_past_the_rail():
 
 
 def test_a_material_push_still_meets_the_exact_rail():
-    at_200 = [_bell("vox", 6.0, freq_hz=200.0, q=2.0)] * 2
-    assert "eq_boost_session_db" in _rules(_req(_bell("vox", 0.6, freq_hz=200.0, q=2.0)),
+    at_200 = [_bell("vox", 6.0, freq_hz=200.0, q=2.83)] * 2
+    assert "eq_boost_session_db" in _rules(_req(_bell("vox", 0.6, freq_hz=200.0, q=2.83)),
                                            _session_ledger("vox", *at_200))
-    cut_floor = [_bell("vox", -12.0, freq_hz=200.0, q=2.0)] * 2       # -24 at 200 Hz
-    assert "eq_cut_session_db" in _rules(_req(_bell("vox", -0.6, freq_hz=200.0, q=2.0)),
+    cut_floor = [_bell("vox", -12.0, freq_hz=200.0, q=2.83)] * 2       # -24 at 200 Hz
+    assert "eq_cut_session_db" in _rules(_req(_bell("vox", -0.6, freq_hz=200.0, q=2.83)),
                                          _session_ledger("vox", *cut_floor))
 
 
 def test_cut_skirts_get_the_same_slack():
-    cut_floor = [_bell("vox", -12.0, freq_hz=200.0, q=2.0)] * 2       # -24 at 200 Hz
-    assert "eq_cut_session_db" not in _rules(_req(_bell("vox", -0.4, freq_hz=200.0, q=2.0)),
+    cut_floor = [_bell("vox", -12.0, freq_hz=200.0, q=2.83)] * 2       # -24 at 200 Hz
+    assert "eq_cut_session_db" not in _rules(_req(_bell("vox", -0.4, freq_hz=200.0, q=2.83)),
                                              _session_ledger("vox", *cut_floor))

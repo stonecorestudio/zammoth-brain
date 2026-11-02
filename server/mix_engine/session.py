@@ -22,7 +22,6 @@ from .reference_monitor import UTILITY_TOGGLES   # the Utility's switches: snapp
 from .models import (
     BAND_LABELS,
     ApplyResult,
-    BandWidthAction,
     BusState,
     ClipAction,
     CompAction,
@@ -31,7 +30,6 @@ from .models import (
     EqAction,
     EqBand,
     GateAction,
-    ImagerAction,
     LimiterAction,
     MbBand,
     MetricMeasurement,
@@ -77,7 +75,33 @@ DISCARD_MARKER_FILE = "session.discard"
 # (DawSession.h kOwedCoeditsFile; test_reader_p2_t.py pins the pair).
 OWED_COEDITS_FILE = "session.owed.coedits.json"
 BOUNCE_DIRNAME = "bounces"
-STATE_VERSION = 2  # v2: the chain LIST is the render order (Ableton-style device freedom) — see _migrate_to_list_order
+#: What a migration has to tell the user, per session file, until an open takes it (and what was
+#: taken, so a second Session over a file not yet re-saved does not say it twice).
+_MIGRATION_NOTICES: dict = {}
+_MIGRATION_TAKEN: dict = {}
+#: The devices whose sound moved when they were re-fitted, with nothing in a project to convert.
+_REFIT_SOUND_KINDS = ("reverb", "return_reverb", "delay", "return_delay", "auto_filter")
+
+
+def take_migration_notices(project_dir) -> list[str]:
+    """What the migrations of this project's session have to say, once."""
+    key = str((Path(project_dir) / SESSION_FILE).resolve())
+    notes = _MIGRATION_NOTICES.pop(key, [])
+    _MIGRATION_TAKEN.setdefault(key, set()).update(notes)
+    return notes
+
+
+STATE_VERSION = 9  # v2: the chain LIST is the render order (Ableton-style device freedom) — see _migrate_to_list_order;
+                   # v3: an EQ band's Q is the reference EQ's (eq_law, 2026-10-27) — see _migrate_eq_law;
+                   # v4: a clipper's knobs are the reference clipper's (clip_law, 2026-10-28) — see _migrate_clip_law;
+                   # v5: a Duck is a drawn curve, the reference curve-ducker's knobs (duck_law, 2026-10-28) — see _migrate_duck_law;
+                   # v6: a dynamic EQ and a de-esser have no ratio (dyneq_law / deess_law), and a project
+                   #     saved before is told what plays otherwise now — see _migrate_dynamics_law;
+                   # v7: an OTT's law and knobs are the reference OTT's (ott_law, 2026-10-28) — see _migrate_ott_law
+                   # v8: one stereo device - the 3-band imager and band width are gone, each converted to a
+                   #     Utility (convert_retired_stereo, 2026-10-28) — see _migrate_one_stereo_device
+                   # v9: a chorus's law and knobs are the reference two-line chorus's (chorus_law, 2026-10-28)
+                   #     — see _migrate_chorus_law
 MASTER = "master"
 MAX_RETURNS = 12  # Ableton parity: at most 12 send/return tracks (audio/MIDI tracks themselves are unlimited)
 # How many removed groups / returns are kept so the DAW's undo can ask for one back
@@ -107,13 +131,12 @@ _MAX_PROPOSAL_RECORDS = 400
 SUPPORTED_ACTION_TYPES = {"gain", "eq", "tilt", "dynamic_eq", "comp", "deess", "pan", "width", "limiter",
                           "saturation", "clip", "gate", "transient", "duck", "mute", "exclude",
                           "utility",  # device freedom: Ableton-style Utility (gain/width/mono/phase)
-                          "imager",  # 2026-07-05: 3-band stereo imager (the band_width upgrade)
                           "ott",  # 2026-07-07: 3-band upward+downward comp (OTT-style)
                           "overdrive",  # 2026-07-07: drive-pedal distortion
                           "chorus",  # 2026-09-06: modulation family (chorus/ensemble)
                           "flanger",  # 2026-09-06: modulation family (swept comb + feedback)
                           "auto_filter",  # Phase 63: modulation family (swept resonant filter)
-                          "match_eq", "mb_comp", "band_width", "group", "route",
+                          "match_eq", "mb_comp", "group", "route",
                           "return_reverb", "return_convolution", "return_delay", "send",
                           "spectral_denoise",  # Phase 29 repair de-noise
                           "tune",  # Phase 31 tuning correction (stems only)
@@ -129,11 +152,10 @@ MASTER_ACTION_TYPES = {"gain", "eq", "tilt", "match_eq", "dynamic_eq", "comp", "
                        "transpose",  # Phase 32: whole-song key change, master only
                        # Phase 43 device freedom: the AGENT can also propose the color/dynamics devices
                        # on the master (real mastering moves) — the user already hand-adds them (Stage 2).
-                       "gate", "deess", "transient", "band_width", "imager",
+                       "gate", "deess", "transient",
                        "utility",  # Ableton-style Utility (gain trim charged to the gain budget)
-                       # `width` was missing while the USER could add a master Width from the
-                       # browser (DeviceChainView::addableTypesFor) — the agent had to reach the
-                       # same result through utility.width. Total-agent-control: same surface.
+                       # `width` is the Imager (the one stereo device, 2026-10-28): the user adds
+                       # one from the browser, so the agent may too. Total-agent-control.
                        "width",
                        "spectrogram",  # analyzer (render no-op)
                        # 2026-07-20: the space devices are free inserts, master included
@@ -148,17 +170,85 @@ MASTER_ACTION_TYPES = {"gain", "eq", "tilt", "match_eq", "dynamic_eq", "comp", "
 BUS_ACTION_TYPES = {"gain", "eq", "tilt", "match_eq", "dynamic_eq", "comp", "deess", "saturation",
                     "gate", "transient", "mb_comp", "ott", "overdrive", "chorus", "flanger",
                     "auto_filter",   # Phase 63 - on a group its envelope follows the group (no trigger)
-                    "band_width",
                     # `clip` since 2026-09-08 (device audit 05-F3): it was already in _BUS_KINDS
                     # and the bus renderer, and the user can add one from the dock — so a bus
                     # clipper rendered perfectly well and ONLY the agent's proposal path refused
                     # it. Refusing what the engine plainly does is a rule the agent cannot learn
                     # from the audio.
                     "clip",
-                    "imager", "utility", "spectrogram",
+                    "utility", "spectrogram",
                     # 2026-07-20: space devices as inserts (a reverb ON the drum bus, not
                     # only a send off it) — the return form targets return_id instead.
                     "return_reverb", "return_delay", "return_convolution"}
+
+# The stereo devices retired when the Imager became the one stereo device (2026-10-28, v8).
+RETIRED_STEREO_TYPES = ("imager", "band_width")
+# A band width's band label -> its top edge (Hz), for the Bass Mono a narrowed low band becomes.
+_BAND_TOP_HZ = {"sub": 60.0, "bass": 150.0}
+
+
+def _retired_stereo_as_utility(e: dict) -> Optional[dict]:
+    """A retired stereo entry (or recorded action) as the Utility it becomes, or None to drop it.
+
+    3-band imager -> Utility at its MID width (the band most of a mix is in; a Utility's width is
+    the Imager's law), Bass Mono at its low crossover when its low band was 0.5 or narrower. Band
+    width -> Utility Bass Mono at the band's top when a band under 300 Hz was 0.5 or narrower; any
+    other band width has no single-band equivalent and is dropped. The identity (`uid`), the
+    target (`stem_id` / `return_id`) and the bypass travel."""
+    def num(key, default):
+        try:
+            v = float(e.get(key, default))
+        except (TypeError, ValueError):
+            return default
+        return v if math.isfinite(v) else default
+    keep = {k: e[k] for k in ("uid", "stem_id", "return_id", "enabled") if k in e}
+    if e.get("type") == "imager":
+        from .models import imager_crossovers
+        lo, _ = imager_crossovers(e.get("crossover_lo_hz"), e.get("crossover_hi_hz"))
+        u = {"type": "utility", **keep, "width": min(2.0, max(0.0, num("width_mid", 1.0)))}
+        if num("width_low", 1.0) <= 0.5:
+            u.update(bass_mono=True, bass_mono_hz=min(500.0, max(50.0, lo)))
+        return u
+    top = _BAND_TOP_HZ.get(str(e.get("band", "")))
+    if e.get("lo_hz") is not None and e.get("hi_hz") is not None:
+        hi = num("hi_hz", 20000.0)
+        top = hi if hi <= 300.0 else None
+    if top is not None and num("width", 1.0) <= 0.5:
+        return {"type": "utility", **keep, "bass_mono": True, "bass_mono_hz": min(500.0, max(50.0, top))}
+    return None
+
+
+def convert_retired_stereo(state) -> tuple[int, int, int]:
+    """Every 3-band imager and band width in `state` - any list or dict inside it: chains, undo
+    snapshots, recorded actions - replaced in place by `_retired_stereo_as_utility` (or removed).
+    Returns (imagers converted, band widths that became Bass Mono, band widths removed)."""
+    n_img = n_bass = dropped = 0
+
+    def walk(node):
+        nonlocal n_img, n_bass, dropped
+        if isinstance(node, list):
+            out = []
+            for v in node:
+                if isinstance(v, dict) and v.get("type") in RETIRED_STEREO_TYPES:
+                    u = _retired_stereo_as_utility(v)
+                    if v.get("type") == "imager":
+                        n_img += 1
+                    elif u is not None:
+                        n_bass += 1
+                    else:
+                        dropped += 1
+                    if u is not None:
+                        out.append(u)
+                else:
+                    walk(v)
+                    out.append(v)
+            node[:] = out
+        elif isinstance(node, dict):
+            for v in node.values():
+                walk(v)
+    walk(state)
+    return n_img, n_bass, dropped
+
 
 STEM_DEFAULTS = {"gain_db": 0.0, "pan": 0.0, "width": 1.0, "tags": [],
                  "chain": [], "rides": [], "muted": False, "excluded": False,
@@ -506,10 +596,9 @@ def effective_chain(stem_state: dict) -> list[dict]:
     chain = stem_state["chain"]
     ordered = [{"type": "gain", "gain_db": round(stem_state["gain_db"], 1)}]
     # Phase 43 (device freedom): render the chain in LIST order — the user's
-    # arrangement — not grouped by type. band_width is a normal in-list insert now
-    # (was pinned post-pan). gain stays first; rides/pan/width remain trailing
+    # arrangement — not grouped by type. gain stays first; rides/pan/width remain trailing
     # channel-strip stages (the mixer's scalars, not chain inserts).
-    ordered += [e for e in chain if e["type"] in set(_STEM_KINDS)]   # band_width included
+    ordered += [e for e in chain if e["type"] in set(_STEM_KINDS)]
     ordered += [{"type": "gain_ride", **ride} for ride in stem_state["rides"]]
     if stem_state["pan"] != 0.0:
         ordered.append({"type": "pan", "pan": stem_state["pan"]})
@@ -517,6 +606,9 @@ def effective_chain(stem_state: dict) -> list[dict]:
         # ...with its on/off (`width_on`, the stereo width audit SW1: a bypassed strip Width keeps
         # its value; the native box and the offline render both read `enabled`)
         entry = {"type": "width", "width": stem_state["width"]}
+        if stem_state.get("stereoize"):   # the Imager's stereoize (2026-10-28): a strip field too
+            entry["stereoize"] = True
+            entry["stereoize_ms"] = float(stem_state.get("stereoize_ms", 6.0))
         if not stem_state.get("width_on", True):
             entry["enabled"] = False
         ordered.append(entry)
@@ -539,7 +631,7 @@ AUTO_FILTER_SNAPPED = ("slope_db_oct", "lfo_sync", "filter_type", "lfo_shape", "
 KEYED_TYPES = ("duck", "auto_filter")
 
 # Canonical stem render order (the re-sortable middle of effective_chain — gain is
-# synthesized first; rides/pan/band_width/width follow after). The user may re-sort it
+# synthesized first; rides/pan/width follow after). The user may re-sort it
 # via the native DAW drag-to-reorder / device add, persisted as stem_device_order.
 _STEM_KINDS = ("tune", "spectral_denoise", "eq", "tilt", "match_eq", "dynamic_eq",
                "gate", "deess", "comp", "mb_comp", "ott", "saturation", "overdrive",
@@ -547,14 +639,6 @@ _STEM_KINDS = ("tune", "spectral_denoise", "eq", "tilt", "match_eq", "dynamic_eq
                "auto_filter",         # Phase 63: the third, beside them
                "transient", "duck",
                "utility",   # device freedom: Ableton Utility (output trim), before the ceiling
-               # band_width sits here (same slot as _BUS_KINDS / _MASTER_KINDS). It used to be
-               # absent — effective_chain re-added it by hand, so it RENDERED, but _canonical_chain
-               # treats an unknown type as unplaceable: a user's drag-to-reorder of Band Width on a
-               # TRACK was silently discarded and the device forced to the end of the chain, while
-               # the identical drag on a bus was honoured. Chain order is audible and the native
-               # monitor honours the list, so the monitor and the export disagreed after any reorder.
-               "band_width",
-               "imager",    # 2026-07-05: 3-band stereo imager (spatial, before the ceiling)
                ) + _WET_KINDS + (   # 2026-07-20: space devices as free inserts
                "clip", "limiter",   # Phase 43 device freedom: per-stem clip + peak ceiling
                "spectrogram")   # 2026-07-06: pure analyzer, render no-op (kinds membership
@@ -567,7 +651,7 @@ _STEM_KINDS = ("tune", "spectral_denoise", "eq", "tilt", "match_eq", "dynamic_eq
 _MASTER_KINDS = ("transpose", "eq", "tilt", "match_eq", "dynamic_eq", "gate", "deess", "comp",
                  "mb_comp", "ott", "saturation", "overdrive", "chorus", "flanger", "auto_filter",
                  "transient", "utility",
-                 "band_width", "imager", "width",
+                 "width",     # the Imager (2026-10-28: the one stereo device)
                  ) + _WET_KINDS + (   # 2026-07-20: space devices as free inserts
                  "clip", "limiter", "spectrogram")   # spectrogram = analyzer no-op (2026-07-06)
 
@@ -576,7 +660,6 @@ _MASTER_KINDS = ("transpose", "eq", "tilt", "match_eq", "dynamic_eq", "gate", "d
 _BUS_KINDS = ("eq", "tilt", "match_eq", "dynamic_eq", "gate", "deess", "comp",
               "mb_comp", "ott", "saturation", "overdrive", "chorus", "flanger", "auto_filter",
               "transient", "utility",
-              "band_width", "imager",
               ) + _WET_KINDS + (   # 2026-07-20: space devices as free inserts
               "clip", "limiter", "spectrogram")   # spectrogram = analyzer no-op (2026-07-06)
 
@@ -590,8 +673,8 @@ _RETURN_KINDS = _BUS_KINDS
 # the combined native storage covers both maxima. Refuse a fourth insert honestly.
 _WET_INSERT_MAX = 3
 #: Devices the native chain holds a fixed number of slots for, beside the space devices above:
-#: MonitorChain::kMaxBandWidth. (An EQ's bank is counted in bands - guardrails eq_bands_max.)
-_NATIVE_SLOT_KINDS = {"band_width": 8, "dynamic_eq": 6,   # (dynamic_eq: MonitorChain::kMaxDynEq - pre-merge review 2026-10-06)
+#: (An EQ's bank is counted in bands - guardrails eq_bands_max.)
+_NATIVE_SLOT_KINDS = {"dynamic_eq": 6,   # (dynamic_eq: MonitorChain::kMaxDynEq - pre-merge review 2026-10-06)
                       "deess": 4,   # MonitorChain::kMaxDeess: four per chain at the user's door (James, 2026-10-17)
                       "tilt": 4,    # MonitorChain::kMaxTilt: a fifth played unrideable (2026-10-17, the tilt audit)
                       "spectrogram": 4}   # MonitorChain::kMaxSpectrograms: each reads at its place through a tap of its own (2026-10-21)
@@ -606,11 +689,22 @@ IR_MODES = ("room", "hall", "plate")
 # them, so a chain with two compressors monitored one way and EXPORTED another (measured:
 # 3.98 dB). Refuse the second honestly, the same call `_WET_INSERT_MAX` makes for a fourth
 # space device, rather than accepting an edit one of the two engines silently discards.
-# NOT singletons: eq (a 32-band bank), dynamic_eq (6), band_width (8), the wet sends.
-_NATIVE_SINGLETON_KINDS = ("comp", "limiter", "mb_comp", "ott", "saturation", "overdrive", "chorus",
-                           "flanger", "auto_filter",
-                           "clip", "gate", "transient", "duck", "imager",
-                           "width", "utility")
+# NOT singletons: eq (a 32-band bank), dynamic_eq (6), the wet sends - and,
+# since Phase 65 (2026-10-24, James: "it should be like ableton where you can add many"), comp:
+# the native chain runs every comp entry as its own instance (MonitorChain::kMaxComps = the
+# chain's 128). Each type leaves this list as the native chain learns to run it more than once.
+# The gate, the transient shaper and the duck left it too (the second family: MonitorChain's
+# InstancePool), then the limiter, the multiband compressor, OTT and the clipper (the third), then
+# saturation, overdrive, chorus, flanger, Auto Filter and utility (the last). WIDTH STAYS:
+# on a track the Stereo Width device IS the strip's width (one `width` field, paramPersistDoor),
+# so a second would be a second face on one number; the native chain runs several on a master.
+_NATIVE_SINGLETON_KINDS = ("width",)
+
+
+# HOW MANY DEVICES ONE CHAIN HOLDS (Phase 65): MonitorChain::kMaxTrackedEntries - every entry
+# its own walk step and its own meter boundary. The dock refuses the 129th
+# (DeviceChainView::capacityRefusal) and so does every brain door that adds one.
+CHAIN_MAX_ENTRIES = 128
 
 
 # Phase 43 device freedom (Stage 3): the limiter is NOT pinned last — the user places it
@@ -669,7 +763,7 @@ def _canonical_chain(chain: list[dict], kinds: tuple, order) -> list[dict]:
     migration time, which pass None and get pure canonical grouping.
 
     Entries the caller did not place fall back to canonical `kinds` order, and entries
-    whose type is not in `kinds` at all (a stem's band_width, a master transpose) keep
+    whose type is not in `kinds` at all (a master transpose) keep
     their relative order at the end. Stable within a type.
     """
     by_key: dict[tuple[str, int], dict] = {}
@@ -806,6 +900,9 @@ def effective_bus_chain(bus_state: dict) -> list[dict]:
     # panned bus match its bounce (2026-09-05 review).
     if bus_state.get("width", 1.0) != 1.0:
         entry = {"type": "width", "width": bus_state["width"]}
+        if bus_state.get("stereoize"):
+            entry["stereoize"] = True
+            entry["stereoize_ms"] = float(bus_state.get("stereoize_ms", 6.0))
         if not bus_state.get("width_on", True):
             entry["enabled"] = False
         ordered.append(entry)
@@ -898,7 +995,25 @@ class Session:
                       "this build does not know are kept as they are and not acted on",
                       file=sys.stderr, flush=True)
         if self._state.get("state_version", 1) < STATE_VERSION:
-            self._migrate_to_list_order()
+            was = self._state.get("state_version", 1)
+            legacy_dyn = self._legacy_dynamic_eqs() if was < 6 else set()
+            if self._state.get("state_version", 1) < 2:
+                self._migrate_to_list_order()
+            if self._state.get("state_version", 1) < 3:
+                self._migrate_eq_law()
+            if self._state.get("state_version", 1) < 4:
+                self._migrate_clip_law()
+            if self._state.get("state_version", 1) < 5:
+                self._migrate_duck_law()
+            if self._state.get("state_version", 1) < 6:
+                self._migrate_dynamics_law()
+            if self._state.get("state_version", 1) < 7:
+                self._migrate_ott_law()
+            if self._state.get("state_version", 1) < 8:
+                self._migrate_one_stereo_device()
+            if self._state.get("state_version", 1) < 9:
+                self._migrate_chorus_law()
+            self._migrate_coedit_journal(was, legacy_dyn)
             self._state["state_version"] = STATE_VERSION
         self._one_of_each_singleton()
         self._discover_stems()
@@ -966,6 +1081,304 @@ class Session:
                 else:
                     prior["chain"] = _canonical_chain(
                         prior["chain"], _BUS_KINDS, prior.pop("bus_device_order", None))
+
+    def _migrate_eq_law(self) -> None:
+        """STATE_VERSION 3 (2026-10-27, the EQ fitted to a reference EQ): every eq band stored
+        before it - in the chains, every undo snapshot and every recorded action - holds its Q
+        (and a tilt shelf its gain) in the cookbook's meaning. Each is converted once, here, so
+        the project plays as it did under the new law (`eq_law.legacy_band`)."""
+        from .eq_law import convert_legacy
+        n = convert_legacy(self._state)
+        if n and not self._read_only:
+            print(f"[session] {self._session_path}: {n} EQ band(s) moved to the new EQ law's Q",
+                  file=sys.stderr, flush=True)
+
+    def _migrate_clip_law(self) -> None:
+        """STATE_VERSION 4 (2026-10-28, the clipper fitted to a reference clipper, with its knob set):
+        every clipper stored before it - in the chains, every undo snapshot and every recorded action
+        - holds threshold / hardness / output. Each is converted once, here (`clip_law.from_legacy`:
+        a negative output trim has no knob to go to and is dropped)."""
+        from .clip_law import convert_legacy, trims_kept
+        kept = trims_kept(self._state)
+        n = convert_legacy(self._state)
+        if n and not self._read_only:
+            print(f"[session] {self._session_path}: {n} clipper(s) moved to the new clipper's knobs",
+                  file=sys.stderr, flush=True)
+        if kept:
+            self._note_migration(
+                f"{kept} clipper(s) in this project had an output trim the new clipper has no knob for: "
+                "each keeps it as a Utility right after it, so they play as they did")
+
+    def _migrate_duck_law(self) -> None:
+        """STATE_VERSION 5 (2026-10-28, the Duck fitted to a reference curve-ducker, with its knob set):
+        every Duck stored before it - in the chains, every undo snapshot and every recorded action -
+        holds threshold / depth / attack / release. Each is converted once, here (`duck_law.from_legacy`:
+        a TRACK duck on curve 1 at 1/4, its depth as the mix that cuts as far)."""
+        from .duck_law import convert_legacy
+        n = convert_legacy(self._state)
+        if n and not self._read_only:
+            print(f"[session] {self._session_path}: {n} duck(s) moved to the new Duck's knobs",
+                  file=sys.stderr, flush=True)
+
+    def _migrate_dynamics_law(self) -> None:
+        """STATE_VERSION 6 (the pre-merge review of 2026-10-28): a dynamic EQ and a de-esser saved
+        before their laws hold a ratio, which neither has now - one at ratio 1 or less cut nothing,
+        and would now cut to its range, so it is bypassed (kept, its knobs as they were); a dynamic
+        EQ's Q moves into the EQ law's meaning, as an EQ band's did (v3). And a project saved before
+        the reverb, the delay and the Auto Filter took their laws is TOLD so once at its open (the
+        hello's notices): their sound moved by design, with nothing to convert."""
+        from .deess_law import convert_legacy as deess_legacy
+        from .dyneq_law import convert_legacy as dyneq_legacy
+        n_dyn, off_dyn = dyneq_legacy(self._state)
+        n_de, off_de = deess_legacy(self._state)
+        if (n_dyn or n_de) and not self._read_only:
+            print(f"[session] {self._session_path}: {n_dyn} dynamic EQ(s) and {n_de} de-esser(s) moved "
+                  "to their new laws", file=sys.stderr, flush=True)
+        if off_dyn or off_de:
+            what = " and ".join(x for x in (
+                f"{off_dyn} dynamic EQ band(s)" if off_dyn else "",
+                f"{off_de} de-esser(s)" if off_de else "") if x)
+            self._note_migration(f"{what} in this project were set to a ratio of 1 and cut nothing: they "
+                                 "are bypassed now (the new devices have no ratio), with their knobs kept")
+        refit = sorted({e.get("type") for chain in self._every_chain() for e in chain
+                        if isinstance(e, dict) and e.get("type") in _REFIT_SOUND_KINDS})
+        if refit:
+            names = {"reverb": "reverb", "return_reverb": "reverb", "delay": "delay",
+                     "return_delay": "delay", "auto_filter": "Auto Filter"}
+            said = sorted({names[k] for k in refit})
+            self._note_migration(
+                "this project was saved before the " + ", ".join(said) + " were re-fitted: they sound "
+                "different now (a reverb's tail is fuller, a delay's echoes darker and about 3 dB "
+                "quieter, an Auto Filter's resonance gentler) - listen, and set them again where it matters")
+
+    def _migrate_ott_law(self) -> None:
+        """STATE_VERSION 7 (2026-10-28, OTT fitted to a reference OTT, with its knob set): every OTT
+        stored before it - in the chains, every undo snapshot and every recorded action - has no
+        strengths and no thresholds. Each is converted once, here (`ott_law.from_legacy`: depth, time,
+        the gains and each band's up / down keep their meaning, crossovers left at 150 Hz / 2 kHz move
+        to 88.3 Hz / 2.5 kHz, a band with both sides off gives its makeup back through its gain), and
+        a project that held one is told once that its OTTs sound different now."""
+        from .ott_law import convert_legacy
+        n, lifted = convert_legacy(self._state)
+        if n and not self._read_only:
+            print(f"[session] {self._session_path}: {n} OTT(s) moved to the new OTT law",
+                  file=sys.stderr, flush=True)
+        if any(isinstance(e, dict) and e.get("type") == "ott"
+               for chain in self._every_chain() for e in chain):
+            text = ("this project was saved before OTT was re-fitted: its OTTs sound different now (a "
+                    "fixed lift per band, a steeper downward side, a new split at 88 Hz / 2.5 kHz) - "
+                    "listen, and set them again where it matters")
+            if lifted:
+                text += ("; a band that had both sides off is lifted a little now, its gain at the "
+                         "bottom of its range")
+            self._note_migration(text)
+
+    def _migrate_one_stereo_device(self) -> None:
+        """STATE_VERSION 8 (2026-10-28, James: "keep 1 stereo device instead of our 3"): the Imager -
+        width + stereoize, fitted to a reference imager - is the one stereo device. Every 3-band imager
+        and band width stored before it (chains, undo snapshots, recorded actions) is converted once
+        (`convert_retired_stereo`), and a project that held one is told once."""
+        n_img, n_bass, dropped = convert_retired_stereo(self._state)
+        if not (n_img or n_bass or dropped):
+            return
+        if not self._read_only:
+            print(f"[session] {self._session_path}: {n_img} imager(s), {n_bass + dropped} band width(s) "
+                  "converted to the one stereo device", file=sys.stderr, flush=True)
+        parts = []
+        if n_img:
+            parts.append(f"{n_img} 3-band imager{'s' if n_img > 1 else ''} became a Utility at its mid "
+                         "width (a narrowed low band as its Bass Mono)")
+        if n_bass:
+            parts.append(f"{n_bass} Band Width{'s' if n_bass > 1 else ''} narrowing the lows became a "
+                         "Utility's Bass Mono")
+        if dropped:
+            parts.append(f"{dropped} other Band Width{'s were' if dropped > 1 else ' was'} removed")
+        self._note_migration("this project was saved before the stereo devices became one (the Imager): "
+                             + "; ".join(parts) + " - listen, and set the width again where it matters")
+
+    def _migrate_chorus_law(self) -> None:
+        """STATE_VERSION 9 (2026-10-28, the chorus fitted to a reference two-line chorus, with its knob
+        set): every chorus stored before it (chains, undo snapshots, recorded actions) holds rate /
+        depth / delay / voices / stereo_deg. Each is converted once (`chorus_law.from_legacy`: a mode
+        from its rate and voices, STEREO from its degrees, the same MIX, a VOLUME that keeps its level),
+        and a project that held one is told once."""
+        from .chorus_law import convert_legacy
+        n = convert_legacy(self._state)
+        if not n:
+            return
+        if not self._read_only:
+            print(f"[session] {self._session_path}: {n} chorus(es) moved to the new chorus law",
+                  file=sys.stderr, flush=True)
+        if any(isinstance(e, dict) and e.get("type") == "chorus"
+               for chain in self._every_chain() for e in chain):
+            self._note_migration("this project was saved before the chorus was re-fitted: its choruses "
+                                 "are a mode now (I, II or I+II) with Stereo, Mix and Volume, and sound "
+                                 "different (rate, depth, delay and voices are gone) - listen, and set "
+                                 "them again where it matters")
+
+    def _legacy_dynamic_eqs(self) -> set:
+        """(target, occurrence) of every dynamic EQ that still holds a ratio (its Q in the old meaning)."""
+        out = set()
+        targets = [("master", self._state.get("master_chain") or [])]
+        targets += [(sid, st.get("chain") or []) for sid, st in self._state.get("stems", {}).items()]
+        targets += [(bid, b.get("chain") or []) for bid, b in self._state.get("buses", {}).items()]
+        for target, chain in targets:
+            dyn = [e for e in chain if isinstance(e, dict) and e.get("type") == "dynamic_eq"]
+            out |= {(target, i) for i, e in enumerate(dyn) if "ratio" in e}
+        return out
+
+    def _migrate_coedit_journal(self, was: int, legacy_dyn: set) -> None:
+        """The co-edit URLs this project keeps - the journal (`coedit_log`) an undo replays, and the
+        moves parked beside session.json for the next open (OWED / SAVED co-edits) - moved to the
+        laws as the chains were (the pre-merge review of 2026-10-28): an EQ band's Q and a tilt
+        shelf's gain into the EQ law's meaning (< v3), a dynamic EQ's Q (< v6, where its band was
+        converted), and a move of a control the device no longer has (a clipper's threshold, a
+        Duck's depth, a de-esser's or a dynamic EQ's ratio) dropped - replayed, it was refused and
+        the edit lost with a line on stderr."""
+        log = self._state.get("coedit_log")
+        if isinstance(log, list):
+            kept = []
+            for entry in log:
+                if not isinstance(entry, dict) or "url" not in entry:
+                    kept.append(entry)
+                    continue
+                url = self._converted_coedit_url(str(entry["url"]), was, legacy_dyn)
+                if url is not None:
+                    kept.append({**entry, "url": url})
+            self._state["coedit_log"] = kept
+        if self._read_only:
+            return
+        for name in (OWED_COEDITS_FILE, SAVED_COEDITS_FILE):
+            path = self._session_path.parent / name
+            if not path.exists():
+                continue
+            try:
+                items = json.loads(path.read_text())
+            except (OSError, ValueError):
+                continue
+            if not isinstance(items, list):
+                continue
+
+            def conv(u) -> list[str]:
+                got = self._converted_coedit_url(str(u), was, legacy_dyn)
+                return [] if got is None else [got, *self._chorus_level_kept(got, was)]
+            out = []
+            for it in items:
+                if isinstance(it, str):
+                    out += conv(it)
+                elif isinstance(it, dict) and isinstance(it.get("urls"), list):
+                    out.append({**it, "urls": [v for u in it["urls"] for v in conv(u)]})
+                else:
+                    out.append(it)
+            if out != items:
+                try:
+                    path.write_text(json.dumps(out))
+                except OSError:
+                    pass
+
+    def _chorus_level_kept(self, url: str, was: int) -> list[str]:
+        """A move still OWED to a chorus saved before its law (< v9) that sets its MIX: the VOLUME
+        that keeps the level at that mix, as `chorus_law.from_legacy` sets it for a stored one - the
+        migration worked VOLUME out from the mix the chain held, and this move changes it (the
+        pre-merge review of 2026-10-29). The journal an undo replays needs none: its moves are
+        already in the chain the migration read."""
+        if was >= 9:
+            return []
+        from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+        parts = urlsplit(url)
+        if not parts.path.endswith("/device_param"):
+            return []
+        q = parse_qsl(parts.query, keep_blank_values=True)
+        d = dict(q)
+        if d.get("device_type") != "chorus" or d.get("param") != "mix":
+            return []
+        try:
+            mix = min(max(float(d.get("value", "")), 0.0), 1.0)
+            occ = int(d.get("occurrence", "0"))
+            choruses = [e for e in self._coedit_chain(d.get("stem", "master") or "master")
+                        if e.get("type") == "chorus"]
+        except ValueError:
+            return []
+        if not 0 <= occ < len(choruses):
+            return []
+        from .chorus_law import OUTPUT_MAX_DB, OUTPUT_MIN_DB, level_db, values
+        old_db = 10.0 * math.log10(max((1.0 - mix) ** 2 + mix ** 2, 1e-12))
+        out_db = round(min(max(old_db - level_db(mix, values(choruses[occ])["mode"]), OUTPUT_MIN_DB),
+                           OUTPUT_MAX_DB), 1)
+        q = [(k, ("output_db" if k == "param" else f"{out_db}" if k == "value" else v)) for k, v in q]
+        return [urlunsplit(parts._replace(query=urlencode(q)))]
+
+    #: The controls each re-fitted device no longer has: a co-edit of one is dropped (it moved nothing).
+    _GONE_FIELDS = {"clip": (4, ("threshold_db", "hardness", "output_db")),
+                    "duck": (5, ("threshold_db", "depth_db", "attack_ms", "release_ms")),
+                    "deess": (6, ("ratio", "attack_ms", "release_ms")),
+                    "dynamic_eq": (6, ("ratio",)),
+                    "chorus": (9, ("rate_hz", "depth", "delay_ms", "voices"))}
+
+    def _converted_coedit_url(self, url: str, was: int, legacy_dyn: set) -> Optional[str]:
+        """One journaled URL in the meaning this build plays, or None for a move of a control gone."""
+        from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+        parts = urlsplit(url)
+        if was < 8 and parts.path.endswith("/device_band"):   # the band width's band (gone, v8)
+            return None
+        if not parts.path.endswith("/device_param"):
+            return url
+        q = parse_qsl(parts.query, keep_blank_values=True)
+        d = dict(q)
+        dt, param = d.get("device_type", ""), d.get("param", "")
+        if was < 8 and dt in RETIRED_STEREO_TYPES:   # the device is gone (v8): its move with it
+            return None
+        gone = self._GONE_FIELDS.get(dt)
+        if gone and was < gone[0] and param in gone[1]:
+            return None
+        try:
+            value = float(d.get("value", ""))
+            occ = int(d.get("occurrence", "0"))
+        except ValueError:
+            return url
+        target = d.get("stem", "master") or "master"
+        new = None
+        if dt == "eq" and was < 3 and param in ("q", "gain_db"):
+            try:
+                eqs = [e for e in self._coedit_chain(target) if e.get("type") == "eq"]
+            except ValueError:
+                return url
+            if 0 <= occ < len(eqs):
+                band = eqs[occ].get("band") if isinstance(eqs[occ].get("band"), dict) else eqs[occ]
+                from .eq_law import legacy_band
+                qq, gg = legacy_band(band.get("shape", "peak"), value if param == "q" else 1.0,
+                                     value if param == "gain_db" else 0.0, band.get("slope_db_oct", 6))
+                new = qq if param == "q" else gg
+        elif dt == "dynamic_eq" and was < 6 and param == "q" and (target, occ) in legacy_dyn:
+            new = min(12.0, max(0.3, value * math.sqrt(2.0)))
+        elif dt == "deess" and was < 6 and param == "range_db" and value < -24.0:
+            new = -24.0
+        elif dt == "chorus" and was < 9 and param == "stereo_deg":   # degrees -> the 0..1 STEREO knob
+            q = [(k, ("stereo" if k == "param" else v)) for k, v in q]
+            new = min(max(value, 0.0), 180.0) / 180.0
+        if new is None:
+            return url
+        q = [(k, (f"{round(new, 4)}" if k == "value" else v)) for k, v in q]
+        return urlunsplit(parts._replace(query=urlencode(q)))
+
+    def _every_chain(self) -> list[list]:
+        """Every device chain the state holds: the stems', the master's, the groups', the returns'."""
+        out = [stem.get("chain") or [] for stem in self._state.get("stems", {}).values()]
+        out.append(self._state.get("master_chain") or [])
+        out += [bus.get("chain") or [] for bus in self._state.get("buses", {}).values()]
+        out += [ret.get("chain") or [] for ret in self._state.get("returns", {}).values()]
+        return out
+
+    def _note_migration(self, text: str) -> None:
+        """A sentence the next open tells the user, once (`take_migration_notices`, the hello)."""
+        if self._read_only:
+            return
+        key = str(self._session_path.resolve())
+        if text in _MIGRATION_TAKEN.get(key, set()):
+            return
+        pending = _MIGRATION_NOTICES.setdefault(key, [])
+        if text not in pending:
+            pending.append(text)
 
     def _one_of_each_singleton(self) -> None:
         """A chain from before the one-per-type rule (or a hand-made file) may hold two
@@ -1168,7 +1581,18 @@ class Session:
     def _eq_headroom(self) -> dict:
         """eq_headroom_db for every target the agent's EQ ledger touches (untouched targets have
         the full rail, so they are left out to keep get_state small)."""
-        from .guardrails import LIMITS, eq_bands_in, eq_headroom_db
+        from .guardrails import LIMITS, eq_bands_in, eq_headroom_db, rail_rate
+        with rail_rate(self._rail_sample_rate()):
+            return self._eq_headroom_at_rate(LIMITS, eq_bands_in, eq_headroom_db)
+
+    def _rail_sample_rate(self):
+        """The project's rate for the EQ rails, or None (the stand-in) when it cannot be read."""
+        try:
+            return float(self.project_sample_rate())
+        except Exception:   # noqa: BLE001 - a session with no audio yet
+            return None
+
+    def _eq_headroom_at_rate(self, LIMITS, eq_bands_in, eq_headroom_db) -> dict:
         ledger = self._eq_ledger()
         # A FULL BANK has no room either (2026-10-02). The native EQ bank holds eq_bands_max
         # bands per chain and guardrails refuses the next one, so "room" there is a number no
@@ -1407,6 +1831,21 @@ class Session:
         self._persist()
         return {"ok": True, "renamed": True, "stem": new, "was": old_id}
 
+    def _dynamic_eq_probe(self, entry: dict) -> dict:
+        """A stored dynamic EQ checked against the user's knobs (DEVICE_PARAMS) and then held into
+        the agent's model for the rest of its check: a value outside the user's range is left as
+        it is, so the model refuses it."""
+        out = dict(entry)
+        for field, (_, lo, hi) in self.DEVICE_PARAMS["dynamic_eq"].items():
+            v = out.get(field)
+            if not isinstance(v, (int, float)) or isinstance(v, bool) or not lo <= float(v) <= hi:
+                continue
+            if field == "gain_db":
+                out[field] = min(-0.1, max(-12.0, float(v)))
+            elif field == "freq_hz":
+                out[field] = min(16000.0, max(40.0, float(v)))
+        return out
+
     def _validated_chain(self, src_chain, dest_stem_id: str) -> tuple[list[dict], list[str]]:
         """Check a device chain copied from another stem (or another project) BEFORE it lands
         here, returning (kept, dropped-descriptions). Copied state is untrusted input — a
@@ -1445,7 +1884,15 @@ class Session:
                 entry = {**entry, "key_stem_id": ""}
                 dropped.append("auto_filter's trigger (it follows its own input now)")
             try:                                         # stored entries omit stem_id — inject to validate
-                adapter.validate_python({**entry, "stem_id": dest_stem_id})
+                # A STORED entry, read as one (the pre-merge review of 2026-10-28): an old de-esser at
+                # its old default range (-80) or with its old knobs, a Duck or a clipper saved before
+                # their laws, is read the way session.json is - without the context a duplicate lost
+                # them. And a dynamic EQ the user set is in the USER's range (DEVICE_PARAMS: a cut to
+                # -30, a lift to +30, 20 Hz to 20 kHz), wider than the agent's proposal model.
+                probe = {**entry, "stem_id": dest_stem_id}
+                if kind == "dynamic_eq":
+                    probe = self._dynamic_eq_probe(probe)
+                adapter.validate_python(probe, context={"stored": True})
                 chain.append(entry)                      # keep the ORIGINAL storage shape
             except Exception:
                 dropped.append(str(kind))
@@ -1455,7 +1902,8 @@ class Session:
         chain, twice = _last_of_each_singleton(chain)
         return chain, dropped + twice
 
-    def copy_stem_state(self, src_id: str, dest_id: str) -> dict:
+    def copy_stem_state(self, src_id: str, dest_id: str,
+                        after_map: Optional[dict] = None) -> dict:
         """Duplicate a stem's MIX STATE onto another stem in the SAME project — the DAW's
         ⌘D / track paste. Everything carries VERBATIM: the device chain, channel scalars,
         tags, rides, sends AND group membership. That is the opposite of the cross-project
@@ -1473,11 +1921,18 @@ class Session:
         if src_id == dest_id:
             return {"ok": False, "error": "copy state: source and destination are the same track"}
         s = json.loads(json.dumps(src))                  # deep copy — never alias the source
-        for key in ("gain_db", "pan", "width", "width_on", "muted", "tags", "rides", "automation_enabled"):
+        for key in ("gain_db", "pan", "width", "width_on", "stereoize", "stereoize_ms", "muted", "tags",
+                    "rides", "automation_enabled"):
             if key in s:
                 dest[key] = s[key]
         chain, dropped = self._validated_chain(s.get("chain"), dest_id)
         dest["chain"] = _canonical_chain(chain, _STEM_KINDS, None)
+        # A device the source played after a rack plays after the COPY's (Phase 66; pre-merge
+        # review 2026-10-26): `after` named the source's plug-in, and the DAW says which of the
+        # copy's own took its place.
+        for e in dest["chain"]:
+            if isinstance(after_map, dict) and str(e.get("after") or "") in after_map:
+                e["after"] = str(after_map[str(e["after"])])
         # Same project → the source's returns and bus exist here by construction; a send to a
         # return that has since been deleted is stale, so it drops rather than dangling.
         dest["sends"] = {rid: db for rid, db in (s.get("sends") or {}).items()
@@ -1513,8 +1968,8 @@ class Session:
             return {"ok": False, "error": f"unknown stem {stem_id!r}"}
         src = json.loads(json.dumps(src_state))          # deep copy — never alias source state
         if not chain_only:
-            for key in ("gain_db", "pan", "width", "width_on", "muted", "tags", "rides",
-                        "automation_enabled"):
+            for key in ("gain_db", "pan", "width", "width_on", "stereoize", "stereoize_ms", "muted",
+                        "tags", "rides", "automation_enabled"):
                 if key in src:
                     stem[key] = src[key]
         chain, devices_dropped = self._validated_chain(src.get("chain"), stem_id)
@@ -1612,6 +2067,10 @@ class Session:
         # the strip Width's on/off (2026-10-21, the stereo width audit SW1): a bypassed Width box
         # keeps its value. A width set with no width_on switches it on (a hand on it is heard).
         "width_on": None,
+        # the Imager's STEREOIZE (2026-10-28): side made from the mid while the width is above
+        # unity, over a time of whole milliseconds (stereoize_law; the knob snaps)
+        "stereoize": None,
+        "stereoize_ms": (1.0, 20.0),
     }
 
     # Phase 40 (native VST co-edit): the user's direct channel for master-chain
@@ -1619,24 +2078,22 @@ class Session:
     # is master_gain_db, handled specially. Ranges mirror the action models.
     MASTER_PARAM = {
         "eq":         ("band.gain_db", -12.0, 12.0),   # == DEVICE_PARAMS["eq"]["gain_db"]: the +6 was the AGENT'S guardrail leaking into the user's primary knob (2026-09-01)
-        "dynamic_eq": ("gain_db",      -12.0, 12.0),   # == DEVICE_PARAMS["dynamic_eq"]["gain_db"]: 0 was the AGENT'S downward-only rule leaking into the user's knob (2026-10-17)
+        "dynamic_eq": ("gain_db",      -30.0, 30.0),   # == DEVICE_PARAMS["dynamic_eq"]["gain_db"]: 0 was the AGENT'S downward-only rule leaking into the user's knob (2026-10-17); the RANGE reaches +-30 since its law (2026-10-27)
         "comp":       ("ratio",          1.0, 10.0),
         "limiter":    ("ceiling_dbtp",  -6.0, -1.0),
         "saturation": ("drive_db",       1.0, 12.0),   # Phase 40 master coloration
         "width":      ("width",          0.0,  2.0),
         "utility":    ("gain_db",      -24.0, 24.0),   # device freedom: Utility primary knob = gain trim
-        "clip":       ("threshold_db", -12.0,  0.0),   # Phase 41 pre-limiter clipper
+        "clip":       ("clip_pct",       0.0, 100.0),  # the clipper's ceiling (clip_law, 2026-10-28)
         "tilt":       ("tilt_db",      -12.0, 12.0),   # Phase 41 one-knob tonal tilt
         "mb_comp":    ("mid.ratio",      1.0, 10.0),   # primary knob = mid-band ratio
         "ott":        ("depth",          0.0,  1.0),   # OTT: the one knob that matters
         "overdrive":  ("drive_db",       0.0, 36.0),   # overdrive: primary = drive
-        "chorus":     ("mix",            0.0, 1.0),    # chorus: primary = the wet blend
+        "chorus":     ("mix",            0.0, 1.0),    # chorus: primary = the dry / wet curve
         "flanger":    ("feedback",      -0.95, 0.95),  # flanger: primary = the return path
         "auto_filter": ("cutoff_hz",    20.0, 20000.0),  # Phase 63: primary = where the filter sits
         "transient":  ("attack_db",     -6.0,  6.0),   # Phase 40 stem color (per-track)
         "deess":      ("threshold_db", -60.0,  0.0),
-        "band_width": ("width",          0.0,  2.0),
-        "imager":     ("width_mid",      0.0,  2.0),   # 3-band imager (primary = mid width)
         "gate":       ("threshold_db", -80.0,  0.0),   # Phase 41 gate/expander (primary = threshold)
         # Space devices (2026-07-20): the primary knob is DRY/WET — the one you reach for on
         # an insert, and the knob that makes the device usable off a return at all.
@@ -1715,7 +2172,7 @@ class Session:
         "eq": {
             "freq_hz": ("band.freq_hz", 20.0, 20000.0),
             "gain_db": ("band.gain_db", -12.0, 12.0),   # user co-edit: symmetric ±12 (agent capped +6 by guardrails)
-            "q":       ("band.q", 0.3, 8.0),
+            "q":       ("band.q", 0.1, 40.0),   # == eq_law.Q_MIN / Q_MAX (2026-10-27)
             # Phase 46: discrete slope, hpf/lpf only — snapped to EQ_SLOPES in
             # set_master_device_param (not a plain min/max clamp).
             "slope_db_oct": ("band.slope_db_oct", 6.0, 96.0),
@@ -1737,6 +2194,7 @@ class Session:
             "feedback": ("feedback", 0.0, 0.85),
             "tone":     ("tone", 0.0, 1.0),
             "mix":      ("mix", 0.0, 1.0),
+            "ping_pong": ("ping_pong", 0.0, 1.0),
         },
         "return_convolution": {
             "decay_s":      ("decay_s", 0.2, 8.0),
@@ -1753,8 +2211,7 @@ class Session:
             "freq_hz":      ("freq_hz", 20.0, 20000.0),   # user co-edit: full audible range (agent action stays 40–16k)
             "q":            ("q", 0.3, 12.0),
             "threshold_db": ("threshold_db", -60.0, 0.0),
-            "ratio":        ("ratio", 1.0, 10.0),
-            "gain_db":      ("gain_db", -12.0, 12.0),   # user co-edit: - cut / + boost (agent action stays a cut)
+            "gain_db":      ("gain_db", -30.0, 30.0),   # the RANGE (dyneq_law): user co-edit - cut / + boost (agent action stays a cut)
             "attack_ms":    ("attack_ms", 1.0, 100.0),
             "release_ms":   ("release_ms", 20.0, 1000.0),
         },
@@ -1763,30 +2220,38 @@ class Session:
             "ratio":        ("ratio", 1.0, 10.0),
             "attack_ms":    ("attack_ms", 0.1, 100.0),
             "release_ms":   ("release_ms", 10.0, 1000.0),
+            "knee_db":        ("knee_db", 0.0, 72.0),
             "makeup_db":    ("makeup_db", 0.0, 12.0),
             "mix":          ("mix", 0.0, 1.0),
+            "style":        ("style", 0.0, 5.0),   # the character (models.COMP_STYLES), snapped to its index
             # True M/S comp (native VST): independent mid/side param sets, both compress.
             "mid_threshold_db":  ("mid.threshold_db", -60.0, 0.0),
             "mid_ratio":         ("mid.ratio", 1.0, 10.0),
             "mid_attack_ms":     ("mid.attack_ms", 0.1, 100.0),
             "mid_release_ms":    ("mid.release_ms", 10.0, 1000.0),
+            "mid_knee_db":    ("mid.knee_db", 0.0, 72.0),
             "mid_makeup_db":     ("mid.makeup_db", 0.0, 12.0),
             "mid_mix":           ("mid.mix", 0.0, 1.0),
             "side_threshold_db": ("side.threshold_db", -60.0, 0.0),
             "side_ratio":        ("side.ratio", 1.0, 10.0),
             "side_attack_ms":    ("side.attack_ms", 0.1, 100.0),
             "side_release_ms":   ("side.release_ms", 10.0, 1000.0),
+            "side_knee_db":   ("side.knee_db", 0.0, 72.0),
             "side_makeup_db":    ("side.makeup_db", 0.0, 12.0),
             "side_mix":          ("side.mix", 0.0, 1.0),
         },
         "limiter": {
             "ceiling_dbtp": ("ceiling_dbtp", -6.0, -1.0),
+            # GAIN (2026-10-25, James: "where is the gain knob like pro l has?"): the drive into the
+            # limiter, before its detector - on every limiter, a track's included. On the master it
+            # adds to the make-up a LOUD target works out.
+            "gain_db":       ("gain_db", 0.0, 24.0),
             # The limiter's loudness/gain control: drive toward this integrated-LUFS
             # target (the offline render measures + applies the makeup; the live
             # monitor reflects it after the next render). The maximizer's "gain".
             "target_lufs_i": ("target_lufs_i", -24.0, -6.0),
             # Advanced (native VST): recovery speed, lookahead ramp window, stereo-link
-            # amount (1 linked / 0 independent), and style (0 Modern/1 Transparent/2 Punchy).
+            # amount (1 linked / 0 independent), and style (0 CLEAN / 1 GLUE / 2 LOUD - models.LIMITER_STYLES).
             "release_ms":    ("release_ms", 1.0, 1000.0),
             "lookahead_ms":  ("lookahead_ms", 0.5, 3.0),
             "channel_link":  ("channel_link", 0.0, 1.0),
@@ -1818,6 +2283,8 @@ class Session:
         },
         "width": {
             "width": ("width", 0.0, 2.0),
+            "stereoize": ("stereoize", 0.0, 1.0),        # the Imager's stereoize on / off
+            "stereoize_ms": ("stereoize_ms", 1.0, 20.0),  # its time, whole ms
         },
         # Device freedom: Ableton-style Utility — gain trim + stereo width + mono fold-down
         # + polarity (phase) invert. mono/invert are 0/1 toggles (stored as 0.0/1.0; the
@@ -1857,9 +2324,14 @@ class Session:
         # per-band up/down rebalance the two sides; gains bracket it.
         "ott": {
             "depth":           ("depth", 0.0, 1.0),
-            "time":            ("time", 0.1, 4.0),
+            "time":            ("time", 0.0, 10.0),
             "in_gain_db":      ("in_gain_db", -12.0, 12.0),
             "out_gain_db":     ("out_gain_db", -12.0, 12.0),
+            "upward_pct":      ("upward_pct", 0.0, 200.0),     # ott_law (2026-10-28): the reference's strengths
+            "downward_pct":    ("downward_pct", 0.0, 100.0),
+            "low_threshold_pct":  ("low.threshold_pct", 0.0, 200.0),
+            "mid_threshold_pct":  ("mid.threshold_pct", 0.0, 200.0),
+            "high_threshold_pct": ("high.threshold_pct", 0.0, 200.0),
             "low_up":          ("low.up", 0.0, 1.0),
             "low_down":        ("low.down", 0.0, 1.0),
             "low_gain_db":     ("low.gain_db", -12.0, 12.0),
@@ -1884,15 +2356,14 @@ class Session:
             "mix":       ("mix", 0.0, 1.0),
             # 2026-09-06: run the soft-clipper at N x so its harmonics stop aliasing.
             "oversample": ("oversample", 1.0, 8.0),
+            "character":  ("character", 0.0, 3.0),   # 0 pedal / 1 smooth / 2 crunchy / 3 power (2026-10-26), an index
         },
-        # 2026-09-06: chorus / ensemble — the modulation family's first device.
+        # chorus (chorus_law, 2026-10-28: a reference two-line chorus's knobs): mode 0 I / 1 II / 2 I+II
         "chorus": {
-            "rate_hz":    ("rate_hz", 0.01, 10.0),
-            "depth":      ("depth", 0.0, 1.0),
-            "delay_ms":   ("delay_ms", 1.0, 50.0),
+            "mode":       ("mode", 0.0, 2.0),
+            "stereo":     ("stereo", 0.0, 1.0),
             "mix":        ("mix", 0.0, 1.0),
-            "voices":     ("voices", 1.0, 3.0),
-            "stereo_deg": ("stereo_deg", 0.0, 180.0),
+            "output_db":  ("output_db", -24.0, 6.0),
         },
         # 2026-09-06: flanger — the same sweep with a return path. `feedback` is the
         # primary because it is the knob that makes it a flanger at all.
@@ -1932,36 +2403,23 @@ class Session:
             "speed":      ("speed", 0.25, 4.0),
             "output_db":  ("output_db", -12.0, 12.0),
         },
-        # v2 (2026-07-05): freed dynamics + range floor + wide-band mode (wide 0/1).
+        # v3 (2026-10-27, deess_law): no ratio / attack / release; a band FREQ..TOP, RANGE to
+        # 24 dB, MODE (0 allround / 1 vocal), wide 0/1.
         "deess": {
             "threshold_db": ("threshold_db", -60.0, 0.0),
             "freq_hz":      ("freq_hz", 2000.0, 12000.0),
-            "ratio":        ("ratio", 1.0, 20.0),
-            "attack_ms":    ("attack_ms", 0.1, 20.0),
-            "release_ms":   ("release_ms", 10.0, 500.0),
-            "range_db":     ("range_db", -80.0, 0.0),
+            "top_hz":       ("top_hz", 2000.0, 20000.0),
+            "range_db":     ("range_db", -24.0, 0.0),
+            "mode":         ("mode", 0.0, 1.0),
             "wide":         ("wide", 0.0, 1.0),
         },
-        "band_width": {
-            "width": ("width", 0.0, 2.0),
-        },
-        # 2026-07-05: 3-band stereo imager — per-band width + movable crossovers.
-        # (width_low/... are FLAT keys by design: the low_/mid_/high_ prefixes would
-        # nest into sub-objects via writeParam/isNestedParam.)
-        "imager": {
-            "width_low":       ("width_low", 0.0, 2.0),
-            "width_mid":       ("width_mid", 0.0, 2.0),
-            "width_high":      ("width_high", 0.0, 2.0),
-            "crossover_lo_hz": ("crossover_lo_hz", 30.0, 4000.0),
-            "crossover_hi_hz": ("crossover_hi_hz", 200.0, 16000.0),
-        },
-        # Phase 41: pre-limiter clipper (master) — clip level + soft/hard knee.
-        # v2 (2026-07-05): oversample 1/2/4/8 (snapped) = true-peak-safe shaping.
+        # The clipper (clip_law, 2026-10-28: a reference clipper's knob set): GAIN before the clip,
+        # CLIP the ceiling in % of full scale, SOFTNESS the knee, OVERSAMPLE 1 off / 2 on (snapped).
         "clip": {
-            "threshold_db": ("threshold_db", -12.0, 0.0),
-            "hardness":     ("hardness", 0.0, 1.0),
-            "output_db":    ("output_db", -12.0, 12.0),   # post-clip output trim (level makeup)
-            "oversample":   ("oversample", 1.0, 8.0),
+            "gain_db":    ("gain_db", 0.0, 12.0),
+            "clip_pct":   ("clip_pct", 0.0, 100.0),
+            "softness":   ("softness", 0.0, 1.0),
+            "oversample": ("oversample", 1.0, 2.0),
         },
         # Phase 41: one-knob tilt EQ — tonal tilt + the pivot it tilts around.
         "tilt": {
@@ -1982,14 +2440,17 @@ class Session:
             "hysteresis_db": ("hysteresis_db", 0.0, 24.0),
             "sc_hpf_hz":     ("sc_hpf_hz", 0.0, 2000.0),
             "sc_lpf_hz":     ("sc_lpf_hz", 200.0, 20000.0),
+            "character":     ("character", 0.0, 3.0),   # 0 classic / 1 clean / 2 vocal / 3 guitar (2026-10-27), an index
         },
-        # Phase 41: the user can dial the agent's sidechain duck directly (native VST
-        # co-edit) — on a per-track insert this targets that stem's duck.
+        # The Duck (duck_law, 2026-10-28: a reference curve-ducker's knob set). trigger / length /
+        # band are indices (their words in duck_law), curve 1..16.
         "duck": {
-            "threshold_db": ("threshold_db", -60.0, 0.0),
-            "depth_db":     ("depth_db", 1.0, 12.0),
-            "attack_ms":    ("attack_ms", 1.0, 100.0),
-            "release_ms":   ("release_ms", 20.0, 1000.0),
+            "mix":      ("mix", 0.0, 1.0),
+            "trigger":  ("trigger", 0.0, 1.0),       # 0 sync, 1 track
+            "curve":    ("curve", 1.0, 16.0),
+            "length":   ("length", 0.0, 3.0),        # 1/8 1/4 1/2 1/1
+            "band":     ("band", 0.0, 1.0),
+            "band_hz":  ("band_hz", 20.0, 5120.0),
         },
     }
 
@@ -2067,21 +2528,46 @@ class Session:
             # nearest here meant a knob dragged to 7 read 7 on the dock, ran 4x in the native
             # monitor and the DAW bounce, and persisted 8 for the offline re-render and the export
             # oracle — three different answers to one gesture (2026-09-06 review).
-            v = float(8 if value >= 8 else 4 if value >= 4 else 2 if value >= 2 else 1)
+            v = float(min(hi, 8 if value >= 8 else 4 if value >= 4 else 2 if value >= 2 else 1))
+        elif device_type == "duck" and path in ("trigger", "curve", "length", "band"):
+            # The Duck's (duck_law, 2026-10-28): indices and a switch, nothing between - stored as
+            # every engine reads them (duck_law.values, the native parse).
+            v = float(min(hi, max(lo, round(value))))
+        elif device_type == "deess" and path in ("mode", "wide"):
+            # The de-esser's MODE (allround / vocal) and WIDE switch (deess_law): an index and a
+            # switch, nothing between - a stored 0.4 was read as allround by one engine and as
+            # truthy by another (the pre-merge review of 2026-10-28).
+            v = float(min(hi, max(lo, round(value))))
+        elif device_type == "gate" and path == "character":
+            # The gate's CHARACTER (2026-10-27, models.GATE_CHARACTERS): an index, nothing between.
+            v = float(min(3, max(0, round(value))))
+        elif device_type == "overdrive" and path == "character":
+            # The overdrive's CHARACTER (2026-10-26, models.OD_CHARACTERS): an index, nothing between.
+            v = float(min(3, max(0, round(value))))
+        elif device_type == "comp" and path == "style":
+            # A compressor's CHARACTER (2026-10-25, models.COMP_STYLES): an index, nothing between.
+            v = float(min(5, max(0, round(value))))
         elif device_type == "limiter" and path == "style":
             # A STYLE is a preset of the release and the lookahead (models.LIMITER_STYLE_PRESETS) -
             # it stored a float nothing read, and `device.set limiter.style` answered ok for a no-op
             # (2026-10-17, the limiter audit; 01 F11). Snapped to its index; applied below.
             v = float(min(2, max(0, round(value))))
+        elif device_type == "width" and path in ("stereoize", "stereoize_ms"):
+            # The Imager's stereoize (2026-10-28): a switch and a time in whole ms (stereoize_law),
+            # stored as both engines read them.
+            v = (1.0 if value > 0.5 else 0.0) if path == "stereoize" else float(min(hi, max(lo, round(value))))
+        elif device_type == "return_delay" and path == "ping_pong":
+            # A switch (pre-merge review 2026-10-26): a stored 0.4 ping-ponged in the brain's push
+            # (truthy) and not in either render (>= 0.5). Snapped as every engine reads it.
+            v = 1.0 if value > 0.5 else 0.0   # nearbyint, as the dock's Snap::index (0.5 is off)
         elif device_type == "utility" and path in UTILITY_TOGGLES:
             # A Utility's switch is ON or OFF (the Utility audit, 2026-10-21, U5): a stored 0.3 played
             # mono in one engine and not in another. Snapped, as every engine reads it (> 0.5).
             v = 1.0 if value > 0.5 else 0.0
-        elif path.endswith("voices"):
-            # DeviceSpecs.h claimed "Voices is discrete, snapped on write" and nothing snapped it,
-            # so a fractional 2.6 persisted and the three engines disagreed about what it meant
-            # (2026-09-06 review). Truncate, matching dsp.py's int() and the native contract cast.
-            v = float(min(3, max(1, int(value))))
+        elif device_type == "chorus" and path == "mode":
+            # The chorus's MODE (chorus_law, 2026-10-28): I / II / I+II, an index, nothing between -
+            # rounded as chorus_law.mode_index and the native parse (nearbyint) round.
+            v = float(min(2, max(0, round(value))))
         else:
             v = float(min(hi, max(lo, value)))
         entry = matches[occurrence]
@@ -2101,7 +2587,8 @@ class Session:
                 entry.setdefault("crossover_hi_hz", 2000.0)
             entry.setdefault(outer, {})[inner] = v   # nested (mb_comp bands / M/S comp)
         else:
-            entry[path] = v
+            entry[path] = (int(v) if device_type == "duck" and path in ("trigger", "curve", "length")
+                           else bool(v) if device_type == "duck" and path == "band" else v)
             # A utility's `invert` IS both channels' flip (2026-10-13). The per-channel flags win
             # over it when they are there (dsp._utility, MonitorChain's parse), and a utility the
             # dock added carries them as false - so `invert` alone flipped nothing that renders,
@@ -2112,6 +2599,10 @@ class Session:
             if device_type == "limiter" and path == "style":
                 from .models import LIMITER_STYLE_PRESETS
                 entry["release_ms"], entry["lookahead_ms"] = LIMITER_STYLE_PRESETS[int(v)]
+            if device_type == "comp" and path == "style":
+                # a character sets the knobs it is heard at (models.COMP_STYLE_PRESETS)
+                from .models import apply_comp_style_preset
+                apply_comp_style_preset(entry, int(v))
         self._persist()
         return {"type": device_type, "occurrence": occurrence,
                 "param": param, "value": round(v, 2)}
@@ -2167,40 +2658,6 @@ class Session:
         entry["channel"] = channel
         self._persist()
         return {"type": device_type, "occurrence": occurrence, "channel": channel}
-
-    def set_device_band(self, occurrence: int, band: str = "",
-                        lo_hz: float | None = None, hi_hz: float | None = None,
-                        target: str = "master") -> dict:
-        """USER co-edit channel (2026-07-05): pick a band_width device's band LABEL
-        (one of the fixed Phase 15 bands) from the device UI — immediate, no
-        proposal. The label is the session-side truth; monitor_chain_params
-        resolves it to the native bandpass center/Q. `target` = master / a stem /
-        a bus (per-track insert).
-
-        2026-07-19 (free band scrub): pass explicit ``lo_hz``/``hi_hz`` instead of a
-        label to place the band anywhere — the custom edges are stored on the entry
-        and OVERRIDE the label everywhere (offline render, native monitor); picking
-        a preset label again clears them."""
-        matches = [e for e in self._coedit_chain(target)
-                   if e["type"] == "band_width"]
-        if not 0 <= occurrence < len(matches):
-            raise ValueError(f"no band_width #{occurrence} on the {target} chain")
-        entry = matches[occurrence]
-        if lo_hz is not None and hi_hz is not None:
-            lo, hi = float(lo_hz), float(hi_hz)
-            if not (20.0 <= lo < hi <= 20000.0):
-                raise ValueError(f"set_device_band: bad custom band {lo!r}..{hi!r}")
-            entry["lo_hz"], entry["hi_hz"] = round(lo, 1), round(hi, 1)
-        elif band in BAND_LABELS:
-            entry["band"] = band
-            entry.pop("lo_hz", None)   # a preset pick clears the custom edges
-            entry.pop("hi_hz", None)
-        else:
-            raise ValueError(f"set_device_band: unknown band {band!r}")
-        self._persist()
-        return {"type": "band_width", "occurrence": occurrence,
-                "band": entry.get("band"),
-                "lo_hz": entry.get("lo_hz"), "hi_hz": entry.get("hi_hz")}
 
     def holds_send_source(self, source_id: str) -> bool:
         """Is `source_id` a track whose sends this session keeps - a stem, a group bus
@@ -3026,15 +3483,13 @@ class Session:
         return {"stem": stem_id, "type": "auto_filter", "key_stem_id": key or None}
 
     def set_duck(self, stem_id: str, key_stem_id: str | None,
-                 threshold_db: float | None = None,
-                 depth_db: float | None = None,
                  key_may_be_track: bool = False) -> dict:
-        """USER co-edit (Tier-1 sidechain shared control): key a stem's sidechain DUCK off another
-        stem (the kick→bass classic), live — the routing the agent already sets via its `duck` action,
-        now in the user's hands too. Direct, like set_send / route_stem (no proposal lifecycle).
-        `key_stem_id` None/""/"none"/"off" clears the duck. One duck per stem (the native engine keys a
-        single sidechain), so re-keying replaces it. Params default neutral-ish (the user/agent dials
-        them via set_master_device_param's "duck" entry). Returns the new duck state."""
+        """USER co-edit (Tier-1 sidechain shared control): pick the TRIGGER TRACK of a stem's Duck
+        (the kick->bass classic), live. Direct, like set_send / route_stem (no proposal lifecycle).
+        `key_stem_id` None/""/"none"/"off" clears the trigger. Picking a track switches the duck to
+        trigger "track" (duck_law, 2026-10-28) - a trigger picked under SYNC would do nothing; clearing
+        leaves the trigger mode as it is. A stem with no duck gets one (curve 1 at 1/4, full mix).
+        Returns the new duck state."""
         if stem_id not in self._state["stems"]:
             raise ValueError(f"set_duck: unknown stem {stem_id!r}")
         chain = self._state["stems"][stem_id]["chain"]
@@ -3080,6 +3535,19 @@ class Session:
             # `slot` indexes the ORIGINAL list, but nothing before the FIRST duck is a duck, so
             # it is also the count of surviving entries ahead of it.
             chain.append(entry_) if slot is None else chain.insert(slot, entry_)
+        # SEVERAL DUCKS (Phase 65): a track has ONE trigger, and every duck on it listens to it - so
+        # the pick re-keys each duck IN PLACE (its tuning, its uid and its place kept) and collapses
+        # none of them. An explicit threshold / depth goes to the first, as it always did.
+        ducks = [e for e in chain if e.get("type") == "duck"]
+        if len(ducks) >= 2:
+            for e in ducks:
+                e["key_stem_id"] = "" if clearing else key
+                if not clearing:
+                    e["trigger"] = 1
+            self._persist()
+            if clearing:
+                return {"stem": stem_id, "key_stem_id": None}
+            return {"stem": stem_id, "key_stem_id": key, "trigger": "track"}
         if clearing:
             # Clearing the trigger DISARMS the duck but keeps the device (unkeyed = a render
             # no-op, see _ADD_STEM_DEVICE["duck"]) — the box, its knobs and its tuning stay so
@@ -3092,22 +3560,19 @@ class Session:
             self._persist()
             return {"stem": stem_id, "key_stem_id": None}
         keep = prev or {}
-        action = SidechainDuckAction(
-            stem_id=stem_id, key_stem_id=key,
-            threshold_db=float(threshold_db) if threshold_db is not None
-                         else float(keep.get("threshold_db", -30.0)),
-            depth_db=float(depth_db) if depth_db is not None
-                     else float(keep.get("depth_db", 6.0)),
-            attack_ms=float(keep.get("attack_ms", 5.0)),
-            release_ms=float(keep.get("release_ms", 150.0)))
-        entry = action.model_dump(exclude={"stem_id"})   # stem_id is implied by the chain owner
+        tuning = {k: v for k, v in keep.items()
+                  if k in ("curve", "length", "mix", "band", "band_hz", "threshold_db", "depth_db",
+                           "attack_ms", "release_ms")}
+        action = SidechainDuckAction.model_validate(
+            {**tuning, "stem_id": stem_id, "key_stem_id": key, "trigger": 1},
+            context={"stored": True})                     # an old duck's knobs are read once
+        entry = action.model_dump(exclude={"stem_id", "instance"})   # stem_id is implied by the chain owner
         if "enabled" in keep:
             entry["enabled"] = keep["enabled"]           # a bypassed duck stays bypassed across a re-key
         _strip()                                         # only now: nothing above can raise any more
         _reseat(entry)
         self._persist()
-        return {"stem": stem_id, "key_stem_id": key,
-                "threshold_db": action.threshold_db, "depth_db": action.depth_db}
+        return {"stem": stem_id, "key_stem_id": key, "trigger": "track"}
 
     def set_sat_multiband(self, occurrence: int, on: bool,
                           target: str = "master") -> dict:
@@ -3153,8 +3618,10 @@ class Session:
     _ADD_MASTER_DEVICE = {
         "eq":         lambda: EqAction(stem_id=MASTER, band=EqBand(
                           freq_hz=1000.0, gain_db=0.0, q=1.0, shape="peak")),
+        # a new compressor opens on CLEAN's knobs (models.COMP_STYLE_PRESETS[0]), so CLEAN is
+        # what it already is
         "comp":       lambda: CompAction(stem_id=MASTER, threshold_db=-18.0,
-                          ratio=2.0, attack_ms=10.0, release_ms=120.0),
+                          ratio=4.0, attack_ms=10.0, release_ms=100.0),
         # target_lufs_i matches defaultDeviceEntry("limiter") (DeviceSpecs.h). It used to be
         # left unset here, so the in-process monitor played a -14 LUFS limiter the instant it
         # was added and then dropped the makeup on the next chain push — the Loud knob fell
@@ -3163,14 +3630,14 @@ class Session:
         "limiter":    lambda: LimiterAction(stem_id=MASTER, ceiling_dbtp=-1.0,
                                             target_lufs_i=-14.0),
         "dynamic_eq": lambda: DynamicEqAction(stem_id=MASTER, freq_hz=3000.0,
-                          gain_db=-3.0, q=2.0, threshold_db=-24.0, ratio=2.0),
+                          gain_db=-3.0, q=2.0, threshold_db=-24.0),
         # Phase 40: master-bus coloration + dynamics the user can add by hand.
         "saturation": lambda: SaturationAction(stem_id=MASTER, drive_db=3.0),
         "width":      lambda: WidthAction(stem_id=MASTER, width=1.0),
         # Device freedom: Ableton-style Utility (gain trim + width + mono + phase), freely placeable.
         "utility":    lambda: UtilityAction(stem_id=MASTER, gain_db=0.0, width=1.0),
         # Phase 41: pre-limiter clipper (the loudness chain) — shave peaks before limiting.
-        "clip":       lambda: ClipAction(stem_id=MASTER, threshold_db=-3.0, hardness=0.5),
+        "clip":       lambda: ClipAction(stem_id=MASTER),   # the reference's defaults: 0 dB, 100 %, hard, off
         # Phase 41: one-knob tilt EQ — broad tonal balance (master/stem/bus).
         "tilt":       lambda: TiltAction(stem_id=MASTER, tilt_db=0.0, pivot_hz=1000.0),
         "mb_comp":    lambda: MultibandCompAction(stem_id=MASTER,
@@ -3184,13 +3651,10 @@ class Session:
                           attack_ms=1.0, release_ms=100.0),
         "deess":      lambda: DeessAction(stem_id=MASTER, threshold_db=-20.0, freq_hz=6000.0),
         "transient":  lambda: TransientAction(stem_id=MASTER, attack_db=2.0, sustain_db=0.0),
-        "band_width": lambda: BandWidthAction(stem_id=MASTER, band="presence", width=1.0),
-        # 2026-07-05: 3-band stereo imager (the band_width upgrade) — mastering imaging.
-        "imager":     lambda: ImagerAction(stem_id=MASTER),
         # 2026-07-07: OTT (3-band up/down comp) + overdrive (drive-pedal distortion).
         # User-add on any target (master included — the user's hands); the AGENT
         # proposes them on stems/busses only (guardrails reject master OTT).
-        "ott":        lambda: OttAction(stem_id=MASTER, depth=0.35),
+        "ott":        lambda: OttAction(stem_id=MASTER),   # the reference's defaults: depth 100 %, time 100 %
         "overdrive":  lambda: OverdriveAction(stem_id=MASTER, drive_db=12.0),
         # 2026-09-06: chorus / ensemble. Seeded SUBTLE (mix 0.35) — a device that lands
         # fully wet on add is one the user immediately turns down.
@@ -3219,10 +3683,6 @@ class Session:
                           sustain_db=0.0),
         "deess":      lambda: DeessAction(stem_id="", threshold_db=-20.0,
                           freq_hz=6000.0),
-        "band_width": lambda: BandWidthAction(stem_id="", band="presence",
-                          width=1.0),
-        # 2026-07-05: 3-band stereo imager (the band_width upgrade).
-        "imager":     lambda: ImagerAction(stem_id=""),
         # Phase 41: downward gate/expander — drum gating, breath/noise control.
         "gate":       lambda: GateAction(stem_id="", threshold_db=-40.0, ratio=4.0,
                           attack_ms=1.0, release_ms=100.0),
@@ -3235,8 +3695,9 @@ class Session:
         # 2026-07-11: user-addable sidechain Duck (the browser Devices tab). Lands UNKEYED
         # (key_stem_id "") — a render no-op until the user picks a key in the dock combo
         # (set_duck) or the box's SC AUTO button asks the agent to key + tune it.
-        "duck":       lambda: SidechainDuckAction(stem_id="", key_stem_id="",
-                          threshold_db=-30.0, depth_db=6.0),
+        # Since 2026-10-28 (duck_law) it lands on SYNC - it pumps on the beat at once, as the
+        # reference does - and a picked trigger track switches it to TRACK.
+        "duck":       lambda: SidechainDuckAction(stem_id="", key_stem_id=""),
     }
 
     # SPACE devices on an FX RETURN: wet-only (mix 1.0) — the return's dry lives on the source
@@ -3273,6 +3734,10 @@ class Session:
         2026-07-20 — wet-only on a return, dry/wet blended as an insert anywhere else."""
         if device_type in ("match_eq", "width"):
             return None                                  # reference-driven / channel-strip scalar
+        if len(self._coedit_chain(target)) >= CHAIN_MAX_ENTRIES:
+            raise ValueError(
+                f"{target!r} already holds {CHAIN_MAX_ENTRIES} devices - a chain holds that many; "
+                "remove one first")
         if device_type in _WET_KINDS:
             # Every placement consumes an in-chain native wet slot, including a real
             # return track. Apply one honest ceiling everywhere rather than allowing a
@@ -3286,8 +3751,8 @@ class Session:
                 return self._ADD_RETURN_DEVICE[device_type]
             return self._ADD_WET_INSERT[device_type]
         # A device the native chain holds a FIXED NUMBER of slots for (P2 batch T, reader
-        # E2·R5): the ninth band_width was named in the comment above _NATIVE_SINGLETON_KINDS
-        # and enforced nowhere - the brain stored it, the node played eight, and the monitor
+        # E2·R5): the ninth of a slotted device (it was the band width, retired 2026-10-28) was
+        # named in the comment above _NATIVE_SINGLETON_KINDS and enforced nowhere - the brain stored it, the node played eight, and the monitor
         # and the bounce parted from the render. The same honest ceiling as a fourth space
         # device; the dock asks the same numbers before it takes a device off its source
         # (DeviceChainView::capacityRefusal).
@@ -3318,9 +3783,9 @@ class Session:
         """USER co-edit channel (Phase 40 / native DAW shared-control): append a device
         to a stem's chain with sane defaults — immediate, no proposal, no guardrails (the
         user's hands). The native DAW (docs/10) is Ableton-style: the user can hand-place
-        the FULL device set on ANY track — the stem-only COLOR devices (transient/de-ess/
-        band_width) AND the rich processors (eq/comp/saturation/etc.), reusing the master
-        constructors, the COLOR devices (transient/de-ess/band_width), AND (Phase 43 device
+        the FULL device set on ANY track — the stem-only COLOR devices (transient/de-ess)
+        AND the rich processors (eq/comp/saturation/etc.), reusing the master
+        constructors, AND (Phase 43 device
         freedom) a per-stem `clip` + `limiter` (a peak ceiling via _brickwall — no loudness
         makeup). Render order is the chain list (effective_chain). `match_eq`/`width` stay off a
         stem: match_eq is reference-driven (a flat default renders nothing), and stem width is the
@@ -3344,6 +3809,14 @@ class Session:
         entry = ctor().model_dump(exclude={"stem_id", "return_id"},
                                   exclude_none=True)   # no None placeholders
         entry["owner"] = "user"   # provenance: _replace_in_chain reports overwriting it
+        if device_type in KEYED_TYPES:
+            # ONE trigger per track (Phase 63): a second keyed device - a second duck since Phase 65
+            # - listens to the one the track already has. Natively every keyed device hears the
+            # node's one sidechain input; unkeyed here, the offline render ran it as nothing.
+            held = next((e.get("key_stem_id") for e in chain
+                         if e.get("type") in KEYED_TYPES and e.get("key_stem_id")), None)
+            if held:
+                entry["key_stem_id"] = held
         chain.append(entry)
         self._persist()
         occ = sum(1 for e in chain if e["type"] == device_type) - 1
@@ -3364,8 +3837,8 @@ class Session:
         """USER co-edit channel (Phase 40, native VST): append a device to the
         master chain with sensible defaults — immediate, no proposal, no guardrails
         (the user's hands). Render order is canonical (effective_master_chain), so
-        the entry lands in the right slot regardless of append position. One limiter
-        max. The planning agent never gets this path.
+        the entry lands in the right slot regardless of append position. As many limiters as
+        the user likes (Phase 65). The planning agent never gets this path.
 
         ``safety=True`` (2026-09-04, limiter only): the DAW's default master SAFETY
         limiter — a −1 dBTP ceiling and NOTHING else (no ``target_lufs_i``, so no
@@ -3385,6 +3858,9 @@ class Session:
             raise ValueError(f"add_master_device: unsupported device {device_type!r}")
         else:
             ctor = self._ADD_MASTER_DEVICE[device_type]
+        if len(self._state["master_chain"]) >= CHAIN_MAX_ENTRIES:
+            raise ValueError(f"the master already holds {CHAIN_MAX_ENTRIES} devices - a chain "
+                             "holds that many; remove one first")
         # ...and the fixed slot counts (_NATIVE_SLOT_KINDS), as on a track: this door had none,
         # and the master is where a Dynamic EQ lives (pre-merge review 2026-10-06).
         if (slots := _NATIVE_SLOT_KINDS.get(device_type)) is not None:
@@ -3399,9 +3875,6 @@ class Session:
                 f"the master already has a {device_type} — the engine hosts one per chain "
                 f"(a second would render offline but not in the live monitor); edit or "
                 f"remove the existing one first")
-        if device_type == "limiter" and any(
-                e["type"] == "limiter" for e in self._state["master_chain"]):
-            raise ValueError("the master already has a limiter")
         # The EQ-bank budget, which `add_stem_device` has always enforced and this path never
         # did — so the MASTER, the one chain most likely to carry a match_eq plus a stack of
         # eq bands, was the unguarded one (2026-09-08 device audit). The native bank silently
@@ -3438,26 +3911,59 @@ class Session:
         self._persist()
         return {"type": device_type, "occurrence": occurrence, "removed": True}
 
-    def set_master_device_order(self, order: list[str]) -> dict:
+    @staticmethod
+    def _placement_targets(chain: list[dict], order: list[str]) -> list[Optional[dict]]:
+        """The entries a device_order's tokens name, read against the chain BEFORE it is reordered:
+        a token's occurrence is the brain's numbering as it stands (a drag posts the moved
+        entries' old numbers in their new order), so it must be resolved before `_dock_order`."""
+        out: list[Optional[dict]] = []
+        for token in order:
+            etype, _, occ = str(token).partition("#")
+            same = [e for e in chain if e.get("type") == etype]
+            out.append(same[int(occ)] if occ.isdigit() and int(occ) < len(same) else None)
+        return out
+
+    @staticmethod
+    def _stamp_placement(targets: list[Optional[dict]], after: Optional[list[str]]) -> None:
+        """A DEVICE AFTER A RACK (Phase 66): `after[i]` is where the entry the i-th token named
+        plays - a rack's or a hosted plug-in's item id in the DAW, "" = the node's own part,
+        ahead of every plug-in. The offline render plays the list in order, without the plug-in
+        (a hosted plug-in is a named blind spot), so this is the DAW's alone."""
+        if after is None:
+            return
+        for entry, place in zip(targets, after):
+            if entry is None:
+                continue
+            if place:
+                entry["after"] = str(place)
+            else:
+                entry.pop("after", None)
+
+    def set_master_device_order(self, order: list[str], after: Optional[list[str]] = None) -> dict:
         """USER co-edit channel (drag-to-reorder): reorder the master chain LIST to the
         requested device-type sequence (Phase 43 device freedom — the list IS the render
         order). Unlisted types keep their relative slot; the limiter is freely placeable
         (Stage 3 — a posted position after it is honored, so a newly-added device appends
         at the END / rightmost in signal flow). Immediate, no proposal — the user's hands;
         the planning agent never gets this path."""
+        targets = self._placement_targets(self._state["master_chain"], order)
         self._state["master_chain"] = _dock_order(
             self._state["master_chain"], _MASTER_KINDS, order)
+        self._stamp_placement(targets, after)
         self._persist()
         return {"master_device_order": [e["type"] for e in self._state["master_chain"]]}
 
-    def set_stem_device_order(self, target: str, order: list[str]) -> dict:
+    def set_stem_device_order(self, target: str, order: list[str],
+                              after: Optional[list[str]] = None) -> dict:
         """USER co-edit channel (drag-to-reorder): reorder a stem's chain LIST to the
         requested device-type sequence so added/reordered devices HOLD their position
         (Phase 43 device freedom — the list IS the render order). Unlisted types keep their
         relative slot. Immediate, no proposal — the user's hands; the agent reaches order
         via its own chain edits. `target` may be a stem, a group bus, or an FX return."""
         chain = self._coedit_chain(target)               # stem / bus / return:<id>; raises if unknown
+        targets = self._placement_targets(chain, order)
         chain[:] = _dock_order(chain, self._kinds_for(target), order)   # in-place (chain is a live ref)
+        self._stamp_placement(targets, after)
         self._persist()
         return {"target": target,
                 "stem_device_order": [e["type"] for e in chain]}
@@ -3489,7 +3995,7 @@ class Session:
             # takes. Before this a bus took gain_db only, so a pan or [M] on a group was refused
             # and lost. `excluded`/`automation_enabled` stay stem-and-master concepts (a bus is
             # removed via remove_bus; automation is per-stem).
-            allowed = {"gain_db", "pan", "width", "width_on", "muted"}
+            allowed = {"gain_db", "pan", "width", "width_on", "stereoize", "stereoize_ms", "muted"}
             if ("width" in changes and "width_on" not in changes
                     and not self.buses[stem_id].get("width_on", True)):   # a hand on the width switches it on
                 changes = {**changes, "width_on": True}
@@ -3503,6 +4009,8 @@ class Session:
                 else:
                     lo, hi = bounds
                     bus[field] = float(min(hi, max(lo, value)))
+                    if field == "stereoize_ms":
+                        bus[field] = float(round(bus[field]))
             self._persist()
             return {"stem_id": stem_id, "gain_db": round(bus["gain_db"], 1),
                     "pan": round(bus.get("pan", 0.0), 3),
@@ -3599,6 +4107,8 @@ class Session:
             else:
                 lo, hi = bounds
                 stem[field] = float(min(hi, max(lo, value)))
+                if field == "stereoize_ms":            # whole milliseconds (the knob snaps)
+                    stem[field] = float(round(stem[field]))
         if changes.get("excluded"):
             # This edit deleted the track — the live track of this name is gone, so any
             # pending membership of the name (a track grouped while empty) is stale with it.
@@ -3655,6 +4165,7 @@ class Session:
         violations += validate_proposal(
             req,
             self._cumulative_gain_this_pass(req.actions),
+            sample_rate=self._rail_sample_rate(),   # the EQ rails at the project's rate
             accepted_proposals_this_pass=self._accepted_proposals_this_pass(),
             stem_tags=self._stem_tags(),
             cumulative_gain_session_db=self._session_gain_baseline(req.actions),
@@ -3737,7 +4248,7 @@ class Session:
                             # type), and a live record of the same pair replaces it in turn
                             # (_cumulative_gain) - so re-tuning a trimmed Utility costs its delta.
                             self._state.setdefault("trimmed_singleton_charges", {}).setdefault(
-                                sid, {})[action["type"]] = charge
+                                sid, {})[self._slot_of(old, index, action)] = charge   # per instance
                         # …and its static EQ, folded into per-target curves on the composed
                         # rail's grid, so a trim never refills the session EQ budget either. A
                         # singleton's curve is not summed: the carry keeps its LAST entry, and a
@@ -3745,13 +4256,15 @@ class Session:
                         counted = self._ledger_eq_action(old, index, action)
                         if self._is_eq_singleton(action):
                             self._state.setdefault("trimmed_eq_singletons", {}).setdefault(
-                                sid, {})[action["type"]] = counted
+                                sid, {})[self._slot_of(old, index, action)] = counted
                             continue
                         curves = eq_family_curves_db(counted)
                         if curves is not None:
                             eq_carry = self._state.setdefault("trimmed_eq_curves_db", {})
+                            from .guardrails import on_eq_grid
                             prev = eq_carry.get(sid) or {"boost": [0.0] * len(curves[0]),
                                                          "cut": [0.0] * len(curves[1])}
+                            prev = {k: [float(x) for x in on_eq_grid(prev[k])] for k in ("boost", "cut")}
                             eq_carry[sid] = {
                                 "boost": [round(x + float(y), 3) for x, y in zip(prev["boost"], curves[0])],
                                 "cut": [round(x + float(y), 3) for x, y in zip(prev["cut"], curves[1])]}
@@ -3778,6 +4291,7 @@ class Session:
         }, context={"stored": True})
         violations = validate_proposal(
             req, self._cumulative_gain_this_pass(req.actions),
+            sample_rate=self._rail_sample_rate(),
             # Re-checked at APPLY too (2026-09-01 sweep): apply re-stamps the record to the
             # current pass, so cards proposed in an earlier pass and approved later (Ask
             # mode) used to land six proposals / 48 actions in one pass against the 3 / 24 cap.
@@ -3841,6 +4355,7 @@ class Session:
         created_returns: list[str] = []
         replaced_user: list[str] = []   # user-placed master/return devices this overwrote
         entry_uids: list[Optional[int]] = []   # the chain entry each action made (D9·R5)
+        self.pin_instances(req.actions)
         for idx, action in enumerate(req.actions):
             if (action.type == "group"
                     and action.bus_id not in self._state["buses"]
@@ -4151,7 +4666,8 @@ class Session:
                                         if drop(e) and e.get("owner") == "user"]
         dropped = [e for e in chain if drop(e)]
         if len(dropped) == 1 and isinstance(dropped[0].get("uid"), int):
-            self._carry_uid = (dropped[0]["type"], dropped[0]["uid"])   # see _stamp_entries
+            # ...and where it played (Phase 66): a re-proposed device stays behind its rack
+            self._carry_uid = (dropped[0]["type"], dropped[0]["uid"], dropped[0].get("after"))   # see _stamp_entries
         return [e for e in chain if not drop(e)]
 
     def _mutate(self, action) -> None:
@@ -4216,18 +4732,20 @@ class Session:
                       else self.stems[action.stem_id])
             holder.setdefault("sends", {})[action.return_id] = action.gain_db
             return
+        if getattr(action, "instance", None) is not None:
+            self._mutate_instance(action)
+            return
         if action.stem_id == MASTER:
             if action.type == "gain":
                 self._state["master_gain_db"] += action.delta_db
             elif action.type in ("limiter", "comp", "mb_comp", "ott", "overdrive",
-                                 "transpose", "utility", "imager", "saturation",
+                                 "transpose", "utility", "saturation",
                                  "clip", "deess", "gate", "transient",
                                  "width") + _WET_KINDS:
                 # one per bus (limiter since Phase 6; comp/mb_comp since the
                 # 2026-06 review — stacked dynamics were never intended;
                 # transpose since Phase 32 — one key change; utility since device
-                # freedom — the native chain hosts a single Utility step; imager
-                # since 2026-07-05 — one 3-band imager; the space devices since
+                # freedom — the native chain hosts a single Utility step; the space devices since
                 # 2026-07-20 — one reverb + one delay + one IR reverb per chain is
                 # exactly the native slot budget, and it keeps "make the reverb
                 # longer" expressible as a re-propose; sat/clip/deess/gate/
@@ -4235,10 +4753,17 @@ class Session:
                 # _NATIVE_SINGLETON_KINDS step the monitor hosts once but the
                 # offline export would render twice): a new one replaces the old
                 chain = self._state["master_chain"]
+                entry = action.model_dump(exclude={"stem_id", "return_id"}, exclude_none=True)
+                if action.type == "width":
+                    # the Imager's stereoize stays as the user set it unless the move names it
+                    # (the pre-merge review of 2026-10-29)
+                    old = next((e for e in chain if e.get("type") == "width"), None)
+                    for k in ("stereoize", "stereoize_ms"):
+                        if k not in entry and old is not None and k in old:
+                            entry[k] = old[k]
                 chain[:] = self._replace_in_chain(
                     chain, lambda e: e["type"] == action.type)
-                _insert_canonical(chain, action.model_dump(
-                    exclude={"stem_id", "return_id"}, exclude_none=True), _MASTER_KINDS)
+                _insert_canonical(chain, entry, _MASTER_KINDS)
             else:  # eq / match-eq / dynamic-eq — slot in at the canonical position
                 # NB eq deliberately APPENDS, even for an identical band: the
                 # deterministic agent iterates by re-proposing the same cut each
@@ -4265,7 +4790,7 @@ class Session:
                     bus["chain"], lambda e: e["type"] == "mb_comp")
                 _insert_canonical(bus["chain"], action.model_dump(
                     exclude={"stem_id", "return_id"}, exclude_none=True), _BUS_KINDS)
-            elif action.type in ("utility", "imager", "ott", "overdrive", "saturation",
+            elif action.type in ("utility", "ott", "overdrive", "saturation",
                                  "transient", "gate", "deess", "clip",
                                  "chorus", "flanger", "auto_filter") + _WET_KINDS:
                 # one per bus — every native-singleton step (2026-08-06 singleton
@@ -4277,7 +4802,7 @@ class Session:
                     bus["chain"], lambda e: e["type"] == action.type)
                 _insert_canonical(bus["chain"], action.model_dump(
                     exclude={"stem_id", "return_id"}, exclude_none=True), _BUS_KINDS)
-            else:  # eq / match_eq / dynamic_eq / band_width — eq appends
+            else:  # eq / match_eq / dynamic_eq — eq appends
                 # (cumulative same-band iteration; see the master-chain note)
                 _insert_canonical(bus["chain"], action.model_dump(
                     exclude={"stem_id", "return_id"}, exclude_none=True), _BUS_KINDS)
@@ -4293,6 +4818,10 @@ class Session:
             stem["pan"] = action.pan
         elif action.type == "width":
             stem["width"] = action.width
+            if action.stereoize is not None:   # only what the move names (pre-merge review 2026-10-29)
+                stem["stereoize"] = bool(action.stereoize)
+            if action.stereoize_ms is not None:
+                stem["stereoize_ms"] = float(round(action.stereoize_ms))
         elif action.type == "mute":
             stem["muted"] = action.muted
         elif action.type == "exclude":
@@ -4341,11 +4870,11 @@ class Session:
             stem["chain"] = self._replace_in_chain(stem["chain"], lambda e: e is last)
             _insert_canonical(stem["chain"], action.model_dump(
                 exclude={"stem_id", "return_id"}, exclude_none=True), _STEM_KINDS)
-        elif action.type in ("utility", "imager", "ott", "overdrive", "saturation",
+        elif action.type in ("utility", "ott", "overdrive", "saturation",
                              "transient", "gate", "duck", "clip",
                              "chorus", "flanger", "auto_filter") + _WET_KINDS:
             # one per stem — every native-singleton step (the chain hosts a single
-            # Utility/imager/OTT/overdrive/sat/transient/gate/duck/clip stage, and
+            # Utility/OTT/overdrive/sat/transient/gate/duck/clip stage, and
             # one reverb + delay + IR reverb is exactly its space-device slot
             # budget); a new one replaces the old, so re-proposing adjusts the
             # params (the 2026-08-06 singleton audit closed sat/transient/gate/
@@ -4360,11 +4889,69 @@ class Session:
                 stem["chain"], lambda e: e["type"] == action.type)
             _insert_canonical(stem["chain"], action.model_dump(
                 exclude={"stem_id", "return_id"}, exclude_none=True), _STEM_KINDS)
-        else:  # eq / ranged comp+deess / match_eq / dynamic_eq / band_width append
+        else:  # eq / ranged comp+deess / match_eq / dynamic_eq append
             # (eq same-band entries are CUMULATIVE by design — see the
             # master-chain note above)
             _insert_canonical(stem["chain"], action.model_dump(
                 exclude={"stem_id", "return_id"}, exclude_none=True), _STEM_KINDS)
+
+    def _mutate_instance(self, action) -> None:
+        """A proposal that names WHICH device of its type it changes (Phase 65 step 3,
+        `instance`): N replaces the type's N-th entry on the target WHERE IT STANDS, handing its
+        identity on; "new" adds one at the type's canonical place, beside the others. The
+        guardrails have already refused an instance the target does not have."""
+        from .guardrails import replaced_entries
+        if action.stem_id == MASTER:
+            chain, kinds = self._state["master_chain"], _MASTER_KINDS
+        elif action.stem_id in self._state["buses"]:
+            chain, kinds = self._state["buses"][action.stem_id]["chain"], _BUS_KINDS
+        else:
+            chain, kinds = self.stems[action.stem_id]["chain"], _STEM_KINDS
+        entry = action.model_dump(exclude={"stem_id", "return_id", "instance"}, exclude_none=True)
+        if action.instance == "new":
+            _insert_canonical(chain, entry, kinds)
+            return
+        # N names the type's N-th entry AS THE PROPOSAL FOUND THE CHAIN (pre-merge review
+        # 2026-10-26): an earlier "new" of the same proposal lands at the type's canonical place,
+        # which can be in front of entry N - so the identity the guardrails judged is pinned before
+        # any action applies (`pin_instances`), and found by it here.
+        pinned = getattr(self, "_instance_pin", {}).pop(id(action), None)   # once: an id is reused
+        gone = ([e for e in chain if e.get("type") == action.type and e.get("uid") == pinned]
+                if pinned is not None else replaced_entries(chain, action))
+        if len(gone) != 1:
+            raise ValueError(f"no {action.type}#{action.instance} on the {action.stem_id} chain")
+        old = gone[0]
+        at = next(i for i, e in enumerate(chain) if e is old)
+        if old.get("owner") == "user":
+            self._replaced_user_devices.append(old["type"])
+        if isinstance(old.get("uid"), int):
+            self._carry_uid = (old["type"], old["uid"])      # see _stamp_entries
+        if old.get("after"):
+            entry["after"] = old["after"]                    # it stays where it played (Phase 66)
+        chain[at] = entry
+
+    def pin_instances(self, actions) -> None:
+        """Pin every `instance: N` of a proposal to the identity of the entry N names on the
+        chains as they stand NOW, before the first action applies (see `_mutate_instance`)."""
+        from .guardrails import replaced_entries
+        pins: dict[int, int] = {}
+        for action in actions:
+            inst = getattr(action, "instance", None)
+            if not isinstance(inst, int) or isinstance(inst, bool):
+                continue
+            sid = getattr(action, "stem_id", None)
+            if sid == MASTER:
+                chain = self._state["master_chain"]
+            elif sid in self._state["buses"]:
+                chain = self._state["buses"][sid]["chain"]
+            elif sid in self.stems:
+                chain = self.stems[sid]["chain"]
+            else:
+                continue
+            gone = replaced_entries(chain, action)
+            if len(gone) == 1 and isinstance(gone[0].get("uid"), int):
+                pins[id(action)] = gone[0]["uid"]
+        self._instance_pin = pins
 
     def probe_copy(self) -> "Session":
         """In-memory scratch copy for probe renders (Phase 12): identical
@@ -4653,7 +5240,7 @@ class Session:
                     message="transpose (whole-song key change) is master-only "
                             f"(got stem '{action.stem_id}')",
                     limit=0, value=0))
-            elif action.type == "duck" and (
+            elif action.type == "duck" and (action.trigger == 1 or action.key_stem_id) and (
                     action.key_stem_id == action.stem_id
                     or action.key_stem_id not in self.stems
                     or self.stems[action.key_stem_id].get("excluded")
@@ -4869,7 +5456,8 @@ class Session:
     # sum. comp / mb_comp makeup are charged here for the per-pass wallet and read
     # off the live chains for the session wallet (see _session_gain_baseline).
     _TRIM_SINGLETONS = frozenset({"saturation", "overdrive", "clip", "transient",
-                                  "ott", "utility", "comp", "mb_comp"})
+                                  "ott", "utility", "comp", "mb_comp",
+                                  "chorus"})   # chorus_law (2026-10-28): its mix curve lifts
 
     @staticmethod
     def _record_trim_charge(action: dict) -> Optional[float]:
@@ -4950,11 +5538,14 @@ class Session:
         return (action["type"] in Session._TRIM_SINGLETONS
                 and action.get("time_range_s") is None)
 
-    @staticmethod
-    def _replaced_by(actions: list) -> set[tuple[str, str]]:
-        """(target, type) pairs this proposal's whole-file singleton actions REPLACE —
+    def _replaced_by(self, actions: list) -> set[tuple[str, str]]:
+        """(target, slot) pairs this proposal's whole-file singleton actions REPLACE -
         their previously applied trim leaves the wallet, or adjusting makeup 4 -> 6
-        would cost 10 dB of budget instead of 2."""
+        would cost 10 dB of budget instead of 2. A slot is one instance (`type@uid`,
+        guardrails.instance_slot) or a bare type (every one of it): on a channel with two
+        utilities, changing `instance: 1` replaces that one's charge alone (Phase 65)."""
+        from .guardrails import replaced_slots
+        chains = self._chains_for_guardrails()
         out: set[tuple[str, str]] = set()
         for a in actions or ():
             t = getattr(a, "type", None) if not isinstance(a, dict) else a.get("type")
@@ -4962,8 +5553,24 @@ class Session:
             rng = (getattr(a, "time_range_s", None) if not isinstance(a, dict)
                    else a.get("time_range_s"))
             if t in Session._TRIM_SINGLETONS and sid and rng is None:
-                out.add((sid, t))
+                out |= {(sid, slot) for slot in replaced_slots(chains.get(sid, ()), a)}
         return out
+
+    def _slot_of(self, record: dict, index: int, action: dict) -> str:
+        """The ledger slot of a singleton record: its type and the identity of the entry it made."""
+        from .guardrails import instance_slot
+        uids = record.get("entry_uids")
+        uid = uids[index] if isinstance(uids, list) and index < len(uids) else None
+        return instance_slot(action["type"], uid)
+
+    @staticmethod
+    def _drop_legacy_slots(slots: dict) -> None:
+        """A bare-type slot (a record from before identities) is the one instance there was then:
+        a slot of the same target and type WITH an identity is what replaced it."""
+        for key in [k for k in slots if "@" not in k[-1]]:
+            if any(k[:-1] == key[:-1] and k[-1].partition("@")[0] == key[-1] and "@" in k[-1]
+                   for k in slots):
+                del slots[key]
 
     def _cumulative_gain_this_pass(self, actions: Optional[list] = None) -> dict[str, float]:
         """Level already *applied* (and not undone) per target in the current pass —
@@ -5020,12 +5627,18 @@ class Session:
         of budget, not 10."""
         # comp / mb_comp makeup is read off the live chains below (with the
         # replace exclusion), so the record walk skips those two here.
-        totals = self._cumulative_gain(None, replaces=self._replaced_by(actions),
+        from .guardrails import instance_slot, slot_replaced
+        replaced = self._replaced_by(actions)
+        totals = self._cumulative_gain(None, replaces=replaced,
                                        skip_types=frozenset({"comp", "mb_comp"}))
-        replaces_comp = {a.stem_id for a in actions
-                         if a.type == "comp"
-                         and getattr(a, "time_range_s", None) is None}
-        replaces_mb = {a.stem_id for a in actions if a.type == "mb_comp"}
+        replaced_on: dict[str, set[str]] = {}
+        for sid, slot in replaced:
+            replaced_on.setdefault(sid, set()).add(slot)
+
+        def replaced_entry(stem_id: str, entry: dict) -> bool:
+            # Per INSTANCE (Phase 65): changing one of two comps leaves the other's makeup spent.
+            return slot_replaced(instance_slot(entry["type"], entry.get("uid")),
+                                 replaced_on.get(stem_id, ()))
         chain_holders = {stem_id: stem["chain"]
                          for stem_id, stem in self.stems.items()}
         chain_holders.update({bus_id: bus["chain"]  # Phase 23: same budget
@@ -5037,10 +5650,10 @@ class Session:
                 if entry["type"] == "comp":
                     if entry.get("time_range_s") is not None:
                         continue             # one-sided: counted by _ranged_gain
-                    if stem_id in replaces_comp:
+                    if replaced_entry(stem_id, entry):
                         continue
                     makeup += level_charge_db(entry)     # incl. a true M/S comp's makeup
-                elif entry["type"] == "mb_comp" and stem_id not in replaces_mb:
+                elif entry["type"] == "mb_comp" and not replaced_entry(stem_id, entry):
                     makeup += level_charge_db(entry)     # incl. an upward band's boost
             if makeup:
                 totals[stem_id] = totals.get(stem_id, 0.0) + makeup
@@ -5059,7 +5672,7 @@ class Session:
         user's co-edits, and the bound is on the agent. Undo refunds, like the gain wallet.
 
         A singleton curve (the overdrive's tone) replaces itself, so it is not appended: per
-        target and type, `singletons` holds the entry that stands (the last applied, else the
+        target and INSTANCE (`guardrails.instance_slot`, Phase 65), `singletons` holds the entry that stands (the last applied, else the
         trimmed carry's) and the one that stood when this pass began (`prior`)."""
         from .guardrails import EQ_CURVE_TYPES
         this_pass: dict[str, list] = {}
@@ -5076,7 +5689,7 @@ class Session:
                     counted = self._ledger_eq_action(record, index, action)   # D9·R5
                     if self._is_eq_singleton(action):
                         slot = singletons.setdefault(action["stem_id"], {}).setdefault(
-                            action["type"], {"standing": None, "prior": None})
+                            self._slot_of(record, index, action), {"standing": None, "prior": None})
                         slot["standing"] = counted
                         if record["pass_number"] < self.pass_number:
                             slot["prior"] = counted
@@ -5084,8 +5697,13 @@ class Session:
                     session.setdefault(action["stem_id"], []).append(counted)
                     if record["pass_number"] == self.pass_number:
                         this_pass.setdefault(action["stem_id"], []).append(counted)
+        for by_slot in singletons.values():          # a bare-type slot was the one instance then
+            for kind in [k for k in by_slot if "@" not in k]:
+                if any(k.partition("@")[0] == kind and "@" in k for k in by_slot):
+                    del by_slot[kind]
         return {"pass": this_pass, "session": session, "singletons": singletons,
-                "trimmed": self._state.get("trimmed_eq_curves_db", {})}
+                "trimmed": self._state.get("trimmed_eq_curves_db", {}),
+                "chains": self._chains_for_guardrails()}   # which instance a proposal replaces
 
     def _signal_parents(self) -> dict[str, Optional[str]]:
         """Every stem and bus -> the next target its signal goes through on the way to the
@@ -5128,17 +5746,27 @@ class Session:
         if pass_number is None:   # session scope: include gain spent by trimmed records
             totals.update({k: float(v)
                            for k, v in self._state.get("trimmed_gain_totals", {}).items()})
+        from .guardrails import slot_replaced
+        replaced_on: dict[str, set[str]] = {}
+        for sid, slot in replaces:
+            replaced_on.setdefault(sid, set()).add(slot)
+
+        def gone(sid: str, slot: str) -> bool:
+            return slot_replaced(slot, replaced_on.get(sid, ()))
+
+        # Keyed by (target, slot): a slot is one INSTANCE of a replacing type (Phase 65) -
+        # `type@uid`, or the bare type for a record from before identities.
         singleton_last: dict[tuple[str, str], float] = {}
         singleton_prior: dict[tuple[str, str], float] = {}   # its value when this pass began
         # What the trimmed records left as each singleton's LAST value (reader D8·R4): the
-        # session's standing charge until a live record of the same pair replaces it, and - in
+        # session's standing charge until a live record of the same slot replaces it, and - in
         # the scope of a pass - the value a replacement is a delta against.
-        for sid, by_type in (self._state.get("trimmed_singleton_charges") or {}).items():
-            for t, carried in by_type.items():
+        for sid, by_slot in (self._state.get("trimmed_singleton_charges") or {}).items():
+            for slot, carried in by_slot.items():
                 if pass_number is not None:
-                    singleton_prior[(sid, t)] = float(carried)
-                elif t not in skip_types and (sid, t) not in replaces:
-                    singleton_last[(sid, t)] = float(carried)
+                    singleton_prior[(sid, slot)] = float(carried)
+                elif slot.partition("@")[0] not in skip_types and not gone(sid, slot):
+                    singleton_last[(sid, slot)] = float(carried)
         for record in self._state["proposals"]:
             if record["status"] != "applied":
                 continue
@@ -5157,19 +5785,22 @@ class Session:
                     continue                              # spent on what held this id before (D8·R6)
                 if earlier:
                     if self._is_singleton_record(action):
-                        singleton_prior[(sid, t)] = charge
+                        singleton_prior[(sid, self._slot_of(record, index, action))] = charge
                 elif self._is_singleton_record(action):
-                    if (sid, t) in replaces:
+                    slot = self._slot_of(record, index, action)
+                    if gone(sid, slot):
                         continue
-                    singleton_last[(sid, t)] = charge     # replace semantics
+                    singleton_last[(sid, slot)] = charge     # replace semantics
                 elif charge:
                     totals[sid] = totals.get(sid, 0.0) + charge
-        for (sid, t), charge in singleton_last.items():
-            charge -= singleton_prior.get((sid, t), 0.0)
+        self._drop_legacy_slots(singleton_last)
+        self._drop_legacy_slots(singleton_prior)
+        for key, charge in singleton_last.items():
+            charge -= singleton_prior.get(key, 0.0)
             if charge:
-                totals[sid] = totals.get(sid, 0.0) + charge
-        for (sid, t) in replaces:
-            if (prior := singleton_prior.get((sid, t), 0.0)) and t not in skip_types:
+                totals[key[0]] = totals.get(key[0], 0.0) + charge
+        for (sid, slot), prior in singleton_prior.items():
+            if prior and gone(sid, slot) and slot.partition("@")[0] not in skip_types:
                 totals[sid] = totals.get(sid, 0.0) - prior
         return totals
 
@@ -5246,6 +5877,8 @@ class Session:
                     continue
                 if (carry is not None and entry.get("type") == carry[0]
                         and carry[1] not in seen and carry[1] not in taken):
+                    if len(carry) > 2 and carry[2]:
+                        entry["after"] = carry[2]            # Phase 66: where the one it replaced played
                     uid, carry = carry[1], None
                 else:
                     serial += 1

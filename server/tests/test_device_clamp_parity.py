@@ -71,6 +71,20 @@ def _expected_snap(path: str, dev: str = "") -> str:
     """The snap `set_master_device_param` applies to this path, by its own branch order."""
     if path in ("ir", "style"):   # a limiter style is an index (2026-10-17)
         return "index"
+    if dev == "overdrive" and path == "character":   # 0 pedal .. 3 power (2026-10-26)
+        return "index"
+    if dev == "duck" and path in ("trigger", "curve", "length", "band"):   # duck_law (2026-10-28)
+        return "index"
+    if dev == "gate" and path == "character":   # 0 classic .. 3 guitar (2026-10-27)
+        return "index"
+    if dev == "deess" and path == "mode":   # 0 allround / 1 vocal (2026-10-27)
+        return "index"
+    if dev == "chorus" and path == "mode":   # 0 I / 1 II / 2 I+II (chorus_law, 2026-10-28)
+        return "index"
+    if dev == "width" and path in ("stereoize", "stereoize_ms"):   # the Imager's (2026-10-28)
+        return "index"
+    if dev == "return_delay" and path == "ping_pong":   # a switch: 0 or 1 (2026-10-26)
+        return "index"
     if dev == "utility" and path in UTILITY_TOGGLES:   # a Utility's switch: 0 or 1 (2026-10-21)
         return "index"
     if dev == "auto_filter" and path in AUTO_FILTER_SNAPPED:   # Phase 63: 12 / 24, the rest indices
@@ -79,8 +93,6 @@ def _expected_snap(path: str, dev: str = "") -> str:
         return "slope"
     if path.endswith("oversample"):
         return "oversample"
-    if path.endswith("voices"):
-        return "voices"
     return "none"
 
 
@@ -135,7 +147,7 @@ def test_the_parse_is_not_vacuous():
     assert len(cpp) == len(_python_table()) >= 168
     assert cpp[("comp", "makeup_db")] == (0.0, 12.0, "none")
     assert cpp[("eq", "slope_db_oct")][2] == "slope"
-    assert cpp[("chorus", "voices")][2] == "voices"
+    assert cpp[("chorus", "mode")][2] == "index"
 
 
 def test_coedit_singleton_list_matches_the_native_mirror():
@@ -146,10 +158,6 @@ def test_coedit_singleton_list_matches_the_native_mirror():
     the monitor ran a device the render would never have (dock audit 2026-09-10). Refusing at
     the dock's own door needs the list in C++, and a second copy of a list is a second thing
     to drift, so this pins it the way the clamp table above is pinned.
-
-    Note it is deliberately NOT `isSingleSlotDeviceType`, which is "every native type except
-    the EQ-bank ones" and therefore counts `dynamic_eq` and `band_width` as singletons when
-    Python does not.
     """
     from mix_engine.session import _NATIVE_SINGLETON_KINDS
 

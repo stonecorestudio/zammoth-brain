@@ -76,8 +76,8 @@ async def test_analyze_reference_roundtrip_and_cache(demo_project):
     [{"type": "saturation", "stem_id": "stem_a", "drive_db": 9.0}],
     [{"type": "transient", "stem_id": "stem_b", "attack_db": 4.0,
       "sustain_db": -2.0}],
-    [{"type": "duck", "stem_id": "stem_b", "key_stem_id": "stem_a",
-      "threshold_db": -30.0, "depth_db": 8.0}],
+    # SYNC: the demo's key is a slow swell, which never fires a TRACK duck (duck_law, 2026-10-28)
+    [{"type": "duck", "stem_id": "stem_b", "trigger": "sync", "mix": 0.5}],
 ])
 async def test_processor_apply_render_undo(demo_project, actions):
     """Each Phase 7 processor: changes the bounce, renders deterministically,
@@ -111,19 +111,48 @@ async def test_processor_apply_render_undo(demo_project, actions):
 
 
 @pytest.mark.anyio
-async def test_duck_reduces_target_under_key(demo_project):
+async def test_a_sync_duck_pumps_on_the_grid(demo_project):
+    async with create_connected_server_and_client_session(
+            create_server(demo_project)) as client:
+        before = await call(client, "analyze_stem", {"stem_id": "stem_b"})
+        proposal = await call(client, "propose_actions", {"req": {
+            "rationale": "a grid pump", "predicted_impact": [],
+            "actions": [{"type": "duck", "stem_id": "stem_b", "trigger": "sync", "mix": 0.7}]}})
+        assert (await call(client, "apply_proposal",
+                           {"proposal_id": proposal["proposal_id"]}))["ok"]
+        after = await call(client, "analyze_stem", {"stem_id": "stem_b"})
+        assert after["lufs_s"] < before["lufs_s"] - 1.0  # audibly ducked
+
+
+@pytest.mark.anyio
+async def test_a_track_duck_ducks_under_its_keys_hits(demo_project):
+    """The kick->bass classic, on a key that HAS hits (the review of 2026-10-28: this test ran a
+    SYNC duck, which never hears its key): a percussive key written beside the demo's stems, and a
+    duck that names the key and no trigger - a TRACK duck. Its reduction lands on the hits."""
+    import numpy as np
+    import soundfile as sf
+    sr = sf.info(str(demo_project / "stem_b.wav")).samplerate
+    n = int(sf.info(str(demo_project / "stem_b.wav")).frames)
+    kick = np.zeros((n, 2))
+    for at in range(0, n, sr // 2):                       # a hit every half second
+        m = min(n - at, int(0.08 * sr))
+        t = np.arange(m) / sr
+        kick[at:at + m] += (0.8 * np.exp(-t * 40.0) * np.sin(2 * np.pi * 60.0 * t))[:, None]
+    sf.write(str(demo_project / "kick.wav"), kick, sr, subtype="FLOAT")
     async with create_connected_server_and_client_session(
             create_server(demo_project)) as client:
         before = await call(client, "analyze_stem", {"stem_id": "stem_b"})
         proposal = await call(client, "propose_actions", {"req": {
             "rationale": "kick->bass classic", "predicted_impact": [],
-            "actions": [{"type": "duck", "stem_id": "stem_b",
-                         "key_stem_id": "stem_a", "threshold_db": -30.0,
-                         "depth_db": 8.0}]}})
+            "actions": [{"type": "duck", "stem_id": "stem_b", "key_stem_id": "kick", "mix": 0.7}]}})
+        assert proposal["accepted"], proposal
         assert (await call(client, "apply_proposal",
                            {"proposal_id": proposal["proposal_id"]}))["ok"]
         after = await call(client, "analyze_stem", {"stem_id": "stem_b"})
-        assert after["lufs_s"] < before["lufs_s"] - 1.0  # audibly ducked
+        assert after["lufs_s"] < before["lufs_s"] - 1.0  # audibly ducked on the hits
+    from mix_engine.session import Session
+    duck = next(e for e in Session(demo_project).stems["stem_b"]["chain"] if e["type"] == "duck")
+    assert duck["trigger"] == 1 and duck["key_stem_id"] == "kick"   # a key alone is TRACK
 
 
 @pytest.mark.anyio
@@ -134,8 +163,7 @@ async def test_duck_key_rules(demo_project):
             result = await call(client, "propose_actions", {"req": {
                 "rationale": "bad duck", "predicted_impact": [],
                 "actions": [{"type": "duck", "stem_id": "stem_b",
-                             "key_stem_id": key, "threshold_db": -30.0,
-                             "depth_db": 6.0}]}})
+                             "key_stem_id": key, "trigger": "track", "mix": 0.5}]}})
             assert not result["accepted"]
             assert result["violations"][0]["rule"] == "duck_key_stem"
 

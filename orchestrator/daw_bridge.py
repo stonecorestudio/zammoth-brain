@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import contextvars
 import functools
 import hashlib
 import json
@@ -57,6 +58,10 @@ _CANNED_CHAT = ("I'm your mix engineer — tell me what to do and I'll do it: e.
 #: real 4-stem project a second pass changed nothing (-14.7 LUFS either way against a
 #: -14 goal) because the -1.0 dBTP ceiling binds before the pass budget does.
 AUTOMIX_REFINE_PASSES = 1
+
+#: How many plug-ins a DAW track holds - dawsession::kTrackPluginCap (DawSession.h), pinned by
+#: test_plugin_cap.py. A send is one of them.
+TRACK_PLUGIN_CAP = 128
 
 
 def brief_not_understood(exc: BaseException) -> bool:
@@ -151,7 +156,8 @@ def _master_resolve_inputs(project_dir: Path) -> tuple[float, float | None, int]
 def resolve_chains(state: dict, makeup_db: float = 0.0,
                    pre_lufs_i: float | None = None,
                    native_returns: bool = False,
-                   sample_rate: float | None = None) -> dict:
+                   sample_rate: float | None = None,
+                   session=None) -> dict:
     """Per-stem + master resolved monitor-chain contracts. The DAW applies each
     ``[stem_id]`` to that track's MonitorChain node and ``["master"]`` to the
     master node. ``makeup_db`` / ``pre_lufs_i`` come from the master render so the
@@ -203,6 +209,166 @@ def resolve_chains(state: dict, makeup_db: float = 0.0,
             params = monitor_chain_params(effective_return_chain(ret), sample_rate=sample_rate)
             params["return_track_mode"] = True
             out[f"return:{return_id}"] = params
+    if session is not None:
+        attach_duck_hits(out, session)
+    return out
+
+
+# A TRACK duck's hits, by the trigger's render (duck_law, 2026-10-28): the key's fingerprint, the
+# offset, the rate and the tempo map say everything the hits depend on. The newest few projects'
+# worth is kept; several threads ask (a co-edit's reply, a chain push), so the table is locked.
+_DUCK_HITS: dict = {}
+_DUCK_HITS_MAX = 64
+_DUCK_HITS_LOCK = threading.Lock()
+# What each project's ducked stems were last SENT (a chain push, a co-edit's reply): (key, ck) per
+# (project, stem). A co-edit that moved a trigger's audio is answered with the new list
+# (`duck_hits_owed`) - nothing else pushes chains then, and the node would play the old one.
+_DUCK_HITS_SENT: dict = {}
+
+
+def duck_key_blind(session, key: str) -> bool:
+    """Does the DAW play this trigger otherwise than the brain renders it? Then its hits would be
+    another audio's: a looped, warped or moved clip the session does not hold as arranged, an
+    automation lane or a modulator on it, a hosted plug-in. The node then listens to its live
+    sidechain (the review of 2026-10-28: a one-bar kick loop gave hits for its first bar only)."""
+    edit = LATEST_EDIT.get(str(Path(session.project_dir).resolve()))
+    if not isinstance(edit, dict):
+        return False
+    track = next((t for t in edit.get("tracks") or []
+                  if isinstance(t, dict) and str(t.get("name")) == key), None)
+    if track is None:
+        return False
+    held = bool((session.stems.get(key) or {}).get("clips"))
+    if not held and _arranged_audio(track):
+        return True
+    if any(isinstance(lane, dict) for lane in track.get("automation") or []):
+        return True
+    if any(isinstance(m, dict) for m in track.get("modifiers") or []):
+        return True
+    return any(isinstance(p, dict) and p.get("enabled", True) and not p.get("instrument")
+               for p in track.get("plugins") or [])
+
+
+def _duck_hits_of(session, stem_id: str, key: str, sr, tempo) -> tuple[tuple, dict | None]:
+    """(ck, hits) for the TRACK duck on `stem_id` keyed by `key`: hits None = the node listens
+    to its live sidechain (a trigger the brain cannot hear, or cannot hear as it plays)."""
+    import numpy as np
+    from mix_engine import dsp, duck_law
+    if not dsp._duck_key_heard(session, key) or key == stem_id or duck_key_blind(session, key):
+        return (key, "live"), None
+    offset = (float(session.stems[key].get("capture_start_s", 0.0))
+              - float(session.stems[stem_id].get("capture_start_s", 0.0)))
+    ck = (str(session.project_dir), dsp._stem_cache_key(session, key, True), round(offset, 9), sr,
+          json.dumps(session.tempo_map, sort_keys=True, default=str))
+    with _DUCK_HITS_LOCK:
+        hits = _DUCK_HITS.get(ck)
+    if hits is None:
+        audio, _ = dsp.render_stem(session, key, exclude_ducks=True)
+        n = int(np.asarray(audio).shape[0]) + max(0, int(round(offset * sr)))
+        idx = duck_law.onsets(dsp._key_audio(audio, n, sr, offset), sr)
+        secs = [float(i) / float(sr) for i in idx]
+        quarters = [float(q) for q in np.asarray(tempo.ppq_at(np.asarray(secs, dtype=np.float64)))] if secs else []
+        hits = {"hits_s": secs, "hits_q": quarters}
+        with _DUCK_HITS_LOCK:
+            while len(_DUCK_HITS) >= _DUCK_HITS_MAX:
+                _DUCK_HITS.pop(next(iter(_DUCK_HITS)))
+            _DUCK_HITS[ck] = hits
+    return ck, hits
+
+
+def _track_duck_key(chain: list) -> str | None:
+    """The trigger the TRACK ducks of one chain name (a track has one), or None."""
+    from mix_engine import duck_law
+    for e in chain:
+        if (isinstance(e, dict) and e.get("type") == "duck" and e.get("enabled", True)
+                and duck_law.trigger_index(e.get("trigger", 0)) == 1 and e.get("key_stem_id")):
+            return str(e["key_stem_id"])
+    return None
+
+
+def _tempo_for(session):
+    from mix_engine import dsp
+    tempo = dsp._tempo_of(session)
+    if tempo is None:
+        from mix_engine.tempo_map import TempoMap
+        tempo = TempoMap.from_fact(None)
+    return tempo
+
+
+def attach_duck_hits(chains: dict, session) -> None:
+    """Give each TRACK duck the brain can hear its trigger for the trigger's HITS, found where the
+    offline render finds them (`duck_law.onsets` on the trigger rendered without its own keyed
+    devices): `hits_s` (seconds on the timeline, at the project's rate) and `hits_q` (the song's
+    quarter position at each, from its tempo map). The DAW's node plays them by the playhead - no
+    latency and no look-ahead needed - because a sidechain arrives delayed by whatever latency the
+    node reports (the engine aligns it), which made the look-ahead cancel itself. A trigger the
+    brain cannot render (an instrument track, a deleted one) or cannot render as the DAW plays it
+    (`duck_key_blind`) gets no list: the node falls back to its live sidechain, without
+    look-ahead. A trigger whose render fails gets none either - never a failed chain push."""
+    sr = session.project_sample_rate()
+    tempo = _tempo_for(session)
+    project = str(session.project_dir)
+    for stem_id, stem in session.stems.items():
+        contract = chains.get(stem_id)
+        if not contract:
+            continue
+        entries = [e for e in contract.get("entries", []) if isinstance(e, dict)]
+        key = _track_duck_key(entries)
+        if key is None:
+            continue
+        try:
+            ck, hits = _duck_hits_of(session, stem_id, key, sr, tempo)
+        except Exception as exc:   # noqa: BLE001 - a trigger that cannot render ducks live
+            print(f"[duck] hits for {stem_id} <- {key} not found: {type(exc).__name__}: {exc}",
+                  file=sys.stderr)
+            ck, hits = (key, "failed"), None
+        with _DUCK_HITS_LOCK:
+            _DUCK_HITS_SENT[(project, stem_id)] = (key, ck)
+        if hits is None:
+            continue
+        from mix_engine import duck_law
+        for e in entries:
+            if (e.get("type") == "duck" and duck_law.trigger_index(e.get("trigger", 0)) == 1
+                    and str(e.get("key_stem_id") or "") == key):
+                e["hits_s"] = list(hits["hits_s"])
+                e["hits_q"] = list(hits["hits_q"])
+
+
+def duck_hits_owed(session, wanted=()) -> dict:
+    """The TRACK ducks whose trigger's hits are not what the DAW was last sent - its audio moved
+    (a co-edit on the trigger: a clip, its level, its chain; the tempo map), or the DAW dropped
+    them and asks (`wanted`: the stems it holds none for) - as `{stem: {key, hits_s, hits_q}}`,
+    or `{stem: {key, live: true}}` for a trigger the node must hear live. A co-edit's reply
+    carries it; nothing else would until the agent's next move (the review of 2026-10-28)."""
+    from mix_engine.session import effective_chain
+    sr = session.project_sample_rate()
+    tempo = None
+    project = str(session.project_dir)
+    wanted = {str(w) for w in wanted or ()}
+    out: dict = {}
+    for stem_id, stem in session.stems.items():
+        if stem.get("excluded"):
+            continue
+        key = _track_duck_key([e for e in effective_chain(stem) if isinstance(e, dict)])
+        if key is None:
+            if stem_id in wanted:
+                out[stem_id] = {"key": "", "live": True}
+            continue
+        if tempo is None:
+            tempo = _tempo_for(session)
+        try:
+            ck, hits = _duck_hits_of(session, stem_id, key, sr, tempo)
+        except Exception as exc:   # noqa: BLE001
+            print(f"[duck] hits for {stem_id} <- {key} not found: {type(exc).__name__}: {exc}",
+                  file=sys.stderr)
+            ck, hits = (key, "failed"), None
+        with _DUCK_HITS_LOCK:
+            sent = _DUCK_HITS_SENT.get((project, stem_id))
+            if stem_id not in wanted and sent == (key, ck):
+                continue
+            _DUCK_HITS_SENT[(project, stem_id)] = (key, ck)
+        out[stem_id] = ({"key": key, "live": True} if hits is None
+                        else {"key": key, "hits_s": list(hits["hits_s"]), "hits_q": list(hits["hits_q"])})
     return out
 
 
@@ -480,6 +646,15 @@ def measured_pre_limiter(session, own_pre):
     return own_pre
 
 
+#: True while the agent's gesture performs a routing op (`turn_host.LiveTurn`, and an approved
+#: step through `Brain`'s counting invoke). The gesture treats the brain's reading as stale after
+#: such a change and pushes measured chains at its end, so `chains_with_readout` resolves over
+#: the last measurement instead of rendering the song for a reading nobody reads (the QA of
+#: 2026-10-30: six `send.set` were six full renders, 40 s of one turn) - and, unlike `light`,
+#: leaves that measurement stamped with the state it was made at, so the next reader measures.
+IN_AGENT_TURN: contextvars.ContextVar[bool] = contextvars.ContextVar("in_agent_turn", default=False)
+
+
 def chains_with_readout(project_dir: Path, cache: dict | None = None,
                         light: bool = False) -> dict:
     """ONE master render → both the resolved graph chains (with the limiter's makeup/pre-LUFS)
@@ -504,7 +679,8 @@ def chains_with_readout(project_dir: Path, cache: dict | None = None,
         # Without these keys the DAW's realizeBuses never runs and a ⌘G group in an empty
         # project records brain-side but never draws.
         return {"chains": resolve_chains(session._state, 0.0, measured_pre_limiter(session, None),
-                                         native_returns=True, sample_rate=session.project_sample_rate()),
+                                         native_returns=True, sample_rate=session.project_sample_rate(),
+                                         session=session),
                 "readout": {"silent": True},
                 "strip": strip_state(session._state),
                 "tempo_map": session._state.get("tempo_map"),   # what the app compares its edit's map with (Phase 63)
@@ -512,13 +688,15 @@ def chains_with_readout(project_dir: Path, cache: dict | None = None,
                 "bus_outputs": bus_outputs(session._state),
                 "send_returns": returns_topology(session._state),
                 "routing_uids": routing_uids(session._state)}
-    if light and cache and "readout" in cache:
+    if (light or IN_AGENT_TURN.get()) and cache and "readout" in cache:
         chains = resolve_chains(session._state, cache.get("makeup_db", 0.0),
                                 measured_pre_limiter(session, cache.get("pre_lufs_i")), native_returns=True,
-                                sample_rate=session.project_sample_rate())
+                                sample_rate=session.project_sample_rate(), session=session)
         # The caller's change was audio-neutral, so the numbers are this state's too: the
         # next neutral change (a second ⌘G) finds them current and renders nothing either.
-        cache["fp"] = session.render_fingerprint()
+        # A change inside the agent's gesture is not neutral: its numbers stay the old state's.
+        if light:
+            cache["fp"] = session.render_fingerprint()
         return {"chains": chains, "buses": bus_topology(session._state),
                 "strip": strip_state(session._state),
                 "tempo_map": session._state.get("tempo_map"),   # what the app compares its edit's map with (Phase 63)
@@ -537,7 +715,7 @@ def chains_with_readout(project_dir: Path, cache: dict | None = None,
     # re-reading session.json — correct + works before the file is first persisted.
     chains = resolve_chains(session._state, report.get("limiter_makeup_db", 0.0),
                             measured_pre_limiter(session, report.get("pre_limiter_lufs_i")), native_returns=True,
-                            sample_rate=session.project_sample_rate())
+                            sample_rate=session.project_sample_rate(), session=session)
     return {"chains": chains, "buses": bus_topology(session._state),
             "strip": strip_state(session._state),
                 "tempo_map": session._state.get("tempo_map"),   # what the app compares its edit's map with (Phase 63)
@@ -1603,7 +1781,7 @@ def _is_structural_coedit(url: str) -> bool:
 _OCCURRENCE_COEDITS: dict[str, Optional[str]] = {
     "chain_param": None, "device_range": None, "device_param": None, "remove_device": None,
     "device_enabled": None, "device_channel": None,
-    "eq_shape": "eq", "device_band": "band_width", "sat_multiband": "saturation",
+    "eq_shape": "eq", "sat_multiband": "saturation",
 }
 
 
@@ -1632,6 +1810,17 @@ def _order_entries(chain: list, tokens: list[str]) -> list[dict]:
                   else [] if occ.isdigit() else matches)
         out += [e for e in picked if not any(e is o for o in out)]
     return out
+
+
+def _order_after(q: dict, tokens: list) -> Optional[list[str]]:
+    """A device_order's `after` list (Phase 66): one per token - a rack's or a plug-in's item id,
+    or `-` for ahead of every plug-in (never blank: `parse_qs` drops a blank value, and an order
+    of one device placed nowhere must still clear its place). None when the co-edit carries none
+    (an older order, which places nothing)."""
+    if "after" not in q:
+        return None
+    places = ["" if p in ("", "-") else p for p in q.get("after", ["-"])[0].split(",")]
+    return (places + [""] * len(tokens))[:len(tokens)]
 
 
 def _coedit_who(session, url: str) -> Optional[dict]:
@@ -1663,7 +1852,13 @@ def _coedit_who(session, url: str) -> Optional[dict]:
     if endpoint == "device_order":
         tokens = [t for t in q.get("order", [""])[0].split(",") if t]
         uids = [e.get("uid") for e in _order_entries(chain, tokens)]
-        return {"uids": uids} if uids and all(isinstance(u, int) for u in uids) else None
+        if not uids or not all(isinstance(u, int) for u in uids):
+            return None
+        out: dict = {"uids": uids}
+        after = _order_after(q, tokens)
+        if after is not None and len(after) == len(uids):
+            out["afters"] = after       # where each one plays (Phase 66), replayed with it
+        return out
     if endpoint == "add_device":
         return {"had": [e.get("uid") for e in chain]}
     return None
@@ -2106,14 +2301,18 @@ def _replay_one_coedit(session, entry: dict, target: str) -> None:
             query.append(("occurrence", str(at[1])))
         _apply_one_coedit(session, urlunsplit(parts._replace(query=urlencode(query))))
     elif "uids" in who:
-        tokens = [f"{at[0]}#{at[1]}" for at in map(address, who["uids"]) if at is not None]
+        afters = who.get("afters")
+        pairs = [(f"{at[0]}#{at[1]}", (afters[i] if afters and i < len(afters) else ""))
+                 for i, at in enumerate(map(address, who["uids"])) if at is not None]
+        tokens = [t for t, _ in pairs]
         if not tokens:        # an empty order is "canonical grouping", which nobody asked for
             raise LookupError("none of the devices it ordered is on the chain any more")
+        place = [a for _, a in pairs] if afters is not None else None
         stem = _bare_bus(session, q.get("stem", ["master"])[0] or "master")
         if stem != "master":
-            session.set_stem_device_order(stem, tokens)
+            session.set_stem_device_order(stem, tokens, place)
         else:
-            session.set_master_device_order(tokens)
+            session.set_master_device_order(tokens, place)
     elif "new_uid" in who:
         had = [e.get("uid") for e in chain]
         _apply_one_coedit(session, url)
@@ -2207,13 +2406,6 @@ def _apply_one_coedit(session, url: str) -> None:
     elif endpoint == "device_channel":
         session.set_device_channel(s("device_type", "eq"), i("occurrence"),
                                    s("channel", "stereo"), target=stem, seed=boolp("seed"))
-    elif endpoint == "device_band":
-        # 2026-07-19: lo_hz/hi_hz (the DAW's free band scrub) override the label
-        _lo, _hi = s("lo_hz"), s("hi_hz")
-        session.set_device_band(i("occurrence"), s("band", ""),
-                                lo_hz=_num("lo_hz") if _lo else None,
-                                hi_hz=_num("hi_hz") if _hi else None,
-                                target=stem)
     elif endpoint == "set_send":
         # The user's send move (dry/wet balance into a return), mirrored to the brain so the
         # agent's next pass + the export oracle see it (shared control). The source may be a
@@ -2254,10 +2446,11 @@ def _apply_one_coedit(session, url: str) -> None:
                                           boolp("enabled", True), target=stem)
     elif endpoint == "device_order":
         order = [t for t in s("order").split(",") if t]
+        after = _order_after(q, order)      # where each device plays (Phase 66), when it says
         if stem != "master":
-            session.set_stem_device_order(stem, order)
+            session.set_stem_device_order(stem, order, after)
         else:
-            session.set_master_device_order(order)
+            session.set_master_device_order(order, after)
     elif endpoint == "set_stem":
         # The user's channel-strip move (fader gain / pan / mute) — the DAW's direct channel,
         # mirrored to the brain so the agent's next pass starts from the user's mix (Session
@@ -2271,6 +2464,10 @@ def _apply_one_coedit(session, url: str) -> None:
             changes["width"] = f("width")
         if "width_on" in q:   # the strip Width's on/off (the stereo width audit, SW1)
             changes["width_on"] = boolp("width_on")
+        if "stereoize" in q:  # the Imager's stereoize (2026-10-28): on / off and its time
+            changes["stereoize"] = boolp("stereoize")
+        if "stereoize_ms" in q:
+            changes["stereoize_ms"] = f("stereoize_ms")
         if "tag" in q:   # the user sets the track's ROLE tag (drives the agent's family targets)
             changes["tags"] = [s("tag")] if s("tag") else []
         if "muted" in q:
@@ -2342,7 +2539,7 @@ def keep_strip_over_copy(session, stem_id: str, keep: Optional[dict]) -> None:
 
 def register_stem_copy(project_dir: Path, path: str, stem_id: str | None = None,
                        bus: str | None = None, *, copy_from: str | None = None,
-                       keep: Optional[dict] = None) -> dict:
+                       keep: Optional[dict] = None, after_map: Optional[dict] = None) -> dict:
     """``import_stem``, and - for a DUPLICATED track - the source's mix state brought onto the
     new stem in the same step (``copy_from``), with the copy's own live strip kept over it
     (``keep``). One call, so the brain's in-turn registration of a duplicate (reader C1·R3,
@@ -2356,7 +2553,7 @@ def register_stem_copy(project_dir: Path, path: str, stem_id: str | None = None,
     session = Session(project_dir)
     dest = str(reg.get("stem_id") or stem_id or "")
     if copy_from in session.stems and dest in session.stems and copy_from != dest:
-        copied = session.copy_stem_state(copy_from, dest)
+        copied = session.copy_stem_state(copy_from, dest, after_map)
         if copied.get("ok"):
             keep_strip_over_copy(session, dest, keep)
             reg["copied_from"] = copy_from
@@ -3187,9 +3384,10 @@ def transpose_to_target_key(project_dir: Path, tonic: str,
         "predicted_impact": [],
         "actions": [{"type": "transpose", "stem_id": "master", "semitones": interval}],
     })
+    from mix_engine.guardrails import pass_cap_among
+
     result = session.propose(req)
-    if (not result.accepted and result.violations
-            and all(v.rule == "proposals_per_pass" for v in result.violations)):
+    if not result.accepted and pass_cap_among(result.violations):
         # A stale pass (aborted run) exhausted the proposal budget; a user
         # gesture gets a fresh pass, same as gateway._chat_propose.
         session.advance_pass()
@@ -4406,6 +4604,80 @@ def read_track_entry(edit: dict | None, name: str, clip: int | None = None,
     return out
 
 
+#: Said beside a channel whose device rows predate this turn's own mix moves. A proposal lands in
+#: the session (and every render the brain makes) at once, but reaches the DAW's live chain only
+#: when the reply that ends the turn carries `chains` (`Brain._realize_mix_before` hands it over
+#: early only before a render COMMAND). Until then `devices` is the chain from before the move -
+#: read as "no processing", it had the engineer tell a user the DAW might not be playing its
+#: chains (before/after demos, 2026-10-29).
+CHAIN_PENDING_NOTE = ("devices[] is the DAW's chain from before this turn's mix moves: they are "
+                      "in the session and in every render now, and reach the DAW's chain (and "
+                      "the dock) when this turn ends. chain_after_this_turn is what it will play. "
+                      "Not a fault - do not report it as one.")
+
+
+def _session_chain_types(state: dict, name: str) -> tuple[str, list[str]] | None:
+    """(the move target id, the chain's device types) for a channel named as the snapshot names
+    it - a stem bare, `return:<id>`, `bus:<id>`, `master` - or None when the session has none."""
+    head, _, rest = name.partition(":")
+    if name == "master":
+        tid, chain = "master", state.get("master_chain")
+    elif rest and head == "return":
+        tid, chain = rest, ((state.get("returns") or {}).get(rest) or {}).get("chain")
+    elif rest and head == "bus":
+        tid, chain = rest, ((state.get("buses") or {}).get(rest) or {}).get("chain")
+    else:
+        tid, chain = name, ((state.get("stems") or {}).get(name) or {}).get("chain")
+    if not isinstance(chain, list):
+        return None
+    return tid, [str(e.get("type")) for e in chain
+                 if isinstance(e, dict) and e.get("type") and e.get("type") != "gain"]
+
+
+def chains_not_yet_in_daw(project_dir: Path, edit: dict | None,
+                          moved: set[str]) -> dict[str, list[str]]:
+    """{channel name: the session's device types} for every channel this turn's proposals moved
+    (`moved`: `_move_target` ids) whose row in the live edit does not list that chain yet - the
+    DAW takes a turn's chains when the turn ends. Empty when nothing is owed."""
+    if not moved or not edit:
+        return {}
+    try:
+        from mix_engine.session import Session
+        state = Session(Path(project_dir), read_only=True)._state
+    except Exception:  # noqa: BLE001 - a marker must never break a read
+        return {}
+    rows = [r for r in [*(edit.get("tracks") or []), edit.get("master"),
+                        *(edit.get("returns") or []), *(edit.get("groups") or [])]
+            if isinstance(r, dict) and r.get("name")]
+    from mix_engine.monitor_chain import MONITOR_TYPES
+    # Compared on what BOTH sides can list (the pre-merge review of 2026-10-29): the session's
+    # chain holds devices the native chain never does (a `tune` is clip pitch, a
+    # `spectral_denoise` is print_only), and a channel strip's width is a `width` row in the
+    # DAW but a field of the session's record - the master's width is a chain entry at both.
+    native = set(MONITOR_TYPES) | {"spectrogram"}
+    out: dict[str, list[str]] = {}
+    for row in rows:
+        name = str(row["name"])
+        held = _session_chain_types(state, name)
+        if held is None or held[0] not in moved:
+            continue
+        shown = ([str(d.get("type")) for d in row.get("devices") or [] if isinstance(d, dict)]
+                 if "devices" in row else [str(t) for t in row.get("device_types") or []])
+        keep = (lambda t: t in native) if name == "master" else (lambda t: t in native and t != "width")
+        if sorted(filter(keep, shown)) != sorted(filter(keep, held[1])):
+            out[name] = held[1]
+    return out
+
+
+def with_chain_pending(out: dict, pending: dict[str, list[str]]) -> dict:
+    """A `read_track` answer, marked when its channel's rows predate this turn's moves."""
+    track = out.get("track") if isinstance(out, dict) and out.get("ok") else None
+    if isinstance(track, dict) and str(track.get("name")) in pending:
+        track["chain_after_this_turn"] = pending[str(track["name"])]
+        track["chain_note"] = CHAIN_PENDING_NOTE
+    return out
+
+
 #: Said above a live block the brain KNOWS is older than the agent's last command: the DAW
 #: numbers every snapshot it pushes, and a command's reply names the one it follows.
 STALE_PICTURE_NOTE = ("NOTE: this is the edit as it was BEFORE your last command - the app's "
@@ -4434,7 +4706,8 @@ def _note_stale_picture(res, edit: dict | None, stale: dict) -> None:
                          + ", or read_track")
 
 
-def _chat_context_live(edit_state: dict | None, stale_seq: int = 0) -> str:
+def _chat_context_live(edit_state: dict | None, stale_seq: int = 0,
+                       pending: dict[str, list[str]] | None = None) -> str:
     """The half that must be FRESH: the edit as it is right now.
 
     Rebuilt every tool round, because the agent's own commands change it — after a
@@ -4444,7 +4717,8 @@ def _chat_context_live(edit_state: dict | None, stale_seq: int = 0) -> str:
 
     ``stale_seq``: the highest snapshot number a command reply of this turn named
     (_note_stale_picture). A snapshot numbered below it predates that command, and is said
-    to."""
+    to. ``pending``: `chains_not_yet_in_daw` - the channels whose device rows predate this
+    turn's own mix moves, said above the block so an empty `devices` is not read as no chain."""
     if not edit_state:
         return ""
     held = edit_state.get("seq")
@@ -4452,7 +4726,11 @@ def _chat_context_live(edit_state: dict | None, stale_seq: int = 0) -> str:
     # Field-wise compaction, never `text[:24000]`: the snapshot writes `tracks` first and
     # tempo / transport / selection LAST, so a character cut dropped exactly the fields
     # the prompt tells the agent to rely on and left unparseable JSON (2026-09-01 sweep).
-    return ((STALE_PICTURE_NOTE if stale else "")
+    pending_line = ""
+    if pending:
+        pending_line = ("NOTE: " + CHAIN_PENDING_NOTE.replace("devices[] is", "these channels' "
+                        "devices[] are") + " " + json.dumps(pending, separators=(",", ":")) + "\n")
+    return ((STALE_PICTURE_NOTE if stale else "") + pending_line
             + "Live DAW edit (daw_edit_state): " + compact_edit_state(edit_state, 24000))
 
 
@@ -4644,7 +4922,7 @@ CONFIRM_ROUTING = frozenset({"return.remove", "bus.remove"})
 #: Keys that are the BRAIN's own messages to the DAW, not commands: `routing.apply` hands over
 #: a routing op the brain performed (or the turn's mix before a render), `coedits.take` drains
 #: the DAW's queue of the user's moves. The DAW answers both ABOVE its choke point - before the
-#: catalog lookup, the confirm gate and the master-safety-limiter refusal every command passes -
+#: catalog lookup, the confirm gate and the master's-limiter refusal every command passes -
 #: because they are the brain's. So they may never be a key the MODEL names: `daw_command
 #: {"command": "routing.apply", "args": {chains…}}` laid a crafted chain set over the live graph
 #: with none of those checks (full audit 2026-10-02, reader S9·R6). Refused where a model's key
@@ -4728,7 +5006,7 @@ def perform_routing(command: str, args: dict, routing_ops: Optional[dict],
     if isinstance(realized, dict) and realized.get("ok") is False:
         out["note"] = ("applied in the session; the DAW could not realize it yet: "
                        + str(realized.get("error", "")))
-    # A send the DAW could not place (reader S4·R27): the track already holds its sixteen
+    # A send the DAW could not place (reader S4·R27): the track already holds its TRACK_PLUGIN_CAP
     # plug-ins, and a send is one. The session recorded it and this answered ok - a send the
     # graph does not hold, counted in every offline measurement after. The DAW names each
     # (`sends_not_placed`) and hands back the co-edit that takes it out of the session again,
@@ -4738,7 +5016,7 @@ def perform_routing(command: str, args: dict, routing_ops: Optional[dict],
     if lost:
         def words(s: dict) -> str:
             return f"'{s.get('source', '')}' to '{s.get('return', '')}'"
-        why = ("a track holds at most sixteen plug-ins, and a send is one: not made - "
+        why = (f"a track holds at most {TRACK_PLUGIN_CAP} plug-ins, and a send is one: not made - "
                + ", ".join(words(s) for s in lost)
                + ". Remove a device or a plug-in from the track first.")
         if command == "send.set":
@@ -4803,6 +5081,12 @@ def sound_profile_for_model(profile: dict) -> dict:
 #: `file` is the finished file in the pack.
 MEASURED_COMMANDS = frozenset({"sound.render", "pack.add", "pack.multisample"})
 
+#: The export, whose `file` the brain reads before the model does (2026-11-02): its loudness and
+#: true peak ride the reply, so the figure the engineer reports is the file's, not its own guess.
+EXPORT_MEASURED_COMMANDS = frozenset({"session.export"})
+#: The ceiling an export is held to (`guardrails`: the master's true peak <= -1 dBTP).
+EXPORT_CEILING_DBTP = -1.0
+
 #: Commands whose answer is a picture the model is SHOWN in the same tool result (Phase 64).
 PICTURED_COMMANDS = frozenset({"view.snapshot"})
 #: ...and how many of them one turn may take (a picture rides every later request).
@@ -4837,6 +5121,35 @@ def _sounds_to_measure(res: dict) -> list:
         picked = sorted({0, len(zones) // 2, len(zones) - 1})
         return [zones[i] for i in picked]
     return []
+
+
+def attach_export_figures(res: Any) -> Any:
+    """`session.export` answered: read the file it wrote and put what it MEASURES beside the
+    reply - `measured`: integrated loudness (`lufs_i`, BS.1770 as everywhere here) and the 4x
+    true peak (`true_peak_dbtp`, `analysis._true_peak_dbtp`) - and `over_ceiling` when the true
+    peak is over -1 dBTP. A master limited at exactly -1.0 read -0.97 on the file (2026-11-02),
+    and the engineer reported "-1.0": the reply gave it only the sample peak. A file that cannot
+    be read says why (`measure_error`); the export's reply is never turned into a failure."""
+    if not isinstance(res, dict) or res.get("ok") is False or not res.get("file"):
+        return res
+    import soundfile as sf
+
+    from mix_engine import analysis
+
+    try:
+        audio, rate = sf.read(str(Path(str(res["file"])).expanduser()), dtype="float64",
+                              always_2d=True)
+        import pyloudnorm as pyln
+        lufs = analysis._integrated_lufs(pyln.Meter(rate), audio)
+        peak = round(float(analysis._true_peak_dbtp(audio)), 2)
+        res["measured"] = {"lufs_i": None if lufs is None else round(float(lufs), 2),
+                           "true_peak_dbtp": peak}
+        if peak > EXPORT_CEILING_DBTP:
+            res["over_ceiling"] = (f"the file's true peak is {peak:.2f} dBTP, over -1 dBTP: lower "
+                                   "the master limiter's ceiling (-1.2) and export again")
+    except Exception as exc:  # noqa: BLE001 - the export stands; the measurement says why not
+        res["measure_error"] = f"{type(exc).__name__}: {exc}"
+    return res
 
 
 def attach_sound_profiles(res: Any) -> Any:
@@ -5545,6 +5858,7 @@ def _sandbox_check(project_dir: Path, sandbox: dict, req: dict,
     proposal in memory, so later steps of the same plan are judged against the earlier
     ones (two +4 dB lifts on one stem are +8 in one pass, which apply_plan refuses too).
     None = it would pass; else the refusal to hand the model."""
+    from mix_engine.guardrails import pass_cap_among
     from mix_engine.models import ProposalRequest
     from mix_engine.session import Session
 
@@ -5554,8 +5868,7 @@ def _sandbox_check(project_dir: Path, sandbox: dict, req: dict,
         s = sandbox["session"]
         request = ProposalRequest.model_validate(req)
         result = s.propose(request)
-        if (result.violations
-                and all(v.rule == "proposals_per_pass" for v in result.violations)):
+        if pass_cap_among(result.violations):
             s.advance_pass()   # apply_plan's own self-heal: a full pass is not a breach
             result = s.propose(request)
         if result.violations and plan_creates and all(
@@ -5652,7 +5965,8 @@ async def _duplicate_track_step(project_dir: Path, args: Optional[dict], daw_inv
                 reg = dict(await anyio.to_thread.run_sync(functools.partial(
                     register, str(copy["path"]), track or None, copy.get("bus") or None,
                     copy_from=source or None,
-                    keep=copy.get("strip") if isinstance(copy.get("strip"), dict) else None)) or {})
+                    keep=copy.get("strip") if isinstance(copy.get("strip"), dict) else None,
+                    **({"after_map": copy["after_map"]} if isinstance(copy.get("after_map"), dict) else {}))) or {})
             except Exception as exc:  # noqa: BLE001 — import_stem raises on an undecodable file
                 reg = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
             if not reg.get("ok") or reg.get("copy_error"):

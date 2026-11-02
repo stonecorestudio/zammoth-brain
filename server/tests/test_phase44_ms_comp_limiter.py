@@ -62,21 +62,21 @@ def test_advanced_limiter_round_trips(demo_project):
     # explicit release/lookahead win over the style preset
     _apply(session, [{"type": "limiter", "stem_id": "master", "ceiling_dbtp": -1.0,
                       "target_lufs_i": -10.0, "release_ms": 200.0, "lookahead_ms": 1.5,
-                      "channel_link": 0.5, "style": "transparent"}])
+                      "channel_link": 0.5, "style": "loud"}])
     lim = [e for e in session.master_chain if e["type"] == "limiter"][0]
     assert lim["release_ms"] == 200.0 and lim["lookahead_ms"] == 1.5
     assert lim["channel_link"] == 0.5
-    assert lim["style"] == 1                      # "transparent" name -> index 1
+    assert lim["style"] == 2                      # "loud" name -> index 2
 
 
 def test_limiter_style_is_a_knob_preset(demo_project):
     """Style with no explicit knobs fills release_ms / lookahead_ms from the preset."""
     session = Session(demo_project)
     _apply(session, [{"type": "limiter", "stem_id": "master",
-                      "ceiling_dbtp": -1.0, "style": "punchy"}])
+                      "ceiling_dbtp": -1.0, "style": "glue"}])
     lim = [e for e in session.master_chain if e["type"] == "limiter"][0]
-    assert lim["release_ms"] == 20.0 and lim["lookahead_ms"] == 1.5   # punchy preset
-    assert lim["style"] == 2
+    assert lim["release_ms"] == 250.0 and lim["lookahead_ms"] == 2.0  # glue's knobs
+    assert lim["style"] == 1
 
 
 def test_ms_comp_renders_independently():

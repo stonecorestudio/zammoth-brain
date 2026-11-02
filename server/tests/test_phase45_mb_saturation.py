@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from mix_engine import dsp
+from mix_engine import dsp, sat_characters
 from mix_engine.models import ProposalRequest, SaturationAction
 from mix_engine.session import Session
 
@@ -30,8 +30,11 @@ def _mb_sat(stem_id: str, low_drive: float = 12.0, **over) -> dict:
 def test_single_band_saturation_bit_exact():
     sr = 48000
     a = (np.random.default_rng(0).standard_normal((sr, 2)) * 0.3)
-    old = np.tanh(10 ** (3 / 20) * a) / 10 ** (3 / 20)
-    new = dsp._saturate(a.copy(), {"drive_db": 3.0, "output_db": 0.0}, sr)
+    # the soft character (sat_characters, since 2026-10-26: it was tanh) - no tone, so 1x is elementwise
+    s = 10 ** ((3 + 0.94) / 20)
+    u = s * a
+    old = u / (1 + np.abs(u) ** 3.83) ** (1 / 3.83) / s * 10 ** (sat_characters.level_db(3.0, 0) / 20)   # its level law
+    new = dsp._saturate(a.copy(), {"drive_db": 3.0, "output_db": 0.0, "oversample": 1}, sr)   # 1x: the elementwise law
     assert np.allclose(old, new)
 
 
@@ -47,8 +50,10 @@ def test_single_band_saturation_dry_wet():
 
 
 def test_saturation_curves_differ():
-    a = np.linspace(-1, 1, 512)[:, None]
-    outs = {t: dsp._waveshape(a, 6.0, t) for t in dsp.SAT_TYPES}
+    # every character is a distinct device - TAPE is the SOFT curve with a tone after it
+    # (sat_characters), so they are told apart on what the device renders, not the curve alone
+    a = np.random.default_rng(5).standard_normal((48000, 1)) * 0.3
+    outs = {t: dsp._saturate(a.copy(), {"drive_db": 6.0, "curve": t}, 48000) for t in dsp.SAT_TYPES}
     types = list(dsp.SAT_TYPES)
     for i in range(len(types)):                       # every model is a distinct curve
         for j in range(i + 1, len(types)):

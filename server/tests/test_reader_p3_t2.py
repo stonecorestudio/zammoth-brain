@@ -19,7 +19,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from orchestrator import api_key, license_state
+from orchestrator import api_key, daw_bridge, license_state
 from orchestrator.device_auth import DeviceLogin, MemoryKeychain
 
 REPO = Path(__file__).resolve().parents[2]
@@ -655,7 +655,7 @@ def test_a_send_the_daw_could_not_place_is_refused_and_leaves_the_session(tmp_pa
     out = B.perform_routing("send.set", {"source": "drums", "return": verb, "gain_db": -12.0},
                             brain.routing_ops(), daw, mirror)
     assert out["ok"] is False, out
-    assert "drums" in out["error"] and verb in out["error"] and "sixteen" in out["error"]
+    assert "drums" in out["error"] and verb in out["error"] and f"{daw_bridge.TRACK_PLUGIN_CAP} plug-ins" in out["error"]
     sends = Session(proj, read_only=True)._state["stems"]["drums"].get("sends") or {}
     assert verb not in sends, f"the session kept a send the graph does not hold: {sends}"
 
@@ -687,7 +687,7 @@ def test_another_routing_command_names_the_sends_it_left_unplaced(tmp_path):
                             lambda urls: None)
     assert out["ok"] is True
     assert out["sends_not_placed"] == [{"source": "bass", "return": verb}]
-    assert "sixteen" in out["note"]
+    assert f"{daw_bridge.TRACK_PLUGIN_CAP} plug-ins" in out["note"]
 
 
 # ---------------------------------------------------------------------------------------------

@@ -18,10 +18,10 @@ Fidelity notes:
   form used by the export. The real-time monitor's limiter is a causal approximation
   with a reported lookahead latency — validated perceptually in Step 1, not here.
 - **Compressor** is a feed-forward peak compressor, linked across the channels,
-  with one-pole ballistics on the gain reduction in dB and literal time
-  constants. It is the law ``MonitorChain::processOneComp`` runs, and - since
-  2026-10-03 (reader E4.R1) - the law the OFFLINE engine runs too
-  (``dsp._native_comp``, pinned to ``_compress`` by test_comp_native_law.py). It
+  with a CHARACTER's static law and two-stage ballistics on the gain reduction (2026-10-25;
+  one-pole literal time constants before). It is the law ``MonitorChain::processOneComp``
+  runs, and the law the OFFLINE engine runs too (``dsp._character_comp``, pinned to
+  ``_compress`` by test_comp_characters.py). It
   was written as "an approximation of Pedalboard's ... until the C++ comp is
   characterised", and never was: Pedalboard's attack is a time constant of
   ms/2pi on the level, per channel, so the two engines disagreed by up to
@@ -43,20 +43,10 @@ LIMITER_LOOKAHEAD_S = 0.005
 LIMITER_SMOOTH_S = 0.005
 MB_CROSSOVERS_HZ = (150.0, 2000.0)   # multiband split (mirrors dsp.MB_CROSSOVERS_HZ)
 
-# OTT internal character (mirrors dsp.OTT_* — the fixed target/slopes/clamps/ballistics).
-OTT_TARGET_DB = -30.0
-OTT_UP_SLOPE = 0.6
-OTT_DOWN_SLOPE = 0.85
-OTT_MAX_BOOST_DB = 24.0
-OTT_MAX_CUT_DB = 36.0
-OTT_BASE_ATTACK_MS = 12.0
-OTT_BASE_RELEASE_MS = 120.0
+# OTT plays `ott_law` (2026-10-28) through dsp._ott.
 
 OD_TONE_HZ = 3000.0   # overdrive tone-tilt pivot (mirrors dsp.OD_TONE_HZ)
 # De-ess + transient constants — mirror dsp.py so the reference tracks the engine.
-DEESS_RATIO = 4.0
-DEESS_ATTACK_MS = 1.0
-DEESS_RELEASE_MS = 50.0
 TRANSIENT_FAST_ATTACK_MS = 1.0
 TRANSIENT_FAST_RELEASE_MS = 20.0
 TRANSIENT_SLOW_ATTACK_MS = 30.0
@@ -209,7 +199,7 @@ def slope_cascade_coeffs(shape: str, sample_rate: float, freq_hz: float,
     # same q, so the resonant peak compounds: measured on broadband noise at -20 dBFS peak, a
     # perfectly legal `lpf 1 kHz q=8` (DEVICE_PARAMS allows 0.3..8, EQ_SLOPES allows 96) rendered
     # +12.6 dB at slope 24, +49.4 dB at 48 and **+127.3 dB** at 96 — a two-knob-move detonation,
-    # with only the master safety limiter between it and the monitor, and nothing at all in front
+    # with only a master limiter (if the user put one there) between it and the monitor, and nothing in front
     # of a soloed track or a bus tap. `eq_resonance_max_db` catches it inside validate_proposal
     # only, so neither the DAW's `device.set` nor the user's own knob ever met it.
     #
@@ -243,27 +233,71 @@ def apply_eq_band(audio: np.ndarray, sample_rate: float, shape: str,
     return lfilter(b, a, np.asarray(audio, dtype=np.float64), axis=0)
 
 
+def apply_eq_entry_band(audio: np.ndarray, sample_rate: float, band: dict) -> np.ndarray:
+    """An EQ DEVICE band on ``(frames, channels)`` audio: the EQ's own law (`eq_law`, 2026-10-27).
+    ``apply_eq_band`` above stays the cookbook filters the match-EQ and tilt devices are built on."""
+    from .eq_law import band_sections
+    out = np.asarray(audio, dtype=np.float64)
+    for b, a in band_sections(band["shape"], sample_rate, band["freq_hz"], band["q"],
+                              band.get("gain_db", 0.0), band.get("slope_db_oct", 6)):
+        out = lfilter(b, a, out, axis=0)
+    return out
+
+
+def _comp_style(e: dict) -> int:
+    from .dsp import comp_style   # dsp imports this module: a late import
+    return comp_style(e)
+
+
 def _compress(audio: np.ndarray, sample_rate: float, threshold_db: float,
               ratio: float, attack_ms: float, release_ms: float,
-              makeup_db: float = 0.0, mix: float = 1.0) -> np.ndarray:
-    """Feed-forward peak compressor (approximate; see module docstring). Linked
-    across channels (one gain envelope), hard knee, one-pole ballistics on the
-    gain-reduction in dB."""
+              makeup_db: float = 0.0, mix: float = 1.0, style: int = 0,
+              knee_db: float = 0.0) -> np.ndarray:
+    """The compressor device, one sample at a time in float64 - the loop
+    `MonitorChain::processOneComp` transcribes and `dsp._character_comp` is pinned against. A
+    feed-forward peak detector linked across channels, the character's static law, and its
+    ballistics on the gain reduction (`dsp.COMP_CHARACTERS`): a fast stage of two attack followers
+    (the slower held to within the gap of the quicker) and a slow BODY following it, the gain the
+    deeper; a stage marked linear runs on the gain minus one instead of the dB."""
+    from . import dsp   # dsp imports this module: a late import
     x = np.asarray(audio, dtype=np.float64)
+    if ratio <= 1.0:
+        return x * 10.0 ** (makeup_db / 20.0) * mix + (1.0 - mix) * x
+    ka, kq, gap, kf, sa, s0, s1, lin_fast, lin_body, _, hold_ms = dsp.COMP_CHARACTERS[style]
     detect = np.max(np.abs(x), axis=1)
+    if hold_ms > 0.0:   # the peak-hold detector, as the recursion it is
+        a_hold = math.exp(-1.0 / (sample_rate * hold_ms / 1000.0))
+        held_det = 0.0
+        for i in range(detect.size):
+            held_det = max(detect[i], held_det * a_hold)
+            detect[i] = held_det
     level_db = 20.0 * np.log10(np.maximum(detect, 1e-12))
-    over = level_db - threshold_db
-    target = np.where(over > 0.0, -over * (1.0 - 1.0 / ratio), 0.0)
+    target = dsp.comp_static_db(level_db - threshold_db, threshold_db, ratio, style, knee_db)
 
-    a_att = np.exp(-1.0 / (sample_rate * attack_ms / 1000.0))
-    a_rel = np.exp(-1.0 / (sample_rate * release_ms / 1000.0))
+    def coef(ms: float) -> float:
+        return math.exp(-1.0 / (sample_rate * ms / 1000.0))
+
+    def to_lin(db: float) -> float:
+        return 10.0 ** (db / 20.0) - 1.0
+
+    def to_db(v: float) -> float:
+        return 20.0 * math.log10(max(1.0 + v, 1.0e-9))
+    attack = attack_ms * ka
+    a_held, a_quick, a_rel = coef(attack * kq), coef(attack), coef(release_ms / kf)
+    a_body_att, a_body_rel = coef(sa), coef(s0 + s1 * release_ms)
     g = np.empty_like(target)
-    prev = 0.0
+    held = quick = body = 0.0
     for i in range(target.size):
-        t = target[i]
-        coef = a_att if t < prev else a_rel   # faster move toward more reduction
-        prev = coef * prev + (1.0 - coef) * t
-        g[i] = prev
+        t = to_lin(target[i]) if lin_fast else target[i]
+        c = a_held if t < held else a_rel
+        held = c * held + (1.0 - c) * t
+        c = a_quick if t < quick else a_rel
+        quick = c * quick + (1.0 - c) * t
+        fast = min(to_db(held), to_db(quick) + gap) if lin_fast else min(held, quick + gap)
+        f = to_lin(fast) if lin_body else fast
+        c = a_body_att if f < body else a_body_rel
+        body = c * body + (1.0 - c) * f
+        g[i] = min(fast, to_db(body) if lin_body else body)
     gain_lin = 10.0 ** ((g + makeup_db) / 20.0)
     wet = x * gain_lin[:, np.newaxis]
     return mix * wet + (1.0 - mix) * x
@@ -272,7 +306,7 @@ def _compress(audio: np.ndarray, sample_rate: float, threshold_db: float,
 def _gate(audio: np.ndarray, sample_rate: float, threshold_db: float, ratio: float,
           attack_ms: float, release_ms: float, hold_ms: float = 0.0,
           range_db: float = -80.0, hysteresis_db: float = 0.0,
-          sc_hpf_hz: float = 0.0, sc_lpf_hz: float = 20000.0) -> np.ndarray:
+          sc_hpf_hz: float = 0.0, sc_lpf_hz: float = 20000.0, character: int = 0) -> np.ndarray:
     """Real-time downward gate/expander - `MonitorChain::applyGate` (`gate_gain_db`, the one
     law, which `dsp._gate` runs too); the sidechain HP/LP biquads (q=0 Butterworth sentinel)
     filter the DETECTOR only. (frames, channels)."""
@@ -291,21 +325,23 @@ def _gate(audio: np.ndarray, sample_rate: float, threshold_db: float, ratio: flo
                              min(sc_lpf_hz, 0.45 * sample_rate), 0.0, 0.0)
         det = lfilter(b, a, det, axis=0)
     from .dsp import gate_gain_db   # the one law (dsp imports this module: a late import)
+    from . import gate_characters
+    ch = gate_characters.character_index(character)
+    det = gate_characters.detector_eq(det, sample_rate, ch, axis=0)
     gain_db = gate_gain_db(np.max(np.abs(det), axis=1), sample_rate, threshold_db, ratio,
-                           attack_ms, release_ms, hold_ms, range_db, hysteresis_db)
+                           attack_ms, release_ms, hold_ms, range_db, hysteresis_db, ch)
     return x * (10.0 ** (gain_db / 20.0))[:, np.newaxis]
 
 
 def _dynamic_eq(audio: np.ndarray, sample_rate: float, freq_hz: float, q: float,
-                threshold_db: float, ratio: float, attack_ms: float,
+                threshold_db: float, attack_ms: float,
                 release_ms: float, gain_db: float) -> np.ndarray:
-    """The dynamic EQ - `dsp._dynamic_eq`, the DAW's law since 2026-10-17 (this was a copy of the
-    native's old dB-domain detector). (frames, channels) in and out."""
+    """The dynamic EQ - `dsp._dynamic_eq` (`dyneq_law` since 2026-10-27). (frames, channels) in and out."""
     from .dsp import _dynamic_eq as one_law   # dsp imports this module: a late import
     x = np.asarray(audio, dtype=np.float64)
     if x.ndim == 1:
         x = x[:, np.newaxis]
-    entry = {"freq_hz": freq_hz, "q": q, "threshold_db": threshold_db, "ratio": ratio,
+    entry = {"freq_hz": freq_hz, "q": q, "threshold_db": threshold_db,
              "attack_ms": attack_ms, "release_ms": release_ms, "gain_db": gain_db}
     return one_law(np.ascontiguousarray(x.T.astype(np.float32)), int(sample_rate), entry).T.astype(np.float64)
 
@@ -318,45 +354,6 @@ def _lr4(audio: np.ndarray, sample_rate: float, shape: str, fc: float) -> np.nda
 
 _LR8_QS = (0.54119610014619701, 1.3065629648763766)   # a 4th-order Butterworth's sections
 
-
-def _lr8_split(t: np.ndarray, sample_rate: float, lo: float, hi: float) -> tuple:
-    """The 3-way LR8 split on (channels, frames) - the band width's and the imager's
-    (MonitorChain::applyBandWidth / applyImager): each crossover the Butterworth's two sections
-    run twice; low = AP@hi(LP@lo x), mid = LP@hi(HP@lo x), high = HP@hi(HP@lo x)."""
-    def lr8(v, shape, f):
-        for qq in _LR8_QS + _LR8_QS:
-            b, a = biquad_coeffs(shape, sample_rate, f, qq, 0.0)
-            v = lfilter(b, a, v, axis=-1)
-        return v
-    low_raw = lr8(t, "lpf2", lo)
-    rest = lr8(t, "hpf2", lo)
-    low = lr8(low_raw, "lpf2", hi) + lr8(low_raw, "hpf2", hi)
-    return low, lr8(rest, "lpf2", hi), lr8(rest, "hpf2", hi)
-
-
-def _imager(audio: np.ndarray, sample_rate: float, entry: dict) -> np.ndarray:
-    """3-band stereo imager - ``MonitorChain::applyImager``'s law (the imager audit, 2026-10-21):
-    the LR8 split at the crossovers, each band's side scaled by its width (held to 0..2), summed;
-    always split (all widths 1 is the split's allpass). No-op on mono."""
-    x = np.asarray(audio, dtype=np.float64)
-    if x.ndim == 1:
-        x = x[:, np.newaxis]
-    if x.shape[1] != 2:
-        return x
-    lo = min(4000.0, max(30.0, float(entry.get("crossover_lo_hz", 150.0))))
-    hi = min(16000.0, max(200.0, float(entry.get("crossover_hi_hz", 2000.0))))
-    if hi <= lo:
-        hi = lo * 1.5
-    widths = [min(2.0, max(0.0, float(entry.get(k, 1.0)))) for k in ("width_low", "width_mid", "width_high")]
-    bands = _lr8_split(x.T, sample_rate, lo, hi)
-    out_l = np.zeros(x.shape[0])
-    out_r = np.zeros(x.shape[0])
-    for band, w in zip(bands, widths):
-        m = 0.5 * (band[0] + band[1])
-        sd = 0.5 * (band[0] - band[1]) * w
-        out_l = out_l + (m + sd)
-        out_r = out_r + (m - sd)
-    return np.stack([out_l, out_r], axis=1)
 
 MB_MAX_BOOST_DB = 12.0   # mirrors dsp.MB_MAX_BOOST_DB (upward-mode cap)
 
@@ -470,72 +467,21 @@ def _multiband_comp(audio: np.ndarray, sample_rate: float, low: dict, mid: dict,
     return one_law(np.ascontiguousarray(x.T.astype(np.float32)), int(sample_rate), entry).T.astype(np.float64)
 
 
-def _ott(audio: np.ndarray, sample_rate: float, depth: float, time_scale: float,
-         in_gain_db: float, out_gain_db: float, low: dict, mid: dict, high: dict,
-         crossover_lo_hz: float = 150.0,
-         crossover_hi_hz: float = 2000.0) -> np.ndarray:
-    """The OTT - `dsp._ott`, the DAW's law since 2026-10-17 (it specified the complement split
-    and its own follower). (frames, channels) in and out."""
+def _ott(audio: np.ndarray, sample_rate: float, entry: dict) -> np.ndarray:
+    """The OTT - `dsp._ott`, which plays `ott_law` (2026-10-28). (frames, channels) in and out."""
     from .dsp import _ott as one_law   # dsp imports this module: a late import
     x = np.asarray(audio, dtype=np.float64)
     if x.ndim == 1:
         x = x[:, np.newaxis]
-    entry = {"depth": depth, "time": time_scale, "in_gain_db": in_gain_db,
-             "out_gain_db": out_gain_db, "low": low, "mid": mid, "high": high,
-             "crossover_lo_hz": crossover_lo_hz, "crossover_hi_hz": crossover_hi_hz}
     return one_law(np.ascontiguousarray(x.T.astype(np.float32)), int(sample_rate), entry).T.astype(np.float64)
 
 
-def _chorus(audio: np.ndarray, sample_rate: float, rate_hz: float = 0.8,
-            depth: float = 0.25, delay_ms: float = 20.0, mix: float = 0.5,
-            voices: int = 1, stereo_deg: float = 90.0) -> np.ndarray:
-    """Chorus / ensemble — the oracle's own copy of ``dsp._chorus`` (this module
-    re-implements the engine on purpose and must not import it).
-
-    Voices read the dry input through a delay swept around ``delay_ms``; the LFO phase comes
-    from the HOST TIMELINE (sample index / rate), which is what lets the native monitor land
-    on the same sweep. Reads use JUCE's Lagrange3rd stencil so the C++
-    ``juce::dsp::DelayLine<float, Lagrange3rd>`` and this are one filter, not two."""
-    x = np.asarray(audio, dtype=np.float64)
-    if x.ndim == 1:
-        x = x[:, np.newaxis]
-    n, nch = x.shape
-    if n == 0:
-        return x
-    voices = int(min(3, max(1, int(voices or 1))))
-    depth = float(min(1.0, max(0.0, depth)))
-    mix = float(min(1.0, max(0.0, mix)))
-    idx = np.arange(n, dtype=np.int64)
-    t = idx.astype(np.float64) / float(sample_rate)
-    max_d = (delay_ms * (1.0 + depth) / 1000.0) * sample_rate + 4.0
-
-    def read(sig, d):
-        di = np.floor(d).astype(np.int64)
-        f = d - di
-        # JUCE's Lagrange3rd `updateInternalVariables()` shifts the stencil back one sample
-        # (delayFrac++/delayInt-- for every delay >= 1); mirror it or this is a DIFFERENT
-        # filter at the same nominal delay. See the note above `_lagrange3_taps` in dsp.py.
-        sh = di >= 1
-        di = di - sh
-        f = f + sh
-        g = [np.where(idx - di - k >= 0, sig[np.clip(idx - di - k, 0, n - 1)], 0.0)
-             for k in range(4)]
-        d1, d2, d3 = f - 1.0, f - 2.0, f - 3.0
-        return (g[0] * (-d1 * d2 * d3 / 6.0)
-                + f * (g[1] * (d2 * d3 * 0.5) + g[2] * (-d1 * d3 * 0.5) + g[3] * (d1 * d2 / 6.0)))
-
-    wet = np.zeros_like(x)
-    for ch in range(nch):
-        # per VOICE SPACING, not per cycle (dsp._chorus carries the reasoning)
-        off = (stereo_deg / 360.0 / voices) if ch == 1 else 0.0
-        acc = np.zeros(n, dtype=np.float64)
-        for v in range(voices):
-            ph = 2.0 * np.pi * (rate_hz * t + off + v / voices)
-            d = np.clip(delay_ms * (1.0 + depth * np.sin(ph)) / 1000.0 * sample_rate,
-                        4.0, max_d)
-            acc += read(x[:, ch], d)
-        wet[:, ch] = acc / np.sqrt(voices)   # decorrelated voices sum in POWER
-    return wet * mix + x * (1.0 - mix) if mix < 1.0 else wet
+def _chorus(audio: np.ndarray, sample_rate: float, entry: dict) -> np.ndarray:
+    """The chorus (chorus_law, 2026-10-28) - the same function as ``dsp._chorus``: two triangle-swept
+    lines read through the Lagrange stencil, the wet's two first-order filters, the reference's dry /
+    wet curve. (frames, channels) in and out."""
+    from .chorus_law import apply
+    return apply(audio, sample_rate, entry)
 
 
 def _flanger(audio: np.ndarray, sample_rate: float, rate_hz: float = 0.5,
@@ -604,15 +550,12 @@ def _flanger(audio: np.ndarray, sample_rate: float, rate_hz: float = 0.5,
 # The filter is a TPT state-variable filter (Zavalishin, "The Art of VA Filter Design" ch. 4):
 # g = tan(pi fc / fs) is the bilinear transform with the cutoff prewarped, so its response is
 # the analog SVF's at Omega = tan(pi f / fs) / g, and it stays well behaved when g moves every
-# sample - which is the whole point of the device. 24 dB/oct is a Butterworth section and then
-# the resonant one (never two resonant sections: the EQ's equal-Q cascade measured +127 dB).
+# sample - which is the whole point of the device. Its section Qs and its envelope are
+# `auto_filter_law`'s (2026-10-27: a reference filter's clean style, measured): the Q by shape
+# and resonance, 24 dB/oct as two sections, the envelope a follower in dB over 60 dB.
 
-AF_Q_BUTTERWORTH_12 = 0.70710678118654752   # the 2nd-order Butterworth Q
-AF_Q_BUTTERWORTH_24 = (0.54119610014619698, 1.30656296487637653)   # the 4th order's pair
-AF_Q_MAX = 16.0                 # resonance 1 = this Q (the whistle; nothing self-oscillates)
 AF_MIN_HZ = 20.0
 AF_MAX_FRACTION = 0.49          # of the sample rate: tan() stays finite, as biquad_coeffs holds it
-AF_ENV_FLOOR_DB = -48.0         # the envelope reads 0 at -48 dBFS and 1 at full scale
 AF_EDGE = 0.02                  # a stepped LFO's edges are raised cosines over 2 % of the cycle
 AF_RANDOM_SEED = 0x41465251     # the random shape's hash seed ("AFRQ")
 
@@ -663,15 +606,10 @@ def auto_filter_values(e: dict) -> dict:
     }
 
 
-def auto_filter_qs(resonance: float, slope_db_oct: int) -> tuple:
-    """The section Qs: 12 dB = one section, Butterworth at resonance 0 rising to AF_Q_MAX;
-    24 dB = the Butterworth pair's low-Q section fixed, then the resonant one rising from the
-    pair's high Q. Resonance is exponential in Q, so equal turns are equal steps in peak dB."""
-    if slope_db_oct == 24:
-        q_fixed, q0 = AF_Q_BUTTERWORTH_24
-        return (q_fixed, q0 * (AF_Q_MAX / q0) ** resonance)
-    q0 = AF_Q_BUTTERWORTH_12
-    return (q0 * (AF_Q_MAX / q0) ** resonance,)
+def auto_filter_qs(filter_type: int, slope_db_oct: int, resonance: float) -> tuple:
+    """The section Qs (`auto_filter_law.section_qs`): by shape and resonance; 24 dB = two sections."""
+    from .auto_filter_law import section_qs
+    return section_qs(filter_type, slope_db_oct, resonance)
 
 
 def auto_filter_cycles(n: int, sample_rate: float, v: dict, channel: int,
@@ -740,10 +678,11 @@ def auto_filter_lfo(cycles: np.ndarray, shape: int) -> np.ndarray:
     return prev + (cur - prev) * w
 
 
-def auto_filter_env01(level: np.ndarray) -> np.ndarray:
-    """The envelope follower's level read as 0..1: 0 at AF_ENV_FLOOR_DB, 1 at full scale."""
-    db = 20.0 * np.log10(np.maximum(np.asarray(level, dtype=np.float64), 1.0e-12))
-    return np.clip((db - AF_ENV_FLOOR_DB) / -AF_ENV_FLOOR_DB, 0.0, 1.0)
+def auto_filter_env01(env_db_over_floor: np.ndarray) -> np.ndarray:
+    """The follower's output (dB over the floor) read as the envelope: 0 at the floor, 1 at full scale,
+    more above it (`auto_filter_law`: the window is ENV_FLOOR_DB to 0 dBFS, and it is not clipped)."""
+    from .auto_filter_law import ENV_FLOOR_DB
+    return np.asarray(env_db_over_floor, dtype=np.float64) / -ENV_FLOOR_DB
 
 
 def auto_filter_cutoff(v: dict, sample_rate: float, lfo: np.ndarray,
@@ -765,8 +704,9 @@ def auto_filter_modulation(x: np.ndarray, sample_rate: float, v: dict, key=None,
                            offset: int = 0, tempo=None, follower=None) -> np.ndarray:
     """The cutoff for every (frame, channel). The envelope follows the louder channel of the
     device's INPUT, or of `key` (the trigger's audio, already aligned) when the entry is keyed;
-    `follower(level, sr, attack_ms, release_ms)` is the linear attack/release follower, from
-    rest (dsp passes its exact vectorised one; the oracle its own loop)."""
+    `follower(level, sr, attack_ms, release_ms)` is the attack/release one-pole, from rest (dsp
+    passes its exact vectorised one; the oracle its own loop) - run here on the level in dB over
+    the floor, at the law's time constants (a knob is the time to 90 %)."""
     n, nch = x.shape
     env01 = 0.0
     if v["env_amount_oct"] != 0.0:
@@ -774,8 +714,9 @@ def auto_filter_modulation(x: np.ndarray, sample_rate: float, v: dict, key=None,
         level = np.max(np.abs(src), axis=1) if src.ndim == 2 else np.abs(src)
         if level.shape[0] < n:
             level = np.concatenate([level, np.zeros(n - level.shape[0])])
-        env = (follower or _af_follower)(level[:n], sample_rate,
-                                         v["env_attack_ms"], v["env_release_ms"])
+        from .auto_filter_law import follower_level_db, follower_tau_ms
+        env = (follower or _af_follower)(follower_level_db(level[:n]), sample_rate,
+                                         follower_tau_ms(v["env_attack_ms"]), follower_tau_ms(v["env_release_ms"]))
         env01 = auto_filter_env01(env)
     fc = np.empty((n, nch))
     for ch in range(nch):
@@ -812,7 +753,7 @@ def _auto_filter(audio: np.ndarray, sample_rate: float, e: dict, key=None,
     fc = auto_filter_modulation(x, sample_rate, v, key, offset, tempo)
     g = np.tan(np.pi * fc / float(sample_rate))
     y = x.copy()
-    for q in auto_filter_qs(v["resonance"], v["slope_db_oct"]):
+    for q in auto_filter_qs(v["filter_type"], v["slope_db_oct"], v["resonance"]):
         k = 1.0 / q
         c1, c2, d = auto_filter_outputs(v["filter_type"], k)
         out = np.empty_like(y)
@@ -849,19 +790,25 @@ def _oversampled(x: np.ndarray, os_n: int, shape) -> np.ndarray:
     return resample_poly(shape(up), 1, os_n, axis=0)[: a.shape[0]]
 
 
+# what an entry with no `oversample` runs at: dsp.OD_OVERSAMPLE_DEFAULT / SAT_OVERSAMPLE_DEFAULT
+# (dsp imports this module, so the two are restated here; a test holds them equal)
+_OD_OS_DEFAULT = 8
+_SAT_OS_DEFAULT = 4
+
+
 def _overdrive(audio: np.ndarray, sample_rate: float, drive_db: float,
                filter_on: bool = False, freq_hz: float = 800.0, q: float = 0.7,
                tone: float = 0.5, output_db: float = 0.0,
-               mix: float = 1.0, oversample: int = 1) -> np.ndarray:
+               mix: float = 1.0, oversample: int = _OD_OS_DEFAULT, character=0) -> np.ndarray:
     """The overdrive - `dsp._overdrive`, one function since 2026-10-17 (this was a copy that clamped
-    less). (frames, channels) in and out."""
+    less); its `character` since 2026-10-26 (od_characters). (frames, channels) in and out."""
     from .dsp import _overdrive as one_law   # dsp imports this module: a late import
     x = np.asarray(audio, dtype=np.float64)
     if x.ndim == 1:
         x = x[:, np.newaxis]
     return one_law(x, int(sample_rate), {"drive_db": drive_db, "filter_on": filter_on, "freq_hz": freq_hz,
                                          "q": q, "tone": tone, "output_db": output_db, "mix": mix,
-                                         "oversample": oversample})
+                                         "oversample": oversample, "character": character})
 
 
 def _match_eq(audio: np.ndarray, sample_rate: float, bands: list) -> np.ndarray:
@@ -891,35 +838,19 @@ def _tilt(audio: np.ndarray, sample_rate: float, tilt_db: float, pivot_hz: float
     return out
 
 
-_SAT_CURVES = {"tanh": 0, "warm": 1, "tube": 2, "hard": 3}
-
-
 def _saturate(audio: np.ndarray, drive_db: float, output_db: float = 0.0,
-              curve=0, mix: float = 1.0, oversample: int = 1) -> np.ndarray:
-    """Memoryless waveshaper — bit-identical to ``dsp._waveshape`` + ``dsp._saturate``
-    (the export) and to ``MonitorChain::applySaturation``: ``k = 10^(drive_db/20)``,
-    ``u = k·x``, one of four curves divided back by ``k`` (unity at 0), a plain
-    ``output_db`` trim, then a dry/wet ``mix``. Until 2026-09-01 this oracle knew only
-    the tanh curve at full wet, so the null test for warm / tube / hard and for any
-    parallel saturation was run by nothing (sweep P2). Stateless + elementwise."""
+              curve=0, mix: float = 1.0, oversample: int = _SAT_OS_DEFAULT,
+              sample_rate: int = 48000) -> np.ndarray:
+    """The saturation characters - bit-identical to ``dsp._waveshape`` + ``dsp._saturate`` (the
+    export) and to ``MonitorChain::applySaturation``: one of four curves (``sat_characters.shape``,
+    unity at low level), the tape / tube tone after it at the base rate, a plain ``output_db``
+    trim, then a dry/wet ``mix``. Until 2026-09-01 this oracle knew only the tanh curve at full
+    wet, so the null test for warm / tube / hard and for any parallel saturation was run by
+    nothing (sweep P2)."""
+    from . import sat_characters
     x = np.asarray(audio, dtype=np.float64)
-    c = _SAT_CURVES.get(curve, curve) if isinstance(curve, str) else int(curve or 0)
-    k = 10.0 ** (drive_db / 20.0)
-
-    def _shape(v):
-        if k <= 0.0:
-            return v
-        u = k * v
-        if c == 1:                                            # warm — arctan
-            return np.arctan(u) / k
-        if c == 2:   # tube — asymmetric (+ tanh, − atan: the NEGATIVE half is softer and louder; a DC offset)
-            return np.where(u >= 0.0, np.tanh(u), np.arctan(u)) / k
-        if c == 3:                                            # hard — cubic soft-clip, ±1 beyond
-            cc = np.clip(u, -1.0, 1.0)
-            return (1.5 * cc - 0.5 * cc ** 3) / (1.5 * k)
-        return np.tanh(u) / k                                 # tanh (default)
-
-    out = _oversampled(x, int(oversample or 1), _shape)
+    out = _oversampled(x, int(oversample or 1), lambda v: sat_characters.shape(v, drive_db, curve))
+    out = sat_characters.apply_tone(out, curve, sample_rate, axis=0)
     if output_db:
         out = out * 10.0 ** (output_db / 20.0)
     mix = float(mix)
@@ -928,32 +859,12 @@ def _saturate(audio: np.ndarray, drive_db: float, output_db: float = 0.0,
     return out
 
 
-def _clip(audio: np.ndarray, threshold_db: float, hardness: float,
-          output_db: float = 0.0, oversample: int = 1) -> np.ndarray:
-    """Pre-limiter clipper — at ``oversample`` 1, bit-identical to ``dsp._clip``:
-    blend a soft tanh knee (hardness 0) and a hard brickwall (hardness 1) at the
-    linear threshold, then a plain ``output_db`` trim (stateless + elementwise, so
-    it nulls to the float noise floor — the C++ applies the same formula per
-    sample). v2's oversampled path (2/4/8) shapes at N× via ``resample_poly`` —
-    the native monitor uses juce::dsp::Oversampling instead, so oversampled clip
-    is the perceptual tier, not a tight null."""
-    t = 10.0 ** (threshold_db / 20.0)
-    h = min(max(hardness, 0.0), 1.0)
-    x = np.asarray(audio, dtype=np.float64)
-    n_frames = x.shape[0]
-    os_n = int(oversample or 1)
-    if os_n > 1:
-        from scipy.signal import resample_poly
-        x = resample_poly(x, os_n, 1, axis=0)
-    soft = t * np.tanh(x / t)
-    hard = np.clip(x, -t, t)
-    out = (1.0 - h) * soft + h * hard
-    if os_n > 1:
-        from scipy.signal import resample_poly
-        out = resample_poly(out, 1, os_n, axis=0)[:n_frames]
-    if output_db:
-        out = out * 10.0 ** (output_db / 20.0)
-    return out
+def _clip(audio: np.ndarray, entry: dict) -> np.ndarray:
+    """The clipper (clip_law, 2026-10-28) - the same function as ``dsp._clip``: memoryless at 1x,
+    so the C++ applies the same knee per sample and nulls to the float floor; at 2x the native
+    monitor uses juce::dsp::Oversampling (the perceptual tier, not a tight null)."""
+    from .clip_law import apply
+    return apply(audio, entry)
 
 
 def _ms(audio: np.ndarray, channel: str, fn) -> np.ndarray:
@@ -987,7 +898,8 @@ def _ms(audio: np.ndarray, channel: str, fn) -> np.ndarray:
     return np.stack([mid + side, mid - side], axis=1)
 
 
-def _width(audio: np.ndarray, width: float) -> np.ndarray:
+def _width(audio: np.ndarray, width: float, stereoize: bool = False, stereoize_ms: float = 6.0,
+           sample_rate: float = 48000.0) -> np.ndarray:
     """Mid/side width — bit-identical to ``dsp._width`` (memoryless): no-op on mono
     or width == 1, else L/R = mid ± side·width, mid = (L+R)/2, side = (L-R)/2. The
     user's channel-strip width control, now heard live (the bit-matched tier)."""
@@ -997,45 +909,22 @@ def _width(audio: np.ndarray, width: float) -> np.ndarray:
         return x
     mid = (x[:, 0] + x[:, 1]) / 2.0
     side = (x[:, 0] - x[:, 1]) / 2.0 * width
+    if stereoize and width > 1.0:
+        # The Imager's stereoize: side made from the mid through the law's taps, convolved here
+        # (np.convolve, the law sums shifted slices) - stereoize_law.taps is the one tap table.
+        from .stereoize_law import kernel
+        side = side + (width - 1.0) * np.convolve(mid, kernel(stereoize_ms, sample_rate))[: len(mid)]
     return np.stack([mid + side, mid - side], axis=1)
 
 
-def _deess(audio: np.ndarray, sample_rate: float, threshold_db: float,
-           freq_hz: float, ratio: float = DEESS_RATIO,
-           attack_ms: float = DEESS_ATTACK_MS, release_ms: float = DEESS_RELEASE_MS,
-           range_db: float = -80.0, wide: bool = False) -> np.ndarray:
-    """Real-time de-esser — per-sample mirror of the offline ``dsp._deess`` v2 law
-    (which runs it on 5 ms block envelopes) and of ``MonitorChain::applyDeess``:
-    a Linkwitz-Riley 4th-order LP/HP split (two cascaded Butterworth sections per leg —
-    the 1st-order pair leaked so much of the ess band back through the low leg that the
-    device saturated at ~5 dB of attenuation whatever `ratio`/`range_db` asked for), the
-    high band's linked peak drives
-    a compressor law over ``threshold_db`` at ``ratio``, the reduction clamped at
-    ``range_db``; the gain applies to the high band (split) or the whole signal
-    (``wide``). Perceptual tier, not a tight null (block vs per-sample detector)."""
+def _deess(audio: np.ndarray, sample_rate: float, entry: dict) -> np.ndarray:
+    """The de-esser - `deess_law.apply`, the DAW's law since 2026-10-27 (this was a copy of the
+    old split-band compressor). (frames, channels) in and out."""
+    from . import deess_law
     x = np.asarray(audio, dtype=np.float64)
     if x.ndim == 1:
         x = x[:, np.newaxis]
-    if ratio <= 1.0:
-        return x                            # not reducing: exactly transparent
-    low = _lr4(x, sample_rate, "lpf2", freq_hz)
-    high = _lr4(x, sample_rate, "hpf2", freq_hz)
-    detect = np.max(np.abs(high), axis=1)              # linked across channels
-    level_db = 20.0 * np.log10(np.maximum(detect, 1e-12))
-    over = level_db - threshold_db
-    target = np.maximum(np.where(over > 0.0, -over * (1.0 - 1.0 / ratio), 0.0),
-                        range_db)                       # gain dB <= 0, floored
-    a_att = np.exp(-1.0 / (sample_rate * attack_ms / 1000.0))
-    a_rel = np.exp(-1.0 / (sample_rate * release_ms / 1000.0))
-    prev = 0.0
-    gain = np.empty(target.shape[0])
-    for i, t in enumerate(target):
-        coef = a_att if t < prev else a_rel            # faster toward more reduction
-        prev = coef * prev + (1.0 - coef) * t
-        gain[i] = 10.0 ** (prev / 20.0)
-    if wide:
-        return x * gain[:, np.newaxis]                  # wide-band: dip the whole signal
-    return low + high * gain[:, np.newaxis]
+    return deess_law.apply(x.T.astype(np.float32), sample_rate, entry).T.astype(np.float64)
 
 
 def _transient(audio: np.ndarray, sample_rate: float, attack_db: float,
@@ -1051,116 +940,38 @@ def _transient(audio: np.ndarray, sample_rate: float, attack_db: float,
                                          "speed": speed, "output_db": output_db})
 
 
-def _duck(audio: np.ndarray, sample_rate: float, key: np.ndarray,
-          threshold_db: float, depth_db: float, attack_ms: float,
-          release_ms: float) -> np.ndarray:
-    """Real-time sidechain duck — approximation of ``dsp._duck``. The KEY arrives
-    live on the host sidechain input (Phase 41 Option A), not a rendered stem: its
-    per-sample level (the LOUDER channel's |x|, in dB - since 2026-10-17, as the native) engages ``depth_db`` of cut
-    while above ``threshold_db``, and a one-pole on the reduction amount gives
-    attack (engage fast) / release (let go slow). Per-sample causal envelope vs the
-    engine's offline 5 ms-block RMS — perceptual, not bit-exact (the export keeps the
-    offline duck-free key render). No key (no sidechain) -> released to unity."""
+def _duck(audio: np.ndarray, sample_rate: float, key, entry: dict, tempo=None) -> np.ndarray:
+    """The Duck (2026-10-28): `duck_law`, as the native runs it - SYNC from the song's quarters,
+    TRACK restarted by the hits of the host sidechain input (`key`; None: unity). (Until 2026-10-28:
+    a per-sample threshold follower with attack / release one-poles.)"""
+    from . import duck_law
     x = np.asarray(audio, dtype=np.float64)
     if x.ndim == 1:
         x = x[:, np.newaxis]
-    n = x.shape[0]
-    if key is None:
-        return x
-    k = np.asarray(key, dtype=np.float64)
-    if k.ndim == 1:
-        k = k[:, np.newaxis]
-    klevel = np.max(np.abs(k), axis=1)
-    m = min(n, klevel.shape[0])
-    target = np.zeros(n)
-    klevel_db = 20.0 * np.log10(np.maximum(klevel[:m], 1e-12))
-    target[:m] = np.where(klevel_db > threshold_db, float(depth_db), 0.0)
-    a_att = np.exp(-1.0 / (sample_rate * attack_ms / 1000.0))
-    a_rel = np.exp(-1.0 / (sample_rate * release_ms / 1000.0))
-    red = 0.0
-    gain_lin = np.empty(n)
-    for i in range(n):
-        t = target[i]
-        coef = a_att if t > red else a_rel        # engage fast, release slow
-        red = coef * red + (1.0 - coef) * t
-        gain_lin[i] = 10.0 ** (-red / 20.0)
-    return x * gain_lin[:, np.newaxis]
-
-
-def _band_width(audio: np.ndarray, sample_rate: float, entry: dict) -> np.ndarray:
-    """Per-band stereo width - the DAW's law (MonitorChain::applyBandWidth, the band width audit
-    2026-10-21): a real 3-way LR8 split at the band's edges, the band's side scaled, summed back.
-    Its own transcription of ``dsp._band_width_scale``: the edges, the 48 dB/oct crossovers (a
-    4th-order Butterworth's two sections, run twice), the allpass on the low. Stereo-only."""
-    x = np.asarray(audio, dtype=np.float64)
-    if x.ndim < 2 or x.shape[1] != 2:
-        return x
-    import math as _m
-    e_lo, e_hi = float(entry.get("lo_hz") or 0.0), float(entry.get("hi_hz") or 0.0)
-    fc, q = float(entry.get("freq_hz") or 0.0), float(entry.get("q") or 0.0)
-    labels = ["sub", "bass", "low_mid", "mid", "high_mid", "presence", "brilliance", "air"]
-    edges = [20, 60, 150, 400, 1000, 2000, 4000, 8000, 20000]
-    if e_lo > 0.0 and e_hi > e_lo:
-        lo, hi = e_lo, e_hi
-    elif entry.get("band") in labels:
-        i = labels.index(entry["band"])
-        lo, hi = float(edges[i]), float(edges[i + 1])
-    elif fc > 0.0 and q > 0.0:
-        lo = fc * (_m.sqrt(1.0 + 1.0 / (4.0 * q * q)) - 1.0 / (2.0 * q))
-        hi = lo + fc / q
-    else:
-        lo, hi = 2000.0, 4000.0
-    top = min(20000.0, 0.45 * sample_rate)
-    lo = max(20.0, min(lo, top / 1.05))
-    hi = max(lo * 1.05, min(min(hi, lo * 100.0), top))
-    w = min(2.0, max(0.0, float(entry.get("width", 1.0))))
-    qs = (0.54119610014619701, 1.3065629648763766)
-
-    def lr8(v, shape, f):
-        for qq in qs + qs:
-            b, a = biquad_coeffs(shape, sample_rate, f, qq, 0.0)
-            v = lfilter(b, a, v, axis=-1)
-        return v
-    t = x.T
-    low_raw = lr8(t, "lpf2", lo)
-    rest = lr8(t, "hpf2", lo)
-    low = lr8(low_raw, "lpf2", hi) + lr8(low_raw, "hpf2", hi)
-    mid, high = lr8(rest, "lpf2", hi), lr8(rest, "hpf2", hi)
-    m = 0.5 * (mid[0] + mid[1])
-    sd = 0.5 * (mid[0] - mid[1]) * w
-    return np.stack([(low[0] + high[0]) + (m + sd), (low[1] + high[1]) + (m - sd)], axis=1)
+    k = None
+    if key is not None:
+        k = np.asarray(key, dtype=np.float64)
+        k = k[:, np.newaxis] if k.ndim == 1 else k
+        pad = np.zeros((x.shape[0], k.shape[1]))
+        m = min(x.shape[0], k.shape[0])
+        pad[:m] = k[:m]
+        k = pad
+    return duck_law.apply(x, sample_rate, entry, tempo=tempo, key=k)
 
 
 # ---------- send/return wet effects (Phase 40 Step 2) ----------------------
 # The agent's reverb/delay returns (Phase 38). Unlike comp/de-ess these are
 # *bit-exact*, not approximations: the return DSP is built from causal IIR
-# recurrences with no lookahead (a feedback comb + a one-pole tone filter), so
+# recurrences with no lookahead (a feedback loop with its filter inside it), so
 # the C++ transcribes them sample-for-sample. The whole return chain is also
 # linear time-invariant, so a per-instance local wet send sums (in the DAW) to
 # the same result as the offline shared-return topology:
 # ``Σ return(sourceᵢ·sendᵢ) == return(Σ sourceᵢ·sendᵢ)`` — see the fidelity test.
-REVERB_COMB_DELAYS_MS = (29.7, 37.1, 41.1, 43.7)   # mirror dsp._return_reverb
-REVERB_WET_SCALE = 0.35 / len(REVERB_COMB_DELAYS_MS)
 _IR_SEEDS = {"room": 0x12001, "hall": 0x12002, "plate": 0x12003}
 _IR_DECAY_SCALE = {"room": 0.55, "hall": 1.0, "plate": 0.75}
 _IR_WET_SCALE = 0.34   # unit-L2 (energy) normalized before the tone shelf — see dsp._IR_WET_SCALE
 _IR_EARLY = ((7.0, 0.6), (11.0, 0.45), (19.0, 0.35))   # a room's reflections (ms, gain) - dsp._IR_EARLY
 _IR_EARLY_LIFT = 10.0 ** (8.0 / 20.0)
-
-
-def _feedback_comb(x: np.ndarray, delay: int, feedback: float) -> np.ndarray:
-    """``y[n] = x[n-delay] + feedback·y[n-delay]`` — mirrors ``dsp._feedback_comb``
-    (the block-vectorised form of the per-sample recurrence the C++ runs)."""
-    n = x.shape[0]
-    out = np.zeros_like(x, dtype=np.float64)
-    if delay >= n:
-        return out
-    for start in range(delay, n, delay):
-        prev = start - delay
-        width = min(delay, n - start)
-        out[start:start + width] = (x[prev:prev + width]
-                                    + feedback * out[prev:prev + width])
-    return out
 
 
 def _tone_filter(audio: np.ndarray, sample_rate: float, tone: float) -> np.ndarray:
@@ -1177,38 +988,20 @@ def _tone_filter(audio: np.ndarray, sample_rate: float, tone: float) -> np.ndarr
 
 
 def _return_delay(audio: np.ndarray, sample_rate: float, entry: dict) -> np.ndarray:
-    """Wet-only feedback delay — mirrors ``dsp._return_delay``."""
-    n_frames = audio.shape[0]
-    # Held to the table (20..2000 ms) as every door holds it - the DAW's ring is two seconds
-    # (2026-10-18, the delay audit: a stored 5 s rendered a 5 s echo here).
-    delay_ms = float(np.clip(float(entry["delay_ms"]), 20.0, 2000.0))
-    delay = max(1, int(delay_ms * sample_rate / 1000.0))
-    if n_frames == 0 or delay >= n_frames:
-        return np.zeros_like(audio, dtype=np.float64)
-    feedback = float(np.clip(entry["feedback"], 0.0, 0.85))
-    out = _feedback_comb(np.asarray(audio, dtype=np.float64), delay, feedback)
-    return _tone_filter(out, sample_rate, float(entry["tone"]))
+    """The delay - ``dsp._return_delay``, one function since 2026-10-25 (the tone moved into the
+    feedback loop; this was a copy of the comb it replaced)."""
+    from .dsp import _return_delay as one_law   # dsp imports this module: a late import
+    return one_law(audio, int(sample_rate), entry)
 
 
 def _return_reverb(audio: np.ndarray, sample_rate: float, entry: dict) -> np.ndarray:
-    """Wet-only Schroeder-style reverb — mirrors ``dsp._return_reverb``."""
-    n_frames = audio.shape[0]
-    if n_frames == 0:
-        return np.zeros_like(audio, dtype=np.float64)
-    pre_delay = int(min(250.0, max(0.0, float(entry.get("pre_delay_ms", 20.0)))) * sample_rate / 1000.0)
-    fed = np.zeros_like(audio, dtype=np.float64)
-    if pre_delay < n_frames:
-        fed[pre_delay:] = audio[: n_frames - pre_delay]
-    decay_s = min(12.0, max(float(entry.get("decay_s", 1.8)), 0.2))
-    wet = np.zeros_like(audio, dtype=np.float64)
-    for delay_ms in REVERB_COMB_DELAYS_MS:
-        delay = max(1, int(delay_ms * sample_rate / 1000.0))
-        if delay >= n_frames:
-            continue
-        feedback = min(0.985, 10.0 ** (-3.0 * (delay / sample_rate) / decay_s))
-        wet += _feedback_comb(fed, delay, feedback)
-    wet *= REVERB_WET_SCALE
-    return _tone_filter(wet, sample_rate, float(entry["tone"]))
+    """The algorithmic reverb - ``dsp._return_reverb`` (reverb_law), one function since 2026-10-24
+    (this was a copy of the four combs the first network replaced)."""
+    from .dsp import _return_reverb as one_law   # dsp imports this module: a late import
+    x = np.asarray(audio, dtype=np.float64)
+    if x.ndim == 1:
+        x = x[:, np.newaxis]
+    return one_law(x, int(sample_rate), entry)
 
 
 def _ir_noise(seed: int, n: int) -> np.ndarray:
@@ -1373,42 +1166,36 @@ def render_monitor(audio: np.ndarray, sample_rate: float,
             out = out * 10.0 ** (e["gain_db"] / 20.0)
         elif t == "eq":
             out = _ms(out, e.get("channel", "stereo"),
-                      lambda a: apply_eq_band(a, sample_rate, e["shape"], e["freq_hz"],
-                                              e["q"], e["gain_db"],
-                                              e.get("slope_db_oct", 6)))
+                      lambda a: apply_eq_entry_band(a, sample_rate, e))
             if e.get("output_db"):   # 2026-07-12: the entry's FULL-signal output trim
                 out = out * 10.0 ** (e["output_db"] / 20.0)
         elif t == "comp":
             out = _ms(out, e.get("channel", "stereo"),
                       lambda a: _compress(a, sample_rate, e["threshold_db"], e["ratio"],
                                           e["attack_ms"], e["release_ms"],
-                                          e.get("makeup_db", 0.0), e.get("mix", 1.0)))
+                                          e.get("makeup_db", 0.0), e.get("mix", 1.0),
+                                          _comp_style(e), float(e.get("knee_db") or 0.0)))
         elif t == "dynamic_eq":
             out = _dynamic_eq(out, sample_rate, e["freq_hz"], e["q"],
-                              e["threshold_db"], e["ratio"],
+                              e["threshold_db"],
                               e.get("attack_ms", 10.0), e.get("release_ms", 120.0),
                               e["gain_db"])
         elif t == "mb_comp":
             out = _multiband_comp(out, sample_rate, e["low"], e["mid"], e["high"],
-                                  e.get("attack_ms", 10.0), e.get("release_ms", 150.0),
+                                  e.get("attack_ms", 2.0), e.get("release_ms", 85.0),
                                   e.get("crossover_lo_hz", MB_CROSSOVERS_HZ[0]),
                                   e.get("crossover_hi_hz", MB_CROSSOVERS_HZ[1]))
         elif t == "ott":
-            out = _ott(out, sample_rate, e.get("depth", 0.5), e.get("time", 1.0),
-                       e.get("in_gain_db", 0.0), e.get("out_gain_db", 0.0),
-                       e.get("low", {}), e.get("mid", {}), e.get("high", {}),
-                       e.get("crossover_lo_hz", 150.0),
-                       e.get("crossover_hi_hz", 2000.0))
+            out = _ott(out, sample_rate, e)
         elif t == "overdrive":
             out = _overdrive(out, sample_rate, e.get("drive_db", 12.0),
                              bool(e.get("filter_on", False)),
                              e.get("freq_hz", 800.0), e.get("q", 0.7),
                              e.get("tone", 0.5), e.get("output_db", 0.0),
-                             e.get("mix", 1.0), int(e.get("oversample", 1) or 1))
+                             e.get("mix", 1.0), int(e.get("oversample", _OD_OS_DEFAULT) or 1),
+                             e.get("character", 0))
         elif t == "chorus":
-            out = _chorus(out, sample_rate, e.get("rate_hz", 0.8), e.get("depth", 0.25),
-                          e.get("delay_ms", 20.0), e.get("mix", 0.5),
-                          int(e.get("voices", 1) or 1), e.get("stereo_deg", 90.0))
+            out = _chorus(out, sample_rate, e)
         elif t == "flanger":
             out = _flanger(out, sample_rate, e.get("rate_hz", 0.5), e.get("depth", 0.6),
                            e.get("delay_ms", 3.0), e.get("feedback", 0.0),
@@ -1432,36 +1219,29 @@ def render_monitor(audio: np.ndarray, sample_rate: float,
             # native implements them)
             out = _saturate(out, e["drive_db"], e.get("output_db", 0.0),
                             curve=e.get("curve", 0), mix=float(e.get("mix", 1.0)),
-                            oversample=int(e.get("oversample", 1) or 1))
+                            oversample=int(e.get("oversample", _SAT_OS_DEFAULT) or 1),
+                            sample_rate=int(sample_rate))
         elif t == "clip":
-            out = _clip(out, e["threshold_db"], e["hardness"], e.get("output_db", 0.0),
-                        int(e.get("oversample", 1) or 1))
+            out = _clip(out, e)
         elif t == "width":
-            out = _width(out, e["width"])
+            out = _width(out, e["width"], bool(e.get("stereoize", False)),
+                         float(e.get("stereoize_ms", 6.0)), sample_rate)
         elif t == "utility":
             out = _utility(out, sample_rate, e)
         elif t == "deess":
-            out = _deess(out, sample_rate, e["threshold_db"], e["freq_hz"],
-                         e.get("ratio", DEESS_RATIO),
-                         e.get("attack_ms", DEESS_ATTACK_MS),
-                         e.get("release_ms", DEESS_RELEASE_MS),
-                         e.get("range_db", -80.0), bool(e.get("wide", False)))
+            out = _deess(out, sample_rate, e)
         elif t == "gate":
             out = _gate(out, sample_rate, e["threshold_db"], e["ratio"],
                         e["attack_ms"], e["release_ms"],
                         e.get("hold_ms", 0.0), e.get("range_db", -80.0),
                         e.get("hysteresis_db", 0.0),
-                        e.get("sc_hpf_hz", 0.0), e.get("sc_lpf_hz", 20000.0))
+                        e.get("sc_hpf_hz", 0.0), e.get("sc_lpf_hz", 20000.0),
+                        e.get("character", 0))
         elif t == "transient":
             out = _transient(out, sample_rate, e["attack_db"], e["sustain_db"],
                              e.get("speed", 1.0), e.get("output_db", 0.0))
-        elif t == "band_width":
-            out = _band_width(out, sample_rate, e)
-        elif t == "imager":
-            out = _imager(out, sample_rate, e)
         elif t == "duck":
-            out = _duck(out, sample_rate, sidechain, e["threshold_db"],
-                        e["depth_db"], e["attack_ms"], e["release_ms"])
+            out = _duck(out, sample_rate, sidechain, e, tempo=tempo)
         elif t == "send_return":
             out = _send_return(out, sample_rate, e["send_db"], e["return_entries"])
         elif t in ("return_delay", "return_reverb", "return_convolution"):

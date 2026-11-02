@@ -41,37 +41,53 @@ def _body(text: str, opening: str, span: int = 6000) -> str:
 # ---- D28: one detector, one step, in both engines --------------------------------------------
 
 def test_the_limiter_and_the_meter_read_a_peak_through_the_same_step():
+    # Since Phase 65 step 5 the step is taken a block at a time (tpBlock: the same numbers, the
+    # taps outside the samples so the inner loop vectorises); there is still ONE of it.
     text = CHAIN.read_text(encoding="utf-8")
-    assert "static inline float tpStep (const float* h, float& prevLast) noexcept" in text
-    limiter = _body(text, "void MonitorChain::applyLookaheadLimiter (AudioBuffer<float>& buffer, bool doLimit, const LimParams& lp)", 12000)
-    assert "tpStep (h, limTpPrev[ch])" in limiter, "the limiter's loop no longer reads its peak through tpStep"
+    assert "static void tpBlock (float* hist, float& prevLast, const float* x, int n, float* pk) noexcept" in text
+    limiter = _body(text, "void MonitorChain::applyLookaheadLimiter (AudioBuffer<float>& buffer, bool doLimit, const LimParams& lp, int slot, LimMem& m)", 24000)
+    assert "tpBlock (m.tpHist[ch], m.tpPrev[ch], chunkIn, len, chunkPk[ch])" in limiter, "the limiter no longer reads its peak through tpBlock"
     meter = _body(text, "static float truePeakOfBlock (float* hist, float& prevLast, const float* d, int n) noexcept\n{")
-    assert "tpStep (hist, prevLast)" in meter, "the meter no longer reads its peak through tpStep"
+    assert "tpBlock (hist, prevLast, d + s, len, part)" in meter, "the meter no longer reads its peak through tpBlock"
     # no second walk over the table: a peak estimate made anywhere else is a second detector
     assert len(re.findall(r"kTpPhase\[p\]\[k\]", text)) == 1
 
 
 def test_the_step_takes_the_crest_between_its_points_in_both_engines():
-    step = _body(CHAIN.read_text(encoding="utf-8"), "static inline float tpStep (const float* h, float& prevLast) noexcept")
-    assert "(b * b) / (4.0f * a)" in step, "the native step lost its parabola"
-    assert "h[kTpTapsN - kTpCentre]" in step, "the native step no longer reads the next sample"
+    text = CHAIN.read_text(encoding="utf-8")
+    crest = _body(text, "static inline float tpPeakOfPoints (const float* q) noexcept")
+    assert "(b * b) / (4.0f * a)" in crest, "the native step lost its parabola"
+    step = _body(text, "static void tpBlock (float* hist, float& prevLast, const float* x, int n, float* pk) noexcept")
+    assert "ext[i + kTpTapsN - kTpCentre]" in step, "the native step no longer reads the next sample"
+    assert "tpPeakOfPoints (q)" in step
     py = DETECTOR.read_text(encoding="utf-8")
     assert "(b[bends] ** 2) / (4.0 * a[bends])" in py, "the Python detector lost its parabola"
 
 
 def test_the_gain_floor_is_read_where_the_exiting_sample_was_judged():
     limiter = _body(CHAIN.read_text(encoding="utf-8"),
-                    "void MonitorChain::applyLookaheadLimiter (AudioBuffer<float>& buffer, bool doLimit, const LimParams& lp)", 12000)
-    assert "targets[(delayPos + k) % ringLen]" in limiter
-    assert "for (int k = kTpCentre - kLimFloorHalf; k <= kTpCentre + kLimFloorHalf; ++k)" in limiter
+                    "void MonitorChain::applyLookaheadLimiter (AudioBuffer<float>& buffer, bool doLimit, const LimParams& lp, int slot, LimMem& m)", 24000)
+    # Since the two-stage limiter (2026-10-25) the raw gain is made 2h samples ahead of the sample
+    # leaving (jRaw) and the floor is read around THAT sample, in the instance's own ring
+    assert "auto slotOf = [&] (int fromLeaving) { return (m.delayPos + fromLeaving + kTpCentre) % ringLen; };" in limiter
+    assert "for (int k = -kLimFloorHalf; k <= kLimFloorHalf; ++k)" in limiter
+    assert "raw = jmin (raw, targets[slotOf (2 * h + k)]);" in limiter
     assert "out = jlimit (-ceiling, ceiling, out);" in limiter, "the backstop stays as the last resort"
 
 
 def test_the_limiter_memory_has_a_line_in_prepare_and_in_the_reset():
+    # Since Phase 65 each limiter and clipper keeps its memory in an instance (LimMem / ClipMem):
+    # its rest() clears the detector's last point, prepare() makes every instance fresh, and the
+    # reset puts every instance at rest.
     text = CHAIN.read_text(encoding="utf-8")
-    assert text.count("std::memset (limTpPrev, 0, sizeof (limTpPrev));") == 2
-    assert text.count("std::memset (clipTpPrev, 0, sizeof (clipTpPrev));") == 2
-    assert text.count("limTargetBuf") >= 4
+    header = CHAIN.with_suffix(".h").read_text(encoding="utf-8")
+    assert "std::memset (tpPrev, 0, sizeof (tpPrev));" in header.split("struct LimMem\n", 1)[1].split("\n    };", 1)[0]
+    assert "std::memset (tpPrev, 0, sizeof (tpPrev));" in header.split("struct ClipMem\n", 1)[1].split("\n    };", 1)[0]
+    prepare = _body(text, "void MonitorChain::prepare (double sampleRate", 30000)
+    reset = _body(text, "void MonitorChain::resetDspState()", 8000)
+    assert "limPool.clear();" in prepare and "clipPool.clear();" in prepare
+    assert "limPool.forEach" in reset and "clipPool.forEach" in reset
+    assert text.count("targetBuf") >= 2
 
 
 # ---- D31: a whole-timeline edit carries the automation ----------------------------------------
@@ -164,8 +180,8 @@ def test_the_composers_button_asks_what_is_typed():
     assert "sendBtn.onClick = [this] { if (sendButtonStops()) { if (onStop) onStop(); } else send(); };" in text
     assert "bool sendButtonStops() const { return busy && input.getText().trim().isEmpty(); }" in text
     # every place that changes the composer's text without a change message refreshes the button
-    for needle in ("input.clear();\n        refreshSendButton();",
-                   "input.setText (lastSentRaw, false);\n        refreshSendButton();",
+    for needle in ("input.clear();\n        resized();   // clear() fires no onTextChange: the box stayed tall for a long message\n        refreshSendButton();",
+                   "input.setText (lastSentRaw, false);\n        resized();\n        refreshSendButton();",
                    "input.setText (text, false); scanMentions(); refreshSendButton();"):
         assert needle in text, needle
     assert "busy ? MixPalette::warm : MixPalette::accent" not in text, "a colour still follows `busy` alone"

@@ -119,41 +119,6 @@ async def test_ranged_actions_rejected_on_master(demo_project):
             assert result["violations"][0]["rule"] == "master_ride_unsupported"
 
 
-# ---------- per-band width ----------
-
-@pytest.mark.anyio
-async def test_band_width_narrows_only_its_band(tmp_path):
-    project = tmp_path / "wide"
-    project.mkdir()
-    t = np.arange(int(8.0 * SAMPLE_RATE)) / SAMPLE_RATE
-    mono_low = 0.4 * np.sin(2 * np.pi * 220.0 * t)
-    wide_high = 0.3 * np.sin(2 * np.pi * 6000.0 * t)
-    audio = np.stack([mono_low + wide_high, mono_low - wide_high], axis=1)
-    sf.write(project / "synth.wav", audio.astype(np.float32), SAMPLE_RATE)
-
-    before, sample_rate = dsp.render_stem(Session(project), "synth")
-    width_before = analysis._band_width_db(before, sample_rate)
-
-    async with in_memory_engine(project) as client:
-        proposal = await call(client, "propose_actions", {"req": {
-            "rationale": "mono the brilliance band", "predicted_impact": [],
-            "actions": [{"type": "band_width", "stem_id": "synth",
-                         "band": "brilliance", "width": 0.0}]}})
-        assert proposal["accepted"], proposal["violations"]
-        await call(client, "apply_proposal",
-                   {"proposal_id": proposal["proposal_id"]})
-
-    after, _ = dsp.render_stem(Session(project), "synth")
-    width_after = analysis._band_width_db(after, sample_rate)
-    # the band's SIDE, measured directly (2026-10-21, the band width audit): the band is a 48 dB/oct
-    # split, so a 6 kHz side tone in brilliance goes ~20.6 dB down, not to zero - and with no mid
-    # in the band the side/mid width metric reads its ceiling whatever is left of the side.
-    side = lambda a: float(np.sqrt(np.mean((0.5 * (a[sample_rate:, 0] - a[sample_rate:, 1])) ** 2)))
-    assert 20.0 * np.log10(side(after) / side(before)) < -18.0
-    assert width_after["low_mid"] == pytest.approx(width_before["low_mid"],
-                                                   abs=0.5)
-
-
 # ---------- multiband compressor ----------
 
 @pytest.mark.anyio

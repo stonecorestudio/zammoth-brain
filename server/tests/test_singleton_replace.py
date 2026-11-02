@@ -38,10 +38,8 @@ def test_stem_singletons_replace_not_stack(demo_project):
          GateAction(stem_id=stem, threshold_db=-35.0)),
         (SaturationAction(stem_id=stem, drive_db=3.0),
          SaturationAction(stem_id=stem, drive_db=4.0)),
-        (SidechainDuckAction(stem_id=stem, key_stem_id=key,
-                             threshold_db=-30.0, depth_db=6.0),
-         SidechainDuckAction(stem_id=stem, key_stem_id=key,
-                             threshold_db=-24.0, depth_db=4.0)),
+        (SidechainDuckAction(stem_id=stem, key_stem_id=key, trigger=1, mix=0.5),
+         SidechainDuckAction(stem_id=stem, key_stem_id=key, trigger=1, mix=0.3)),
     ]
     for first, second in moves:
         s._mutate(first)
@@ -50,7 +48,7 @@ def test_stem_singletons_replace_not_stack(demo_project):
         assert _count(chain, first.type) == 1, f"{first.type} stacked"
         entry = next(e for e in chain if e["type"] == first.type)
         probe = {"deess": "threshold_db", "gate": "threshold_db",
-                 "duck": "threshold_db", "transient": "attack_db",
+                 "duck": "mix", "transient": "attack_db",
                  "saturation": "drive_db"}[first.type]
         assert entry[probe] == getattr(second, probe)
 
@@ -139,8 +137,8 @@ def test_replacing_a_user_master_device_is_reported(demo_project):
 def test_master_singletons_replace_not_stack(demo_project):
     s = Session(demo_project)
     for first, second in [
-        (ClipAction(stem_id=MASTER, threshold_db=-3.0),
-         ClipAction(stem_id=MASTER, threshold_db=-2.0)),
+        (ClipAction(stem_id=MASTER, clip_pct=71.0),
+         ClipAction(stem_id=MASTER, clip_pct=79.0)),
         (SaturationAction(stem_id=MASTER, drive_db=3.0),
          SaturationAction(stem_id=MASTER, drive_db=5.0)),
         (DeessAction(stem_id=MASTER, threshold_db=-24.0, freq_hz=6000.0),
@@ -179,7 +177,7 @@ def test_safety_limiter_is_ceiling_only(demo_project):
     ceiling and no loudness target — transparent until a peak reaches it. The
     palette limiter (safety=False) keeps its −14 LUFS target; the safety one must
     not inherit it, or "a limiter on the master by default" would push every new
-    project's loudness. Still one limiter max, and it removes like any other."""
+    project's loudness. It removes like any other."""
     s = Session(demo_project)
     res = s.add_master_device("limiter", safety=True)
     assert res == {"type": "limiter", "occurrence": 0}
@@ -187,8 +185,9 @@ def test_safety_limiter_is_ceiling_only(demo_project):
     assert entry["ceiling_dbtp"] == -1.0
     assert "target_lufs_i" not in entry
     assert entry.get("owner") == "user"
-    with pytest.raises(ValueError, match="already has a limiter"):
-        s.add_master_device("limiter")            # one limiter max, palette or safety
+    s.add_master_device("limiter")                # Phase 65: the master takes a second limiter
+    assert sum(e["type"] == "limiter" for e in s._state["master_chain"]) == 2
+    s.remove_master_device("limiter", 1)
     s.remove_master_device("limiter", 0)
     assert not any(e["type"] == "limiter" for e in s._state["master_chain"])
     # the palette limiter is unchanged by the flag's existence

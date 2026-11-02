@@ -136,6 +136,10 @@ def test_the_api_loop_records_every_round_and_every_tool(api):
     assert tools.ran == ["track.set_gain", "clip.trim"]
     s = session.timing.summary()
     assert s["rounds"] == 3 and s["tool_calls"] == 2
+    # 2026-11-02: how much each reply put into the context, so a bloated one is found by
+    # measurement, not estimated from the rounds' token counts (the reply here is {"ok": true})
+    assert s["tool_chars"]["track.set_gain"] == {"n": 1, "chars": len('{"ok": true}'),
+                                                 "max": len('{"ok": true}')}
     assert [r["calls"] for r in session.timing.rounds] == [1, 1, 0]
     assert sorted(t["tool"] for t in s["slowest_tools"]) == ["clip.trim", "track.set_gain"]
     assert s["out_tokens"] > 0, "a round's usage is its tokens"

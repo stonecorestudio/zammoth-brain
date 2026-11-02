@@ -147,6 +147,7 @@ def probe(session: Session, actions: list, metrics: list[str],
     probe's `after` equals the post-apply measurement on the same range."""
     before = _Resolver(session, range_s=range_s)
     scratch = session.probe_copy()
+    scratch.pin_instances(actions)
     for action in actions:
         scratch._mutate(action)
     after = _Resolver(scratch, range_s=range_s)

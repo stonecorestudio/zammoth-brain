@@ -1,7 +1,7 @@
 """The stereo phase reading (`analyze_phase`, 2026-10-13; mix-analysis skill ▸ *Phase*).
 
 One measurement for the agent's ears and the device faces' lamps: a band's L/R correlation over
-windows of about 0.3 s. The DAW's imager, width, utility and band-width faces light PHASE while
+windows of about 0.3 s. The DAW's Imager and Utility faces light PHASE while
 that reading is below 0 (their meters integrate over the same 0.3 s); `below_zero_pct` here is
 the share of a band's sounding time it is - how much of the song such a lamp would be lit.
 
@@ -19,6 +19,10 @@ songs and their separated stems, 2026-10-13):
   40-57 % of their time and the records fold to mono fine;
 - two STEMS that cancel each other in the lows (`conflicts`): opposite polarity, or one a few
   milliseconds early - measured on their centre signals at their mix levels.
+- a STEM whose centred, bright hits carry a low-mid tick on ONE side (`one_sided_clicks`,
+  2026-11-02): nothing cancels, but it is heard as a click in one ear, and lifting the stem's
+  attack or top end makes it louder. Sized on the loop that had it (every hit, +18 dB on the
+  right) against 40 released-pack stems that do not (none flagged).
 
 `mono_safe_width` is exact for the strip width: it scales the side, and a window's correlation is
 below 0 exactly when its mid power is below its side power, so the answer is read off the
@@ -31,8 +35,8 @@ from typing import Optional
 
 import numpy as np
 
-from .models import (BAND_EDGES_HZ, BAND_LABELS, PhaseBand, PhaseConflict, PhaseIssue,
-                     PhaseTarget)
+from .models import (BAND_EDGES_HZ, BAND_LABELS, OneSidedClicks, PhaseBand, PhaseConflict,
+                     PhaseIssue, PhaseTarget)
 
 PHASE_WINDOW_S = 0.3              # the window a correlation is read over - the lamps' integration
 PHASE_CANCEL_CORRELATION = 0.0    # a window below this cancels in mono (the lamps' PHASE)
@@ -61,6 +65,17 @@ PHASE_LAG_MIN_MS = 0.25           # ...and is not a timing fix below this
 PHASE_LAG_MIN_GAIN = 0.1          # ...and must line up this much better than a flip would
 BASS_MONO_MAX_HZ = 500.0          # utility bass_mono_hz's ceiling
 SIDE_SHARE_MIN = 0.1              # a stem carrying less of a band's side than this is not named
+CLICK_BAND_HZ = (300.0, 3000.0)   # one_sided_clicks: where a tick lives, under a hat's top end
+CLICK_BRIGHT_HZ = 5000.0          # ...and where the hit's own (centred) top end is read
+CLICK_FRAME_S = 0.004             # the envelope's frame
+CLICK_SIDE_DB = 12.0              # a frame's low-mids this much louder on one side...
+CLICK_NEAR_PEAK_DB = 20.0         # ...within this of the stem's loudest low-mid frame
+CLICK_CENTRED_DB = 3.0            # the hit's top end within this of centre (else: a panned sound)
+CLICK_BRIGHT_FLOOR_DB = -30.0     # a stem whose top end is this far under its low-mids is not judged
+CLICK_MERGE_S = 0.03              # frames this close are one click
+CLICK_MIN = 4                     # at least this many clicks...
+CLICK_HIT_SHARE = 0.5             # ...on at least this share of the stem's bright hits...
+CLICK_SAME_SIDE = 0.8             # ...and at least this share of them on one side
 _TINY = 1.0e-20
 
 _CONFLICT_TOP_HZ = BAND_EDGES_HZ[BAND_LABELS.index(PHASE_CONFLICT_BANDS[-1]) + 1]
@@ -290,13 +305,9 @@ def stereo_devices(chain: list[dict]) -> list[str]:
         if not entry.get("enabled", True):
             continue
         kind = entry.get("type")
-        if kind == "imager":
-            moved = [f"{k} {float(entry[k]):.2f}" for k in ("width_low", "width_mid", "width_high")
-                     if k in entry and float(entry[k]) > 1.0]
-            if moved:
-                out.append("imager " + ", ".join(moved))
-        elif kind == "band_width" and float(entry.get("width", 1.0)) > 1.0:
-            out.append(f"band_width {entry.get('band', '')} {float(entry['width']):.2f}".replace("  ", " "))
+        if kind == "width" and float(entry.get("width", 1.0)) > 1.0:   # the Imager (a chain entry)
+            out.append(f"width {float(entry['width']):.2f}"
+                       + (" with stereoize" if entry.get("stereoize") else ""))
         elif kind == "utility":
             left, right = entry.get("invert_left"), entry.get("invert_right")
             left = bool(entry.get("invert", False)) if left is None else bool(left)
@@ -337,7 +348,7 @@ def stem_move(row: PhaseTarget, label: str, devices: list[str]) -> str:
         if top <= BASS_MONO_MAX_HZ:
             parts.append(f"utility bass_mono at {max(top, 120.0):.0f} Hz")
         else:
-            parts.append(f"an imager or band_width below 1.0 on {label}")
+            parts.append(f"an eq on the side cutting {label}")
         if row.mono_safe_width is not None:
             parts.append(f"strip width {row.mono_safe_width:.2f} or less")
     said = f"{row.target}: " + " or ".join(parts)
@@ -567,6 +578,70 @@ def _flip_side(audio: np.ndarray, sample_rate: int, others: list[WindowSums]) ->
 
 # ---------------------------------------------------------------- the session's reading
 
+def one_sided_clicks(audio: np.ndarray, sample_rate: int) -> Optional[OneSidedClicks]:
+    """A tick on ONE side of a centred hit, on most of a bright sound's hits (mix-analysis skill ▸
+    *Phase*). Each candidate is a 4 ms frame whose low-mids (`CLICK_BAND_HZ`) are `CLICK_SIDE_DB`
+    louder on one side, near the stem's loudest, with a hit around it whose top end is centred -
+    a panned sound leans in its top end too, and a dark one (a bass, a pad) has none to judge."""
+    from scipy.signal import butter, sosfilt
+
+    x = np.asarray(audio, dtype=np.float64)
+    if x.ndim != 2 or x.shape[1] < 2:
+        return None
+    x = x[:, :2]
+    low_mid = sosfilt(butter(4, list(CLICK_BAND_HZ), "bandpass", fs=sample_rate, output="sos"),
+                      x, axis=0)
+    bright = sosfilt(butter(4, CLICK_BRIGHT_HZ, "highpass", fs=sample_rate, output="sos"), x, axis=0)
+    if (10.0 * math.log10(float(np.mean(bright ** 2)) + _TINY)
+            - 10.0 * math.log10(float(np.mean(low_mid ** 2)) + _TINY)) < CLICK_BRIGHT_FLOOR_DB:
+        return None
+    f = max(1, int(round(CLICK_FRAME_S * sample_rate)))
+    n = x.shape[0] // f
+    if n < 8:
+        return None
+    level = np.abs(low_mid[:n * f]).reshape(n, f, 2).max(axis=1)
+    top = (bright[:n * f] ** 2).reshape(n, f, 2).sum(axis=1)
+    if level.max() <= 1e-9 or top.max() <= _TINY:
+        return None
+    lean_db = 20.0 * np.log10((level[:, 1] + 1e-12) / (level[:, 0] + 1e-12))
+    candidates = np.flatnonzero((level.max(axis=1) >= level.max() * 10 ** (-CLICK_NEAR_PEAK_DB / 20.0))
+                                & (np.abs(lean_db) >= CLICK_SIDE_DB))
+    half = int(round(0.02 / CLICK_FRAME_S))
+    clicks: list[tuple[float, str, float]] = []
+    last = -(10 ** 9)
+    for k in candidates:
+        if (k - last) * CLICK_FRAME_S < CLICK_MERGE_S:
+            continue
+        lo, hi = max(0, k - half), min(n, k + half + 1)
+        left, right = float(top[lo:hi, 0].sum()), float(top[lo:hi, 1].sum())
+        if max(left, right) < top.max() * 1e-3:
+            continue                                   # no bright hit around it
+        if abs(10.0 * math.log10((right + _TINY) / (left + _TINY))) >= CLICK_CENTRED_DB:
+            continue                                   # the sound itself leans: a panned hit
+        clicks.append((k * CLICK_FRAME_S, "right" if lean_db[k] > 0 else "left", abs(float(lean_db[k]))))
+        last = k
+    if len(clicks) < CLICK_MIN:
+        return None
+    peak = top.max(axis=1)
+    rises = np.flatnonzero((peak[1:-1] >= peak[:-2]) & (peak[1:-1] > peak[2:])
+                           & (peak[1:-1] >= peak.max() * 1e-2)) + 1
+    hits, last = 0, -(10 ** 9)
+    for k in rises:
+        if (k - last) * CLICK_FRAME_S >= CLICK_MERGE_S:
+            hits, last = hits + 1, k
+    if len(clicks) < CLICK_HIT_SHARE * max(1, hits):
+        return None                                    # a stereo synth leaning now and then
+    sides = [side for _, side, _ in clicks]
+    side = max(("left", "right"), key=sides.count)
+    mine = [c for c in clicks if c[1] == side]
+    if len(mine) < CLICK_SAME_SIDE * len(clicks):
+        return None
+    seconds = x.shape[0] / float(sample_rate)
+    return OneSidedClicks(side=side, count=len(mine), per_minute=round(len(mine) / seconds * 60.0, 1),
+                          excess_db=round(float(np.median([c[2] for c in mine])), 1),
+                          at_s=[round(c[0], 2) for c in mine[:4]])
+
+
 def phase_reading(session, stem_ids: Optional[list[str]] = None):
     """`analyze_phase`: the master, every stem and group in the mix (or only the stems and groups
     `stem_ids` names), what cancels and why, and the stems that cancel each other."""
@@ -592,7 +667,8 @@ def phase_reading(session, stem_ids: Optional[list[str]] = None):
         audio, rate = dsp.render_stem(session, sid, _cache=cache)
         stem_sums[sid] = WindowSums(audio, rate, keep_mid=True)
         rows[sid] = PhaseTarget(target=sid, kind="stem", corr=broadband_corr(stem_sums[sid]),
-                                bands=band_reading(stem_sums[sid]))
+                                bands=band_reading(stem_sums[sid]),
+                                one_sided_clicks=one_sided_clicks(audio, rate))
     mix, rate = dsp.render_master(session, _cache=cache)
     entering, _ = dsp.render_master(session, pre_master=True, _cache=cache)
     entering_sums = WindowSums(entering, rate)
@@ -668,6 +744,11 @@ def phase_reading(session, stem_ids: Optional[list[str]] = None):
     if session.returns:
         notes.append("returns (reverb / delay wets) are wide by design and are not judged on "
                      "their own - they are in the master's reading")
-    return PhaseAnalysis(window_s=window_seconds(rate), clean=not issues and not found,
+    clicky = [t.target for t in targets if t.one_sided_clicks is not None]
+    if clicky:
+        notes.append("a click on one side of each hit: " + ", ".join(clicky)
+                     + " - narrow toward mono; no extra attack or top end")
+    return PhaseAnalysis(window_s=window_seconds(rate),
+                         clean=not issues and not found and not clicky,
                          master=master, targets=targets, issues=issues, conflicts=found,
                          note="; ".join(notes) or None)

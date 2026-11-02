@@ -115,8 +115,7 @@ def test_excluded_stem_refuses_everything_but_an_exclude(demo_project):
     assert "stem_a" in result.violations[0].message
     # a duck may not be keyed to it either
     duck = ProposalRequest(rationale="duck", predicted_impact=[], actions=[{
-        "type": "duck", "stem_id": "stem_b", "key_stem_id": "stem_a",
-        "threshold_db": -30.0, "depth_db": 6.0, "attack_ms": 5.0, "release_ms": 150.0}])
+        "type": "duck", "stem_id": "stem_b", "key_stem_id": "stem_a", "trigger": "track", "mix": 0.5}])
     result = Session(demo_project).propose(duck)
     assert not result.accepted and result.violations[0].rule == "duck_key_stem"
     # the way back in is allowed, and afterwards the stem takes moves again

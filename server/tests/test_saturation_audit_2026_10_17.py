@@ -4,8 +4,9 @@ The native half is `--sat-audit` (restart from rest, the dry aligned at every mi
 each curve against values pinned from `dsp._waveshape`). Here:
   * every value is held to the table and the oversample snapped down to 1/2/4/8, as the native's
     parse does - a mix outside 0..1 or an oversample of 3 rendered otherwise offline;
-  * no text calls tube's NEGATIVE half the hard one: it is the softer, louder one (atan), and the
-    tool text says its negative peaks come out louder and it leaves a small DC offset.
+  * no text calls tube's NEGATIVE half the hard one. Since 2026-10-26 (sat_characters) the tube is
+    the other way round - its POSITIVE peaks clip later - and its tone takes the DC out, so the tool
+    text says the first and no longer claims a DC offset.
 """
 from __future__ import annotations
 
@@ -40,5 +41,8 @@ def test_an_oversample_between_factors_snaps_down():
 def test_no_text_calls_tubes_negative_half_the_hard_one():
     for rel in ("server/mix_engine/dsp.py", "server/mix_engine/reference_monitor.py"):
         assert "+ soft / − hard" not in (ROOT / rel).read_text(), rel
+    big = dsp._waveshape(np.array([-50.0, 50.0]), 12.0, "tube")
+    assert big[1] > -big[0]                                  # the positive side clips later
     for rel in ("orchestrator/prompts.py", "orchestrator/chat.py", "orchestrator/agents.py"):
-        assert "DC offset" in (ROOT / rel).read_text(), rel
+        text = " ".join((ROOT / rel).read_text().replace("\\\n", " ").split())
+        assert "positive peaks clip later" in text and "negative peaks come out louder" not in text, rel

@@ -54,7 +54,7 @@ def test_utility_canonical_order_and_live_monitor(demo_project):
     for kinds in (_STEM_KINDS, _MASTER_KINDS, _BUS_KINDS):
         assert "utility" in kinds
     for kinds in (_MASTER_KINDS, _BUS_KINDS):
-        assert kinds.index("utility") < kinds.index("band_width") < kinds.index("width" if "width" in kinds else "clip")
+        assert kinds.index("utility") < kinds.index("width" if "width" in kinds else "clip")
 
     s.add_stem_device(stem, "utility")
     mc = monitor_chain_params(effective_chain(s._state["stems"][stem]))

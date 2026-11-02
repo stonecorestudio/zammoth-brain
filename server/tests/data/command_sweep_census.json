@@ -736,6 +736,15 @@
  "device.move_to_track wrong_type": {
   "outcome": "refused"
  },
+ "device.place bare": {
+  "outcome": "refused"
+ },
+ "device.place no_target": {
+  "outcome": "refused"
+ },
+ "device.place wrong_type": {
+  "outcome": "refused"
+ },
  "device.remove bare": {
   "outcome": "refused"
  },
@@ -1129,15 +1138,6 @@
   "outcome": "refused"
  },
  "marker.set wrong_type": {
-  "outcome": "refused"
- },
- "master.limiter bare": {
-  "outcome": "refused"
- },
- "master.limiter example": {
-  "outcome": "ok"
- },
- "master.limiter wrong_type": {
   "outcome": "refused"
  },
  "metronome.set bare": {
@@ -2865,8 +2865,7 @@
   "outcome": "refused"
  },
  "view.device_zoom bare": {
-  "moved": false,
-  "outcome": "ok"
+  "outcome": "refused"
  },
  "view.device_zoom wrong_type": {
   "outcome": "refused"

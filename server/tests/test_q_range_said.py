@@ -30,7 +30,7 @@ def _q_too_high_dump() -> str:
     proposal = {"rationale": "notch the ring",
                 "predicted_impact": [{"metric": "lufs_i", "predicted_delta": 0.0, "unit": "LUFS"}],
                 "actions": [{"type": "eq", "stem_id": "drums",
-                             "band": {"freq_hz": 11400.0, "gain_db": 0.0, "q": 20.0,
+                             "band": {"freq_hz": 11400.0, "gain_db": 0.0, "q": 60.0,
                                       "shape": "notch"}}]}
     with pytest.raises(ValidationError) as caught:
         _Arguments.model_validate({"req": proposal})
@@ -65,7 +65,7 @@ def test_the_chats_engine_call_words_a_refusal_as_the_one_problem():
     for noise in ("TextContent", "validation error", "Arguments", "[type=", "function-after"):
         assert noise not in said, f"{noise!r} in: {said}"
     assert said.startswith("engine tool 'propose_actions' failed: "), said
-    assert "q" in said and "8" in said, said
+    assert "q" in said and "40" in said, said
 
 
 def _range(model, field: str) -> str:
