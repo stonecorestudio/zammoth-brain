@@ -128,11 +128,14 @@ def test_a_drawn_step_ends_where_it_ends():
     assert "**Nor does what plays after it**" in MANUAL
 
 
-def test_the_report_dialog_does_not_promise_a_listener():
-    """There is no support address in the product. Until there is one, the dialog says what a
-    useful report holds and does not say "Tell us"."""
+def test_the_report_dialog_says_where_a_report_goes():
+    """Since the public launch (2026-11-02) a report has a listener: support@zammoth.com. The
+    dialog names it and its Email Support button opens a message to it with the diagnostics
+    already in it (appboundary::supportMailUrl); Copy Diagnostics stays for any other route."""
     body = _body(APP, "    void showReportProblem()")
-    assert "Tell us" not in body and "Copy Diagnostics puts them on" in body
+    assert "support@zammoth.com" in body and "Copy Diagnostics puts them on" in body
+    assert 'addButton ("Email Support"' in body
+    assert "appboundary::supportMailUrl (app->diagnosticsBlock())" in body
 
 
 def test_the_manual_says_a_key_can_read_as_its_relative():
