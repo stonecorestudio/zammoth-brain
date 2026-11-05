@@ -444,7 +444,7 @@ def test_the_smoke_set_is_one_list():
     """The skill's section 2 and the tool's `SMOKE` are the same twelve, and each is a leg."""
     module = _load(REPO / "daw" / "scripts" / "legs_for.py", "legs_for_real")
     skill = SKILL.read_text(encoding="utf-8")
-    section = skill[skill.index("**2. The smoke set**"):skill.index("**3. The whole suites")]
+    section = skill[skill.index("**2. The smoke set**"):skill.index("**3. A merge to `main`")]
     listed = section[section.index("pinned against this section"):section.index("```bash")]
     assert tuple(re.findall(r"--[a-z][a-z0-9-]*", listed)) == module.SMOKE, listed
     flags = set(re.findall(r'"(--[a-z][a-z0-9-]*)"', (REPO / "daw" / "Source" / "Main.cpp").read_text(encoding="utf-8")))

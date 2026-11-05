@@ -185,6 +185,9 @@ TAG_MIX_BANDS = 5
 OVER_COMPRESSION_GR_MEAN_DB = 6.0
 OVER_COMPRESSION_PINNED_ACTIVE_PCT = 95.0
 OVER_COMPRESSION_PINNED_MEAN_DB = 3.0
+# the processors whose reduction is levelling and adds up along a chain (a de-esser, a gate, a
+# duck and a limiter each do another job)
+STACKED_LEVELLING = frozenset({"comp", "mb_comp", "ott"})
 # Over-limiting (Phase 34): the limiter is allowed to be busy on loud masters,
 # but low PSR/PLR plus sustained limiter GR means the master is likely being
 # flattened rather than merely caught. Thresholds are intentionally conservative
@@ -2920,6 +2923,12 @@ def over_compressed(master_dynamics: Optional[list],
     entries = list(master_dynamics or [])
     for per_stem in (stem_dynamics or {}).values():
         entries += per_stem
+    # A chain's levelling processors are in SERIES, so their reduction adds: three compressors at
+    # 2.5 dB each are 7.5 dB of levelling, and each alone passed (2026-11-02: the site's vocal).
+    for chain in [master_dynamics or []] + list((stem_dynamics or {}).values()):
+        if sum(e["gr_mean_db"] for e in chain
+               if e["processor"] in STACKED_LEVELLING) >= OVER_COMPRESSION_GR_MEAN_DB:
+            return True
     return any(
         entry["processor"] != "limiter"
         and (entry["gr_mean_db"] >= OVER_COMPRESSION_GR_MEAN_DB

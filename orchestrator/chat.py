@@ -491,7 +491,12 @@ _IDLE_TOOL_DEFS = [
     {"name": "render",
      "description": ("Re-bounce the master and re-measure. State-read-only: "
                      "renders what is already applied; use after imports or "
-                     "when the user wants fresh numbers."),
+                     "when the user wants fresh numbers, and before you say a "
+                     "mix is done. It may carry `against_raw`: the master "
+                     "against every track raw at its level, at matched loudness. "
+                     "A change there the request did not ask for is a "
+                     "regression to fix or to tell the user about, never to "
+                     "report as an improvement."),
      "input_schema": {"type": "object", "properties": {}}},
     {"name": "propose",
      "description": ("Submit ONE bundled mix move through the guardrailed "
@@ -518,6 +523,14 @@ _IDLE_TOOL_DEFS = [
                      "constrains what the user ASKED for, tell them the "
                      "concrete rule and limit (they should learn about the "
                      "\u00b16 dB/pass cap, not read 'couldn't do that'). "
+                     "A move that shapes a track's tone or dynamics may come "
+                     "back with `against_raw`: what the track's WHOLE chain "
+                     "now does against its own raw file at matched loudness "
+                     "(brighter or darker, flatter, compressors adding up). "
+                     "Read it before the next move: the raw file may already "
+                     "have had what the request asked for, and a chain that "
+                     "leaves a track worse than its file is eased or undone, "
+                     "not built on. "
                      "Action objects follow the engine grammar in your "
                      "system prompt."),
      "input_schema": {
@@ -1896,6 +1909,17 @@ what we already said):
   * "just mix it" -> `auto_mix`
   * a question -> answer it, from the read tools and the snapshot. Do not turn
     a question into a mix.
+- **Measure the source before you treat it.** A request that lists everything
+("even out every word, warmth, presence, air, control the esses") is a list of
+what a finished track has, not of moves to make: `analyze_stem` first, and make a
+move only where the file lacks that quality. A bounced or sample-pack part often
+arrives compressed, bright and de-essed already, and processing it again makes it
+worse. One compressor that does the job beats three that each look gentle, since
+in series their reduction adds up: a track takes one whole-file compressor,
+multiband or OTT from you, and a second is refused. When a move comes back with `against_raw`,
+heed it before the next one; and before you call a mix done, `render` and read the
+master's. Saying "the vocal already had plenty of air, so I left it" is a good
+answer.
 - **Scope matters more than anything else here.** If the user names a track, a
 region, or "this part", the move belongs to THAT track or THAT range — never
 widen it to the master because a session-level target was easier to reach for.

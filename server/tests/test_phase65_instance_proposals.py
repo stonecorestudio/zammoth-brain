@@ -58,13 +58,14 @@ def test_a_proposal_names_the_second_compressor_and_changes_it_alone(demo_projec
     assert "instance" not in b                     # the address is not a setting
 
 
-def test_new_adds_a_compressor_beside_the_one_there(demo_project):
+def test_new_adds_a_gate_beside_the_one_there(demo_project):
+    # (a compressor beside a compressor is refused since 2026-11-02: test_stacked_levelling.py)
     s = Session(demo_project)
     stem = _stem(s)
-    s.add_stem_device(stem, "comp")
-    _apply(s, _comp(stem, threshold_db=-30.0, instance="new"))
-    comps = _of(s._state["stems"][stem]["chain"], "comp")
-    assert len(comps) == 2 and comps[1]["threshold_db"] == -30.0
+    s.add_stem_device(stem, "gate")
+    _apply(s, {"type": "gate", "stem_id": stem, "threshold_db": -60.0, "instance": "new"})
+    gates = _of(s._state["stems"][stem]["chain"], "gate")
+    assert len(gates) == 2 and gates[1]["threshold_db"] == -60.0
 
 
 def test_an_instance_the_channel_does_not_have_is_refused(demo_project):
@@ -113,8 +114,10 @@ def test_changing_one_of_two_utilities_is_charged_its_own_delta(demo_project):
 def test_changing_one_of_two_compressors_keeps_the_others_makeup_in_the_session(demo_project):
     s = Session(demo_project)
     stem = _stem(s)
-    _apply(s, _comp(stem, makeup_db=3.0, instance="new"))
-    _apply(s, _comp(stem, makeup_db=3.0, instance="new"))
+    s.add_stem_device(stem, "comp")                 # the user's two (the engineer may not stack them)
+    s.add_stem_device(stem, "comp")
+    _apply(s, _comp(stem, makeup_db=3.0, instance=0))
+    _apply(s, _comp(stem, makeup_db=3.0, instance=1))
     s.advance_pass()
     _apply(s, _util(stem, 6.0, instance="new"))      # 12 dB spent this session
     s.advance_pass()

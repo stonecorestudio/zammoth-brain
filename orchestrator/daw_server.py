@@ -1254,6 +1254,33 @@ class Brain:
         warm_observations(self.project_dir)   # what this turn made stale, ready for the next
         return result
 
+    def remote_tool(self, name: str, args: dict, on_event=None, should_cancel=None) -> dict:
+        """One of the engineer's tools for a chat app over the remote door (Phase 69,
+        `remote_engineer`). The same bookkeeping as an engineer turn (`chat`): one gesture,
+        one undo mark, and the chains the app must play when it moved the mix."""
+        self.begin_agent_turn()   # this call = one DAW undo transaction
+        before = max_applied_seq(self.project_dir)
+        self._mark_inflight("chat", before)
+        moved = False
+        from orchestrator.daw_bridge import remote_tool_call   # absolute: the DAW starts this file by path
+        try:
+            result = remote_tool_call(
+                self.project_dir, name, args, edit_state=lambda: self.latest_edit,
+                daw_invoke=self.counting_invoke(), cache=self.render_cache, on_event=on_event,
+                should_cancel=should_cancel, routing_ops=self.routing_ops(),
+                mirror_coedits=self._mirror_coedits, take_user_moves=self.take_user_moves,
+                register_stem=self._register_stem)
+        finally:
+            moved = self._close_gesture(before)
+            self._clear_inflight()
+        result.update(self._gesture_out())
+        if moved:
+            self.take_user_moves()
+            self.render_cache.clear()
+            result.update(chains_with_readout(self.project_dir, cache=self.render_cache))
+            warm_observations(self.project_dir)
+        return result
+
     def _record_timing(self, timing, tail_s: float) -> None:
         """One line in brain.log and one in `runs/turn_timing.jsonl` for a finished chat
         turn (Phase 54). The tail is what this method's caller did after the reply."""
@@ -2620,6 +2647,30 @@ async def _do_chat(send, brain: Brain, run_id: int, message: str, mode: str,
                     **({"cost_usd": spent} if spent else {})})
 
 
+async def _do_remote_tool(send, brain: Brain, run_id: int, name: str, args: dict,
+                          should_cancel=None) -> None:
+    """Phase 69: one engineer tool for the remote door, off the event loop. The licence is the
+    engineer's (as Auto Mix's: whatever does the thinking, the engine's work is the product)."""
+    if name not in ("engineer_guide",) and (why := await _auto_mix_refusal()):
+        await send({"event": "run_failed", "run_id": run_id, "error": why, "licence": True, "retryable": False})
+        return
+    await send({"event": "run_started", "run_id": run_id, "brief": f"(remote: {name})", "agent": "remote"})
+    loop = asyncio.get_running_loop()
+
+    def on_event(event: dict) -> None:
+        if event.get("type") in ("chat_tool", "chat_tool_done", "chat_measured", "chat_notice"):
+            asyncio.run_coroutine_threadsafe(
+                send({"event": "chat_progress", "run_id": run_id, **event}), loop)
+
+    try:
+        result = await asyncio.to_thread(brain.remote_tool, name, args, on_event, should_cancel)
+        await send({"event": "mcp_done", "run_id": run_id, "ok": True, **result})
+    except Exception as exc:  # noqa: BLE001 - report any failure to the app
+        import traceback
+        traceback.print_exc()
+        await send({"event": "run_failed", "run_id": run_id, **_failure(exc)})
+
+
 async def _do_apply_plan(send, brain: Brain, run_id: int, plan: dict,
                          should_cancel=None, llm: dict | None = None) -> None:
     # A plan whose steps include a mix RUN reaches the LLM: the same licence door as the other
@@ -3321,6 +3372,33 @@ async def _serve_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
                     await send({"id": rid, "result": {
                         "run_id": run_id, "status": "started", "mode": mode,
                         "agent": "claude" if use_llm else "rule"}})
+                elif method == "mcp_tools":
+                    # Phase 69: the engineer's tools a chat app may call over the remote door
+                    from orchestrator import remote_engineer
+                    await send({"id": rid, "result": {"tools": remote_engineer.remote_tool_defs()}})
+                elif method == "mcp_tool":
+                    # Phase 69: one of the engineer's tools for a chat app over the remote door - a
+                    # turn of one tool call, no model; the slot is the engineer's, like a chat turn
+                    if brain.run_active or any(not t.done() for t in tasks):
+                        await send({"id": rid, "error": "the engineer is working in this project"})
+                        continue
+                    name = str(params.get("name", ""))
+                    targs = params.get("args") if isinstance(params.get("args"), dict) else {}
+                    run_id = next(_RUN_IDS)
+                    cancel_ev = threading.Event()
+                    brain.cancels[run_id] = owned[run_id] = cancel_ev
+                    brain.run_active = True
+                    brain.live_run = {"kind": method, "run_id": run_id, "brief": f"(remote: {name})",
+                                      "started_at": time.time(), "moves": []}
+                    task = asyncio.create_task(_do_remote_tool(send, brain, run_id, name, targs,
+                                                               cancel_ev.is_set))
+                    tasks.add(task)
+                    task.add_done_callback(tasks.discard)
+                    task.add_done_callback(lambda _t, k=run_id, b=brain: (
+                        b.cancels.pop(k, None), owned.pop(k, None)))
+                    task.add_done_callback(lambda _t, b=brain: setattr(b, "run_active", False))
+                    task.add_done_callback(lambda _t, b=brain: setattr(b, "live_run", None))
+                    await send({"id": rid, "result": {"run_id": run_id, "status": "started"}})
                 elif method == "apply_plan":
                     if brain.run_active or any(not t.done() for t in tasks):
                         await send({"id": rid, "error": "a run is already in progress"})

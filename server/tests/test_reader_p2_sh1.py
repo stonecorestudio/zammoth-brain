@@ -445,6 +445,42 @@ def test_an_edit_that_was_never_committed_fails_the_check(engine_copy):
         f.write_text(was)
 
 
+JUCE_PATCHES = PATCHES / "juce"
+
+
+def test_the_juce_patches_are_one_unbroken_series():
+    """The JUCE fixes (since 2026-11-03: choosing another microphone crashed in JUCE's CoreAudio
+    combiner) are a series of their own, applied to modules/juce above ENGINE_BASE's JUCE_COMMIT."""
+    nums = sorted(int(p.name[:4]) for p in JUCE_PATCHES.glob("[0-9][0-9][0-9][0-9]-*.patch"))
+    assert nums == list(range(1, len(nums) + 1)), nums
+    script = (SCRIPTS / "fetch_engine.sh").read_text()
+    assert "am -q --keep-cr" in script, "JUCE's sources are CRLF: a plain `git am` cannot apply a patch to them"
+    # ...and the repository's `* text=auto` would store a JUCE patch with its CRs taken out, so a
+    # fresh checkout's patch matches nothing in JUCE: the patches are stored byte for byte.
+    for p in JUCE_PATCHES.glob("[0-9][0-9][0-9][0-9]-*.patch"):
+        rel = str(p.relative_to(REPO))
+        attr = subprocess.run(["git", "-C", str(REPO), "check-attr", "text", "--", rel],
+                              capture_output=True, text=True, check=True).stdout
+        assert attr.strip().endswith("text: unset"), attr
+
+
+@needs_clone
+def test_the_juce_patches_rebuild_the_juce_this_machine_builds(tmp_path):
+    """What a fresh fetch does - the recorded JUCE, every JUCE patch applied with --keep-cr - gives
+    the tree the clone here holds. (A plain `git am` refuses the first patch: CRLF.)"""
+    juce = ENGINE / "modules" / "juce"
+    if not (juce / ".git").exists():
+        pytest.skip("no JUCE checked out in the engine clone")
+    dst = tmp_path / "juce"
+    subprocess.run(["git", "clone", "-q", "--no-checkout", f"file://{juce}", str(dst)],
+                   check=True, capture_output=True, timeout=300)
+    _git(dst, "checkout", "-q", _engine_base()["JUCE_COMMIT"])
+    patches = [str(p) for p in sorted(JUCE_PATCHES.glob("[0-9][0-9][0-9][0-9]-*.patch"))]
+    if patches:
+        _git(dst, "am", "-q", "--keep-cr", *patches)
+    assert _git(dst, "rev-parse", "HEAD^{tree}") == _git(juce, "rev-parse", "HEAD^{tree}")
+
+
 def test_a_clone_without_the_recorded_juce_fails_the_check(engine_copy):
     r = _check(engine_copy)                              # the copy has no submodule checked out
     assert r.returncode != 0 and "modules/juce) is not checked out" in r.stderr, r.stdout + r.stderr

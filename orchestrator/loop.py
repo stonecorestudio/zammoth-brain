@@ -551,6 +551,21 @@ def _load_notes(runs_dir: Path) -> list[str]:
     return notes[-NOTES_FOR_BRIEF:]
 
 
+def _against_raw_notes(project_dir: Path) -> list[str]:
+    """What the processing so far does to each track against its raw file
+    (`against_raw.session_notes`), for the pass's planner. The master's reading is left to the
+    chat's `render`: its two master renders broke a pass's render budget
+    (test_reference_pass_render_budget), and what flattens a master shows on its tracks first.
+    Empty when the reading cannot be made: it is advice, and a run goes on without it."""
+    from mix_engine import against_raw
+    from mix_engine.session import Session
+    try:
+        return against_raw.session_notes(Session(project_dir, read_only=True), master=False)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[loop] against-raw reading skipped ({type(exc).__name__}: {exc})", file=sys.stderr)
+        return []
+
+
 async def run_passes(engine: EngineClient, project_dir: Path, brief: str,
                      agent: Agent, max_passes: int = MAX_PASSES,
                      gate: Optional[GateFn] = None,
@@ -777,6 +792,7 @@ async def run_passes(engine: EngineClient, project_dir: Path, brief: str,
             anyio.from_thread.run(
                 emit, {"type": "agent_working", "pass_number": pass_n, **info})
 
+        raw_notes = await anyio.to_thread.run_sync(_against_raw_notes, project_dir)
         ctx = PassContext(pass_number=pass_n, metrics=metrics["analysis"],
                           brief=brief,
                           targets=states, stem_chains=chains,
@@ -790,6 +806,7 @@ async def run_passes(engine: EngineClient, project_dir: Path, brief: str,
                           taste=taste,
                           metrics_delta=_metrics_delta(last_ctx_analysis,
                                                        metrics["analysis"]),
+                          against_raw=raw_notes,
                           progress=progress_sync,
                           # asked HERE, once a pass (QA 2026-10-08, D21): a chat-started run
                           # is handed the turn's getter, and each pass should read the edit

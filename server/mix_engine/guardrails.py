@@ -336,6 +336,45 @@ def _comp_coverage(stem_chains: Optional[dict[str, list[dict]]],
     return coverage
 
 
+#: The devices whose gain reduction adds up in series (analysis.STACKED_LEVELLING): a track may
+#: carry one of them whole-file from the engineer (2026-11-02).
+LEVELLING_KINDS = ("comp", "mb_comp", "ott")
+
+
+def _stacked_levelling(req: ProposalRequest,
+                       stem_chains: Optional[dict[str, list[dict]]]) -> list[Violation]:
+    """Refuse a proposal that would leave a track or the master with two whole-file levelling
+    devices (2026-11-02). Told that compressors in series add up, the engineer still kept two on a
+    rap taking 12.4 dB together: a note can be weighed away, a refusal cannot. A move that
+    replaces the one there is taken; what stands is counted whoever placed it (a device the
+    engineer adds by command is filed as the user's)."""
+    if stem_chains is None:
+        return []
+    out: list[Violation] = []
+    targets: dict[str, list[tuple[int, object]]] = {}
+    for i, action in enumerate(req.actions):
+        if (getattr(action, "type", None) in LEVELLING_KINDS
+                and getattr(action, "time_range_s", None) is None):
+            targets.setdefault(getattr(action, "stem_id", None) or "master", []).append((i, action))
+    for target, moves in targets.items():
+        chain = stem_chains.get(target) or []
+        standing = [e for e in chain
+                    if e.get("type") in LEVELLING_KINDS and not e.get("time_range_s")]
+        gone = {id(e) for _, a in moves for e in replaced_entries(chain, a)}
+        kept = [e for e in standing if id(e) not in gone]
+        adding = [i for i, a in moves if not replaced_entries(chain, a)]
+        if adding and len(kept) + len(adding) > 1:
+            have = ", ".join(e["type"] for e in kept) or "this proposal's own"
+            out.append(Violation(
+                action_index=adding[-1], rule="levelling_stacked",
+                message=f"'{target}' would carry {len(kept) + len(adding)} whole-file levelling "
+                        f"devices ({have} already) and their gain reduction adds up in series; "
+                        "adjust the one there by proposing it again, or take it off with "
+                        "device.remove first",
+                limit=1, value=len(kept) + len(adding)))
+    return out
+
+
 def _wet_insert_mix(i: int, action) -> list[Violation]:
     """Policy bound on a space device the agent places as an INSERT (2026-07-20). The
     RETURN form is exempt: a return is *meant* to be 100 % wet (its dry lives on the
@@ -1118,6 +1157,7 @@ def _validate_proposal(
             else:
                 net_w[stem_id] = net
 
+    violations += _stacked_levelling(req, stem_chains)
     faders = dict(fader_db or {})
     added_new: dict[str, int] = {}
     for i, action in enumerate(req.actions):

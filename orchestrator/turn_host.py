@@ -45,7 +45,7 @@ def checked_command(project_dir: Path, command: str, args: Optional[dict],
     arguments read against the project folder (`command_door.resolve_path_args`), and which
     scene does a scene NAME mean (`command_door.resolve_scene_names`, from the edit's
     `scenes[]`). The plan's copy resolved first and refused second."""
-    refused = B.brain_only_refusal(command)
+    refused = B.brain_only_refusal(command) or levelling_by_command_refusal(project_dir, command, args)
     if refused is not None:
         return refused, dict(args or {})
     sent = B.resolve_path_args(project_dir, command, args, (edit or {}).get("projects"))
@@ -53,6 +53,31 @@ def checked_command(project_dir: Path, command: str, args: Optional[dict],
     if why is not None:
         return {"ok": False, "error": why}, dict(sent or {})
     return None, sent
+
+
+#: What `device.add` may not put on an audio stem (guardrails.LEVELLING_KINDS, 2026-11-02).
+_LEVELLING_BY_PROPOSAL = ("comp", "mb_comp", "ott")
+
+
+def levelling_by_command_refusal(project_dir: Path, command: str,
+                                 args: Optional[dict]) -> Optional[dict]:
+    """A compressor put on an audio stem by `device.add` - or None. The command is for a MIDI or
+    instrument track; on a stem it skipped the guardrails, and the app files what it adds as the
+    user's (2026-11-02), so a second compressor reached a track the engineer may hold one on."""
+    if command != "device.add" or not isinstance(args, dict):
+        return None
+    kind, track = str(args.get("type") or ""), str(args.get("track") or "")
+    if kind not in _LEVELLING_BY_PROPOSAL or not track:
+        return None
+    try:
+        stems = json.loads((Path(project_dir) / "session.json").read_text()).get("stems") or {}
+    except (OSError, ValueError):
+        return None
+    if track not in stems:
+        return None
+    return {"ok": False,
+            "error": f"{track} is an audio stem: a {kind} on it is a mix move - `propose` it, "
+                     "where the guardrails count it (one levelling device a track)"}
 
 
 async def registering_command(project_dir: Path, command: str, args: Optional[dict], *,
@@ -234,6 +259,52 @@ async def with_phase_check(engine_call, req: dict, applied: Optional[dict]) -> O
     if not isinstance(reading, dict):
         return applied
     return {**applied, "phase": phase_check(reading, targets)}
+
+
+#: The action types that change a track's tone or dynamics: a move of one of these comes back with
+#: what the track's whole chain now does against its raw file (`against_raw`, 2026-11-02).
+SHAPING_ACTION_TYPES = frozenset({
+    "eq", "tilt", "match_eq", "dynamic_eq", "comp", "mb_comp", "ott", "deess", "gate",
+    "transient", "saturation", "overdrive", "clip", "limiter"})
+
+
+def against_raw_note(project_dir: Path, req: dict) -> Optional[str]:
+    """What each track a proposal shaped now sounds like against its own file, at matched
+    loudness - said only where the change is large enough to hear. The site's before-and-after
+    vocal was given three compressors, saturation and +4 dB of air on a file that arrived compressed
+    and bright, and every figure the engineer read was of the track as it then stood. The master
+    is read the same way when the engineer renders (`master_against_raw_note`). None when every
+    shaped track stays near its file."""
+    from mix_engine import against_raw
+    from mix_engine.session import MASTER, Session
+    stems: list[str] = []
+    for action in req.get("actions") or []:
+        stem = str(action.get("stem_id") or "")
+        if action.get("type") in SHAPING_ACTION_TYPES and stem and stem != MASTER \
+                and stem not in stems:
+            stems.append(stem)
+    if not stems:
+        return None
+    try:
+        session = Session(project_dir, read_only=True)
+        notes = [against_raw.note(against_raw.stem_against_raw(session, stem)) for stem in stems]
+    except Exception as exc:   # noqa: BLE001 - the move landed; only the reading of it did not
+        print(f"[daw_bridge] against-raw reading skipped ({type(exc).__name__}: {exc})",
+              file=sys.stderr)
+        return None
+    return " ".join(n for n in notes if n) or None
+
+
+def master_against_raw_note(project_dir: Path) -> Optional[str]:
+    """The master against every track summed raw, at matched loudness; None when it is close."""
+    from mix_engine import against_raw
+    from mix_engine.session import Session
+    try:
+        return against_raw.note(against_raw.master_against_raw(Session(project_dir, read_only=True)))
+    except Exception as exc:   # noqa: BLE001 - a readout; the render's own numbers stand
+        print(f"[daw_bridge] against-raw reading skipped ({type(exc).__name__}: {exc})",
+              file=sys.stderr)
+        return None
 
 
 def duck_trigger_note(project_dir: Path, req: dict) -> Optional[str]:
@@ -540,6 +611,8 @@ class LiveTurn:
         await anyio.to_thread.run_sync(self.chains_owed, True)   # warm it off the event loop
         if (note := await anyio.to_thread.run_sync(duck_trigger_note, self.project_dir, req)):
             out["duck"] = note
+        if (note := await anyio.to_thread.run_sync(against_raw_note, self.project_dir, req)):
+            out["against_raw"] = note
         return out
 
     async def do_look(self, command: str, args: dict):
@@ -924,6 +997,12 @@ class LiveTurn:
                 blind = B.render_blind_spots(B._live_edit(self.edit_state), B.arranged_held(self.project_dir))
                 if blind:
                     readout = {**readout, "not_heard": blind}
+                # what the mix as a whole now is against the raw tracks at their levels (2026-11-02): only
+                # of the brain's own render, where the raw sum is the same mix with nothing on it
+                if not readout.get("silent"):
+                    note = await anyio.to_thread.run_sync(master_against_raw_note, self.project_dir)
+                    if note:
+                        readout = {**readout, "against_raw": note}
         return json.dumps(readout)
 
     async def unsupported(self, *_args, **_kwargs) -> str:
@@ -974,6 +1053,37 @@ class LiveTurn:
                                                         self.stale_picture.get("seq", 0),
                                                         self.chains_owed()),
                 emit=self.emit, should_cancel=self.should_cancel, **pictured)
+
+    async def run_one(self, name: str, args: dict):
+        """ONE of the engineer's tools, called by a chat app over the remote door (Phase 69):
+        no model, no context block - the same tool function a turn calls, then the level
+        measure the call owes (`do_after_calls`), as the in-app engineer gets it."""
+        from .chat import ToolOutcome, execute_tool
+        async with in_memory_engine(self.project_dir) as engine:
+            self.engine = engine
+            # the user's queued moves first (and the door's own plain commands): a baseline taken
+            # without them measured a fader moved up as the mix getting quieter
+            await self._take_user_moves()
+            # the levels a move is measured against: the mix as it plays now
+            try:
+                readout = B.session_readout(self.project_dir, self.cache)
+            except Exception as exc:  # noqa: BLE001 - a baseline is a bonus
+                print(f"[remote] no baseline readout ({type(exc).__name__}: {exc})", file=sys.stderr)
+                readout = {}
+            if isinstance(readout, dict):
+                self.readout_before.update(readout)
+            self.levels["last"], self.levels["exact"] = dict(self.readout_before), bool(self.readout_before)
+            self.prep["s"] = time.monotonic() - self.turn_began
+            outcome = await execute_tool(self.tools(), name, args)
+            after = ""
+            if self.owed["commands"]:
+                try:
+                    after = (await self.do_after_calls() or "").strip()
+                except Exception as exc:  # noqa: BLE001 - a readout, never a blocker
+                    print(f"[remote] after-calls measure skipped ({type(exc).__name__}: {exc})", file=sys.stderr)
+            if after:
+                outcome = ToolOutcome((outcome.text or "") + "\n\n" + after, outcome.error, outcome.images)
+            return outcome
 
     def note_failure(self, exc: BaseException) -> None:
         """Hang on a turn's failure what it billed and where its seconds went.

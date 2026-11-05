@@ -70,24 +70,25 @@ def test_a_flat_trim_no_engine_plays_does_not_cancel_the_bands_charge():
 # ---- `instance` numbers are the chain as the proposal found it ---------------------------------
 
 def test_instance_numbers_are_pinned_before_a_new_one_lands(project):
+    # gates (2026-11-02): a second compressor from the engineer is refused (levelling_stacked)
     s = Session(project)
     sid = next(iter(s.stems))
-    s.stems[sid]["chain"] = [{"type": "comp", "threshold_db": -20, "ratio": 2, "attack_ms": 10, "release_ms": 100, "makeup_db": 0},
+    s.stems[sid]["chain"] = [{"type": "gate", "threshold_db": -60.0},
                              {"type": "saturation", "drive_db": 3.0, "curve": 0},
-                             {"type": "comp", "threshold_db": -18, "ratio": 3, "attack_ms": 10, "release_ms": 100, "makeup_db": 0}]
+                             {"type": "gate", "threshold_db": -55.0}]
     s._persist()
     s = Session(project)
-    uid_second = [e for e in s.stems[sid]["chain"] if e["type"] == "comp"][1]["uid"]
+    uid_second = [e for e in s.stems[sid]["chain"] if e["type"] == "gate"][1]["uid"]
     r = s.propose(_req(
-        {"type": "comp", "stem_id": sid, "instance": "new", "threshold_db": -30, "ratio": 2, "attack_ms": 10, "release_ms": 100, "makeup_db": 0},
-        {"type": "comp", "stem_id": sid, "instance": 1, "threshold_db": -9, "ratio": 2, "attack_ms": 10, "release_ms": 100, "makeup_db": 0}))
+        {"type": "gate", "stem_id": sid, "instance": "new", "threshold_db": -70.0},
+        {"type": "gate", "stem_id": sid, "instance": 1, "threshold_db": -50.0}))
     assert r.accepted, r.violations
     s.apply(r.proposal_id)
-    comps = [e for e in Session(project).stems[sid]["chain"] if e["type"] == "comp"]
-    by_uid = {e["uid"]: e for e in comps}
-    assert by_uid[uid_second]["threshold_db"] == -9          # the comp the proposal named
-    assert any(e["threshold_db"] == -30 for e in comps)     # the new one is there too
-    assert len(comps) == 3
+    gates = [e for e in Session(project).stems[sid]["chain"] if e["type"] == "gate"]
+    by_uid = {e["uid"]: e for e in gates}
+    assert by_uid[uid_second]["threshold_db"] == -50.0       # the gate the proposal named
+    assert any(e["threshold_db"] == -70.0 for e in gates)    # the new one is there too
+    assert len(gates) == 3
 
 
 # ---- the delay's Ping-Pong is a switch at every door ------------------------------------------

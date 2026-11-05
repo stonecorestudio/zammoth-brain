@@ -186,7 +186,11 @@ def test_the_choke_point_refuses_in_the_order_the_fake_app_does():
             APP.index("dawcmd::badNumericArg (args, why)", invoke),
             APP.index("dawcmd::badScalarArg (args, why)", invoke)]
     assert door == sorted(door), "the path door, then the numeric one, then the single-value one"
-    assert door[1] - invoke < 4000, "both doors sit at the top of invokeCommand, before any case"
+    # "At the top" is read as the rule says it - before any case: a character count (4000) was
+    # outgrown by the whole-app lock's refusal above the doors (2026-10-29) while nothing moved.
+    head = APP[invoke: door[2]]
+    assert "case dawcmd::" not in head and "switch (" not in head, \
+        "both doors sit at the top of invokeCommand, before any case"
 
     fake = inspect.getsource(O.fake_daw)
     code = fake[fake.index("from .daw_bridge import"):]

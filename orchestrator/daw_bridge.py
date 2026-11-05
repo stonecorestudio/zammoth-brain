@@ -6028,6 +6028,42 @@ def chat_turn(project_dir: Path, message: str, *, mode: str = "agent", routing_o
     return turn.result()
 
 
+def remote_tool_call(project_dir: Path, name: str, args: dict, *, routing_ops=None,
+                     mirror_coedits=None, register_stem=None, take_user_moves=None,
+                     edit_state=None, daw_invoke=None, cache: dict | None = None,
+                     on_event=None, should_cancel=None) -> dict:
+    """One of the engineer's tools for a chat app over the remote door (Phase 69,
+    `remote_engineer`): `{text, error}` plus what a turn hands back for the app (moves,
+    co-edit refusals). The tool runs in a `LiveTurn` of its own conversation
+    (`REMOTE_SESSION_ID`), agent mode, no model."""
+    import anyio
+
+    from . import remote_engineer as R
+    from .turn_host import LiveTurn
+
+    if (why := R.refusal(project_dir, name, args)) is not None:
+        return {"text": why, "error": True}
+    args = R.fill_export_file(project_dir, name, args)
+    if name == "engineer_guide":
+        try:
+            return {"text": R.engineer_guide(str((args or {}).get("section") or "")), "error": False}
+        except KeyError as exc:
+            return {"text": str(exc.args[0]), "error": True}
+    turn = LiveTurn(project_dir, f"(remote: {name})", mode="agent", routing_ops=routing_ops,
+                    mirror_coedits=mirror_coedits, register_stem=register_stem,
+                    take_user_moves=take_user_moves, use_llm=False, edit_state=edit_state,
+                    daw_invoke=daw_invoke, cache=cache, on_event=on_event,
+                    should_cancel=should_cancel, session_id=R.REMOTE_SESSION_ID)
+    outcome = anyio.run(turn.run_one, name, args or {})
+    out: dict = {"text": outcome.text or "", "error": bool(outcome.error), "moves": turn.moves}
+    if turn.coedit_refusals:
+        out["coedit_refused"] = len(turn.coedit_refusals)
+        out["coedit_refusals"] = turn.coedit_refusals[:3]
+    if turn.coedits_unmirrored:
+        out["coedits_unmirrored"] = list(dict.fromkeys(turn.coedits_unmirrored))
+    return out
+
+
 def _turn_timing(session, session_id: str, message: str, reply_parts: list[str],
                  turn_began: float, prep_s: float, renders_before: dict,
                  pictures: int = 0) -> dict:

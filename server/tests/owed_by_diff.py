@@ -46,7 +46,8 @@ fixture of its module (and conftest) it uses. It is owed when:
 
 Still a floor, and the notes on stderr say where: a test that reaches a function only through
 another module; a symbol too common a word to search for; a needle a test builds at run time.
-Add those by hand and say what was left out - the whole suite belongs to a merge to `main`.
+Add those by hand and say what was left out. A merge to `main` runs this with `--base main`; the
+whole suite only when the engine base or the harness moves, or James asks.
 """
 from __future__ import annotations
 

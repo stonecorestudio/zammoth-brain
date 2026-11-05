@@ -143,6 +143,10 @@ class PassContext:
     # Phase 14: what changed since the previous pass's context (scalars +
     # per-band energy) — regression is visible at a glance, not re-derived.
     metrics_delta: Optional[dict] = None
+    # 2026-11-02: what the processing so far does against the raw audio, at matched loudness
+    # (`against_raw.session_notes`): a track brighter or flatter than its own file, its
+    # compressors adding up (the master is the chat render's). Empty when all is close.
+    against_raw: list[str] = field(default_factory=list)
     # 2026-06 cost-control: optional sync progress sink. The loop bridges it
     # onto the websocket so investigation rounds are visible (and worth
     # cancelling) instead of minutes of silence. Advisory — never required.
@@ -680,7 +684,11 @@ Loudness goals go through the master limiter (type "limiter", stem_id
 "master", ceiling_dbtp, target_lufs_i) — the only processor allowed to push
 loudness; bus-comp makeup must stay 0 on the master. If flags include
 over_limiting, do not push the target louder again: back off the limiter target,
-reduce master/bus drive, or rebalance the mix before limiting. Time-confined
+reduce master/bus drive, or rebalance the mix before limiting. `against_raw` says
+where your processing leaves a track, or the master, brighter, darker or flatter
+than its raw audio at matched loudness, or its compressors adding up: unless the
+brief asked for that change, ease or undo the move rather than build on it. A part
+that arrives compressed and bright (a sample-pack or bounced part) needs little. Time-confined
 moves use gain with time_range_s ([start_s, end_s], stems only) after checking
 analyze_sections. For phrase-level vocal rides or de-essing, call
 analyze_phrases(stem_id) and use its level_moves / sibilance_bursts as range
@@ -2181,6 +2189,7 @@ class ClaudeAgent:
             "bus_chains": ctx.bus_chains,        # group busses: chain/members/sends
             "mix_plan": ctx.plan,
             "metrics_delta_since_last_pass": ctx.metrics_delta,
+            "against_raw": ctx.against_raw,
             "recent_history": ctx.history,
             "user_instructions": ctx.instructions,
             "guardrail_limits": ctx.limits,
