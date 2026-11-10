@@ -122,6 +122,33 @@ def is_ranged(action) -> bool:
     return rng is not None
 
 
+def ranged_peak(spans) -> tuple[float, float]:
+    """(up, down): the most ranged lift, and the most ranged cut, that play AT ONE MOMENT among
+    `spans` = (start_s, end_s, charge_db). Still one-sided - lifts and cuts are never netted
+    (D9·R4) - but two moves on ranges that do not overlap are not one move: "down 4 dB
+    everywhere except the drop" is two ranges and -4 at any moment, and summed it read -8
+    and was refused (the mixing audit of 2026-11-10, M4)."""
+    def most(items) -> float:
+        best = 0.0
+        for start, _, _ in items:
+            at = sum(c for s, e, c in items if s <= start < e)
+            best = max(best, abs(at))
+        return best
+    ups = [(float(s), float(e), float(c)) for s, e, c in spans if c > 0]
+    downs = [(float(s), float(e), float(c)) for s, e, c in spans if c < 0]
+    return most(ups), -most(downs)
+
+
+def _span_of(action) -> Optional[tuple[float, float]]:
+    rng = action.get("time_range_s") if isinstance(action, dict) \
+        else getattr(action, "time_range_s", None)
+    try:
+        start, end = float(rng[0]), float(rng[1])
+    except (TypeError, ValueError, IndexError):
+        return None
+    return (start, end) if end > start else None
+
+
 LIMITS = {
     # MonitorChain::kMaxBands — the native EQ bank holds 32 bands across eq / tilt (2 each) /
     # match_eq entries and silently DROPPED the rest while dsp.py applied them (2026-09-01
@@ -178,6 +205,9 @@ LIMITS = {
     "dynamic_eq_cut_min_db": -12.0,
     "hpf_max_hz_default": 120.0,
     "hpf_max_hz_bass_tagged": 40.0,
+    # where engineers really high-pass (2026-11-10): hats and cymbals, a voice
+    "hpf_max_hz_cymbal_tagged": 500.0,
+    "hpf_max_hz_vocal_tagged": 200.0,
     "comp_ratio_max": 10.0,
     "master_true_peak_max_dbtp": -1.0,
     "master_comp_makeup_max_db": 0.0,  # only the limiter pushes loudness (Phase 6)
@@ -1067,6 +1097,8 @@ def _validate_proposal(
     eq_ledger: Optional[dict] = None,
     ranged_gain_this_pass_db: Optional[dict[str, tuple[float, float]]] = None,
     ranged_gain_session_db: Optional[dict[str, tuple[float, float]]] = None,
+    ranged_spans_this_pass: Optional[dict[str, list]] = None,
+    ranged_spans_session: Optional[dict[str, list]] = None,
     fader_db: Optional[dict[str, float]] = None,
     signal_parents: Optional[dict[str, Optional[str]]] = None,
     standing_gain_this_pass_db: Optional[dict[str, float]] = None,
@@ -1120,25 +1152,54 @@ def _validate_proposal(
     running_session = dict(cumulative_gain_session_db or {})
     # (not `ranged`: the comp-stacking rule below binds that name, and _charge_gain reads these
     # through its closure — the clash made the wallet a list for any later action)
-    ranged_pass_w = {k: tuple(v) for k, v in (ranged_gain_this_pass_db or {}).items()}
-    ranged_session_w = {k: tuple(v) for k, v in (ranged_gain_session_db or {}).items()}
+    # A ranged wallet is a BASE (what has no range any more: the retention carry) plus the
+    # peak of the SPANS that still have one (`ranged_peak`). A caller that hands no spans
+    # hands sums, and is charged as before.
+    ranged_pass_base = {k: tuple(v) for k, v in (ranged_gain_this_pass_db or {}).items()}
+    ranged_session_base = {k: tuple(v) for k, v in (ranged_gain_session_db or {}).items()}
+    spans_pass_w = {k: list(v) for k, v in (ranged_spans_this_pass or {}).items()}
+    spans_session_w = {k: list(v) for k, v in (ranged_spans_session or {}).items()}
+
+    def _ranged_total(base: dict, spans: dict) -> dict:
+        out = {}
+        for sid in set(base) | set(spans):
+            b_up, b_down = base.get(sid, (0.0, 0.0))
+            p_up, p_down = ranged_peak(spans.get(sid, ()))
+            out[sid] = (b_up + p_up, b_down + p_down)
+        return out
+
+    ranged_pass_w = _ranged_total(ranged_pass_base, spans_pass_w)
+    ranged_session_w = _ranged_total(ranged_session_base, spans_session_w)
+    ranged_pass_before, ranged_session_before = dict(ranged_pass_w), dict(ranged_session_w)
     coverage = _comp_coverage(stem_chains)
     deess_coverage = _comp_coverage(stem_chains, "deess")
 
     def _charge_gain(i: int, stem_id: str, delta_db: float,
-                     note: str = "", in_range: bool = False) -> None:
+                     note: str = "", in_range: bool = False,
+                     span: Optional[tuple[float, float]] = None) -> None:
         """Walk both gain budgets — gain moves and (2026-06 review) comp
         makeup draw from the same wallet. A whole-file move nets (a −3 after a +3 is 0, and it
         is); a time-ranged one (`in_range`) is one-sided, so a cut in one region never pays
         for a lift in another (D9·R4)."""
-        for net_w, ranged_w, rule, what, tail in (
-                (running, ranged_pass_w, "gain_per_stem_per_pass_db", "this pass", ""),
-                (running_session, ranged_session_w, "gain_per_stem_per_session_db",
+        for net_w, ranged_w, base_w, spans_w, rule, what, tail in (
+                (running, ranged_pass_w, ranged_pass_base, spans_pass_w,
+                 "gain_per_stem_per_pass_db", "this pass", ""),
+                (running_session, ranged_session_w, ranged_session_base, spans_session_w,
+                 "gain_per_stem_per_session_db",
                  "across the session", "; undo earlier gain moves to free budget")):
             net = net_w.get(stem_id, 0.0)
             up, down = ranged_w.get(stem_id, (0.0, 0.0))
-            if in_range:
+            trial = None
+            if in_range and span is not None:
+                # by what plays at once: this move beside the ranged ones already there
+                trial = list(spans_w.get(stem_id, ())) + [(span[0], span[1], delta_db)]
+                b_up, b_down = base_w.get(stem_id, (0.0, 0.0))
+                p_up, p_down = ranged_peak(trial)
+                up, down = b_up + p_up, b_down + p_down
+            elif in_range:
                 up, down = up + max(delta_db, 0.0), down + min(delta_db, 0.0)
+                b_up, b_down = base_w.get(stem_id, (0.0, 0.0))
+                trial_base = (b_up + max(delta_db, 0.0), b_down + min(delta_db, 0.0))
             else:
                 net += delta_db
             hi, lo = net + up, net + down
@@ -1154,6 +1215,10 @@ def _validate_proposal(
                 ))
             elif in_range:
                 ranged_w[stem_id] = (up, down)
+                if trial is not None:
+                    spans_w[stem_id] = trial
+                else:
+                    base_w[stem_id] = trial_base
             else:
                 net_w[stem_id] = net
 
@@ -1220,7 +1285,7 @@ def _validate_proposal(
                             f"one by hand with device.set {kind}#N",
                     limit=1, value=whole_now))
         if isinstance(action, GainAction):
-            _charge_gain(i, action.stem_id, action.delta_db, in_range=is_ranged(action))
+            _charge_gain(i, action.stem_id, action.delta_db, in_range=is_ranged(action), span=_span_of(action))
             # The fader's own top. A time-ranged move is a ride over the fader, not its level;
             # a cut is always allowed (a level already past the top may come down).
             if fader_db is not None and not is_ranged(action) and action.stem_id in faders:
@@ -1351,7 +1416,10 @@ def _validate_proposal(
                     ))
             if action.band.shape == "hpf":
                 bass_tagged = "bass" in stem_tags.get(action.stem_id, [])
+                own_tags = stem_tags.get(action.stem_id, [])
                 hpf_limit = (LIMITS["hpf_max_hz_bass_tagged"] if bass_tagged
+                             else LIMITS["hpf_max_hz_cymbal_tagged"] if "cymbal" in own_tags
+                             else LIMITS["hpf_max_hz_vocal_tagged"] if "vocal" in own_tags
                              else LIMITS["hpf_max_hz_default"])
                 if action.band.freq_hz > hpf_limit:
                     violations.append(Violation(
@@ -1366,7 +1434,7 @@ def _validate_proposal(
             # it to the same gain wallet as gain moves / comp makeup (a cut is free).
             if action.output_db > 0:
                 _charge_gain(i, action.stem_id, action.output_db,
-                             note=" (incl. eq output)", in_range=is_ranged(action))
+                             note=" (incl. eq output)", in_range=is_ranged(action), span=_span_of(action))
 
         elif isinstance(action, CompAction):
             if action.ratio > LIMITS["comp_ratio_max"]:
@@ -1389,7 +1457,7 @@ def _validate_proposal(
                 ))
             elif eff_makeup:
                 _charge_gain(i, action.stem_id, eff_makeup,
-                             note=" (incl. comp makeup)", in_range=is_ranged(action))
+                             note=" (incl. comp makeup)", in_range=is_ranged(action), span=_span_of(action))
             # One whole-file comp per stem (2026-06 review): a new one
             # *replaces* the old (session._mutate), so re-proposing is how
             # the agent adjusts settings. What gets rejected is stacking: a
@@ -1862,12 +1930,12 @@ def _validate_proposal(
         violations += [v for v in _path_gain_violations(req, signal_parents, (
             ("gain_per_stem_per_pass_db", "this pass", "",
              dict(cumulative_gain_this_pass_db if standing_gain_this_pass_db is None
-                  else standing_gain_this_pass_db), dict(ranged_gain_this_pass_db or {}),
+                  else standing_gain_this_pass_db), ranged_pass_before,
              running, ranged_pass_w),
             ("gain_per_stem_per_session_db", "across the session",
              "; undo earlier gain moves to free budget",
              dict((cumulative_gain_session_db if standing_gain_session_db is None
-                   else standing_gain_session_db) or {}), dict(ranged_gain_session_db or {}),
+                   else standing_gain_session_db) or {}), ranged_session_before,
              running_session, ranged_session_w)))
             # a wallet already refused on its own says so once
             if not any(w.rule == v.rule and w.action_index == v.action_index for w in violations)]

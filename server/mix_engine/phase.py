@@ -41,9 +41,10 @@ from .models import (BAND_EDGES_HZ, BAND_LABELS, OneSidedClicks, PhaseBand, Phas
 PHASE_WINDOW_S = 0.3              # the window a correlation is read over - the lamps' integration
 PHASE_CANCEL_CORRELATION = 0.0    # a window below this cancels in mono (the lamps' PHASE)
 MASTER_CANCEL_TIME_PCT = 20.0     # a master band below 0 this much of its sounding time cancels
+MASTER_CANCEL_WORST = -0.3        # ...when its worst windows are really anti-phase (a wide part hovers at 0)
 STEM_CANCEL_CORRELATION = -0.2    # a stem band this anti-phase over the song cancels
-STEM_SAFE_CORRELATION = 0.2       # mono_safe_width: every band at least this over the song...
-STEM_SAFE_TIME_PCT = 20.0         # ...and below 0 less than this of its time
+STEM_SAFE_CORRELATION = 0.0       # mono_safe_width: every band at least this over the song
+STEM_SAFE_TIME_PCT = 20.0         # ...and not below 0 this much of its time with its worst windows anti-phase
 PHASE_BAND_FLOOR_DB = -30.0       # a band this far under the channel's total is not judged
 PHASE_WINDOW_FLOOR_DB = -20.0     # a window this far under the band's mean is not "sounding"
 PHASE_INVERTED_CORRELATION = -0.5 # broadband AND lowest band at or below this = one side flipped
@@ -224,9 +225,15 @@ def band_reading(sums: WindowSums, file_sums: Optional[WindowSums] = None
 
 
 def master_cancels(band: PhaseBand) -> bool:
-    """A master band cancels: below 0 over the song, or for MASTER_CANCEL_TIME_PCT of it."""
+    """A master band cancels: below 0 over the song, or for MASTER_CANCEL_TIME_PCT of it WITH
+    its worst windows really anti-phase (MASTER_CANCEL_WORST). Two unrelated sides - a
+    double-tracked hook, a wide pad - sit around 0 and dip under it half the time they play:
+    that is width, it costs the 3 dB every wide part costs in mono, and nothing cancels. Counted
+    by time alone it read as a fault, and the engineer answered "make the hook wider" by
+    narrowing it (the mixing audit of 2026-11-10, M2)."""
     return (band.corr < PHASE_CANCEL_CORRELATION
-            or band.below_zero_pct >= MASTER_CANCEL_TIME_PCT)
+            or (band.below_zero_pct >= MASTER_CANCEL_TIME_PCT
+                and band.worst <= MASTER_CANCEL_WORST))
 
 
 def stem_cancels(band: PhaseBand) -> bool:
@@ -267,8 +274,10 @@ def channel_delay(sums: WindowSums) -> Optional[tuple[float, float]]:
 def mono_safe_width(sums: WindowSums, width: float) -> Optional[float]:
     """The widest strip width (on the PHASE_WIDTH_STEP grid, rounded down, at most `width`) at
     which every sounding band of this stem reads STEM_SAFE_CORRELATION or more over the song and
-    is below 0 less than STEM_SAFE_TIME_PCT of its time. `sums` are of the channel in front of
-    its pan, at strip width `width`. None when the stem already does."""
+    passes the master's own time rule (`master_cancels`): where it stops cancelling, and no
+    narrower (it asked for +0.2 and a bare time share until the mixing audit of 2026-11-10 -
+    half the width for a part that read -0.4). `sums` are of the
+    channel in front of its pan, at strip width `width`. None when the stem already does."""
     bands = energetic_bands(sums)
     if width <= 0.0 or not bands:
         return None
@@ -282,10 +291,15 @@ def mono_safe_width(sums: WindowSums, width: float) -> Optional[float]:
         for b, on in zip(bands, live):
             m, s = mid[:, b], side[:, b] * squared
             # corr ~= (M - S) / (M + S) >= safe  <=>  S <= M * (1 - safe) / (1 + safe)
-            if s.sum() > m.sum() * target:
+            if s.sum() > m.sum() * target * (1.0 + 1e-9):
                 return True
+            # the master's own time rule (master_cancels), so the width named clears it
             if on.any() and 100.0 * float(np.mean(m[on] < s[on])) >= STEM_SAFE_TIME_PCT:
-                return True
+                # ...read on the MIDDLE of its below-zero windows, not their tail: a low band
+                # has few bins a window, and a part that only hovers at 0 strays to -0.4 there
+                corr = (m[on] - s[on]) / np.maximum(m[on] + s[on], _TINY)
+                if float(np.median(corr[corr < 0.0])) <= MASTER_CANCEL_WORST:
+                    return True
         return False
 
     if not wide(1.0):
@@ -348,7 +362,7 @@ def stem_move(row: PhaseTarget, label: str, devices: list[str]) -> str:
         if top <= BASS_MONO_MAX_HZ:
             parts.append(f"utility bass_mono at {max(top, 120.0):.0f} Hz")
         else:
-            parts.append(f"an eq on the side cutting {label}")
+            parts.append(f"an eq on the side cutting {label} (keeps its width everywhere else)")
         if row.mono_safe_width is not None:
             parts.append(f"strip width {row.mono_safe_width:.2f} or less")
     said = f"{row.target}: " + " or ".join(parts)

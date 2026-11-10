@@ -70,7 +70,9 @@ def test_pop_master_stops_at_the_rail_instead_of_the_pass_budget():
     res = bm.run_case(case, RuleAgent, Path(tempfile.mkdtemp(prefix="rail-stop-")))
     assert res["stop_reason"] == "EQ rail reached", res["stop_reason"]
     assert res["passes_run"] < 6, res["passes_run"]
-    assert res["mean_closure"] >= 0.69, res["mean_closure"]   # the honest closure under the rail
+    # 0.69 until 2026-11-10: the fixture has no sub, and a gap that wide at the bottom of the
+    # spectrum is no longer boosted (agents.MATCH_EQ_MISSING_DB) - the other bands close as before
+    assert res["mean_closure"] >= 0.55, res["mean_closure"]   # the honest closure under the rail
 
 
 def test_a_run_still_short_of_the_loudness_goal_is_not_spent():

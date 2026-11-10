@@ -4173,8 +4173,7 @@ class Session:
             # path is judged against (guardrails._path_gain_violations)
             standing_gain_this_pass_db=self._cumulative_gain(self.pass_number),
             standing_gain_session_db=self._session_gain_baseline([]),
-            ranged_gain_this_pass_db=self._ranged_gain(self.pass_number),
-            ranged_gain_session_db=self._ranged_gain(None),
+            **self._ranged_wallets(),
             stem_chains=self._chains_for_guardrails(),
             eq_ledger=self._eq_ledger(),
             fader_db=self._fader_levels(),
@@ -4302,8 +4301,7 @@ class Session:
             # path is judged against (guardrails._path_gain_violations)
             standing_gain_this_pass_db=self._cumulative_gain(self.pass_number),
             standing_gain_session_db=self._session_gain_baseline([]),
-            ranged_gain_this_pass_db=self._ranged_gain(self.pass_number),
-            ranged_gain_session_db=self._ranged_gain(None),
+            **self._ranged_wallets(),
             stem_chains=self._chains_for_guardrails(),
             eq_ledger=self._eq_ledger(),
             fader_db=self._fader_levels(),
@@ -5584,13 +5582,41 @@ class Session:
         Never netted against each other or against a whole-file move (guardrails.is_ranged).
         The session scope reads ranged comp makeup off the live chains, like the whole-file
         makeup in `_session_gain_baseline`, and adds what trimmed records spent."""
-        from .guardrails import is_ranged, level_charge_db
-        out: dict[str, list[float]] = {}
+        from .guardrails import ranged_peak
+        base, spans = self._ranged_ledger(pass_number)
+        out = {}
+        for sid in set(base) | set(spans):
+            b_up, b_down = base.get(sid, (0.0, 0.0))
+            p_up, p_down = ranged_peak(spans.get(sid, ()))
+            out[sid] = (b_up + p_up, b_down + p_down)
+        return out
 
-        def add(sid: str, charge: Optional[float]) -> None:
-            if charge:
-                slot = out.setdefault(sid, [0.0, 0.0])
-                slot[0 if charge > 0 else 1] += charge
+    def _ranged_wallets(self) -> dict:
+        """The ranged gain wallets as `validate_proposal` takes them: base + spans, both scopes."""
+        pass_base, pass_spans = self._ranged_ledger(self.pass_number)
+        session_base, session_spans = self._ranged_ledger(None)
+        return {"ranged_gain_this_pass_db": pass_base, "ranged_gain_session_db": session_base,
+                "ranged_spans_this_pass": pass_spans, "ranged_spans_session": session_spans}
+
+    def _ranged_ledger(self, pass_number: Optional[int]
+                       ) -> tuple[dict[str, tuple[float, float]], dict[str, list]]:
+        """`_ranged_gain` in its two parts (the mixing audit of 2026-11-10, M4): `spans` - per
+        target, (start_s, end_s, charge) of each ranged move that still has its range - and
+        `base` - what has none (the retention carry, a sum). The guardrails charge the spans
+        by what plays at one moment (`guardrails.ranged_peak`) and add the base whole."""
+        from .guardrails import _span_of, is_ranged, level_charge_db
+        out: dict[str, list[float]] = {}
+        spans: dict[str, list] = {}
+
+        def add(sid: str, charge: Optional[float], source=None) -> None:
+            if not charge:
+                return
+            span = _span_of(source) if source is not None else None
+            if span is not None:
+                spans.setdefault(sid, []).append((span[0], span[1], float(charge)))
+                return
+            slot = out.setdefault(sid, [0.0, 0.0])
+            slot[0 if charge > 0 else 1] += charge
 
         for record in self._state["proposals"]:
             if record["status"] != "applied":
@@ -5604,7 +5630,7 @@ class Session:
                     continue                      # session scope: read off the chain, below
                 if not self._same_entity(record, action["stem_id"]):
                     continue                      # spent on what held this id before (D8·R6)
-                add(action["stem_id"], level_charge_db(action))
+                add(action["stem_id"], level_charge_db(action), action)
         if pass_number is None:
             for sid, (up, down) in self._state.get("trimmed_ranged_gain", {}).items():
                 add(sid, float(up))
@@ -5614,8 +5640,8 @@ class Session:
             for sid, chain in holders.items():
                 for entry in chain:
                     if entry["type"] == "comp" and is_ranged(entry):
-                        add(sid, level_charge_db(entry))
-        return {sid: (up, down) for sid, (up, down) in out.items()}
+                        add(sid, level_charge_db(entry), entry)
+        return {sid: (up, down) for sid, (up, down) in out.items()}, spans
 
     def _session_gain_baseline(self, actions: list) -> dict[str, float]:
         """The agent's session gain budget already spent per target (Phase

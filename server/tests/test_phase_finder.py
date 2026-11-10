@@ -140,23 +140,33 @@ def test_the_master_rule_is_twenty_percent_of_the_time_below_zero():
 
 
 def test_mono_safe_width_counts_the_time_below_zero_not_only_the_song():
-    """Half the song wide, half mono: over the song it reads well above +0.2, but it is below 0
-    for a quarter of its time - the width is set by the time share."""
+    """Half the song anti-phase-leaning, half mono: over the song it reads above 0, but it is
+    below 0 for a good share of its time with its worst windows really anti-phase - the width
+    is set by the master's time rule (2026-11-10: a part that only hovers at 0 is width, and
+    is no longer narrowed for it)."""
     x = _noise(102, 300.0, 3000.0)
-    left, right = _pad(103, 0.0)
+    left, right = _pad(103, 0.5)
+    right = -right                      # the two sides share half their power, upside down
     half = x.size // 2
     audio = np.stack([np.concatenate([x[:half], left[half:]]),
                       np.concatenate([x[:half], right[half:]])], axis=1)
     sums = phase.WindowSums(audio, SR)
     reading = phase.band_reading(sums)
+
+    def unsafe(b):
+        return (b.below_zero_pct >= phase.STEM_SAFE_TIME_PCT
+                and b.worst <= phase.MASTER_CANCEL_WORST)
     assert all(b.corr > phase.STEM_SAFE_CORRELATION for b in reading.values())
-    assert any(b.below_zero_pct >= phase.STEM_SAFE_TIME_PCT for b in reading.values())
+    assert any(unsafe(b) for b in reading.values())
     safe = phase.mono_safe_width(sums, 1.0)
     assert safe is not None and safe < 1.0
     at = phase.band_reading(phase.WindowSums(dsp._width(audio, safe), SR))
-    assert all(b.below_zero_pct < phase.STEM_SAFE_TIME_PCT for b in at.values())
-    wider = phase.band_reading(phase.WindowSums(dsp._width(audio, round(safe + 0.05, 2)), SR))
-    assert any(b.below_zero_pct >= phase.STEM_SAFE_TIME_PCT for b in wider.values())
+    assert all(b.corr >= phase.STEM_SAFE_CORRELATION for b in at.values())
+    # control: a part that only HOVERS at 0 for half the song is width, and is left alone
+    hover_l, hover_r = _pad(103, 0.0)
+    hover = np.stack([np.concatenate([x[:half], hover_l[half:]]),
+                      np.concatenate([x[:half], hover_r[half:]])], axis=1)
+    assert phase.mono_safe_width(phase.WindowSums(hover, SR), 1.0) is None
 
 
 def test_a_haas_delay_between_the_sides_is_found_with_its_side_and_length():

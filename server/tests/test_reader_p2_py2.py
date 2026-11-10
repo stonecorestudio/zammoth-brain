@@ -321,8 +321,10 @@ def test_members_of_a_refused_group_get_their_own_compressors(tmp_path):
     vocal_bus = after.stems["vox"]["bus"]
     assert vocal_bus and after.stems["bgv"]["bus"] == vocal_bus
     assert _types(after.buses[vocal_bus]["chain"]) == ["comp"]
-    for member in ("vox", "bgv"):                              # the control: glue landed, no member comp
-        assert "comp" not in _types(after.stems[member]["chain"]), member
+    # the vocals' glue landed - and since 2026-11-10 a vocal whose level moves keeps its OWN
+    # compressor under it (the glue is parallel and levels nothing), exactly one
+    for member in ("vox", "bgv"):
+        assert _types(after.stems[member]["chain"]).count("comp") == 1, member
 
 
 # ---------- S1·R17: KICK.WAV is a stem ----------

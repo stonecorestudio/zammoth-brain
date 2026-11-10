@@ -63,7 +63,9 @@ def test_a_negative_tone_is_refused_so_the_prompt_must_say_dark_is_low(name: str
 @pytest.mark.parametrize("name", sorted(PROMPTS))
 def test_the_hpf_cap_is_named_with_the_guardrails_numbers(name: str) -> None:
     text = PROMPTS[name]
-    m = re.search(r"hpf's freq_hz is capped at (\d+) Hz \((\d+) Hz on a\s+stem tagged bass\)", text)
+    m = re.search(r"hpf's freq_hz is capped at (\d+) Hz \((\d+) Hz on a\s+stem tagged cymbal, "
+                  r"(\d+) Hz on\s+one tagged vocal, (\d+) Hz on a\s+stem tagged bass\)", text)
     assert m, f"{name}: the hpf cap is not stated"
-    assert float(m.group(1)) == LIMITS["hpf_max_hz_default"]
-    assert float(m.group(2)) == LIMITS["hpf_max_hz_bass_tagged"]
+    assert [float(g) for g in m.groups()] == [
+        LIMITS["hpf_max_hz_default"], LIMITS["hpf_max_hz_cymbal_tagged"],
+        LIMITS["hpf_max_hz_vocal_tagged"], LIMITS["hpf_max_hz_bass_tagged"]]

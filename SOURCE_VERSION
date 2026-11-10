@@ -1,4 +1,4 @@
 Zammoth brain source
-commit 211fc0e85fe26912082e1b7f82c95c7f5385c213
-build 1938
+commit a1ed53270c937cfd28cff19a16760f070681de5c
+build 1943
 Cut by scripts/brain_source_cut.py, without orchestrator/knowledge_content.py.

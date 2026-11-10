@@ -20,7 +20,7 @@ from typing import Awaitable, Callable, Optional
 
 import sys
 
-from .targets import _loudness_goal, _mentions
+from .targets import _loudness_goal, _mentions, _roles_named
 
 EmitFn = Callable[[dict], Awaitable[None]]
 
@@ -69,6 +69,19 @@ MASKING_CARVE_Q = 1.7
 WARM_SHELF_Q = 0.98
 COMP_SPREAD_DB = 12.0        # generic fallback; per-intent floors live in
                              # STEM_DYNAMICS_PROFILES["spread_at"] (see below)
+# The mixing audit of 2026-11-10 (M5), from Auto Mix run on a real rap session.
+# A stem is never carved in the band that is its own: the louder stem of a pair is "the masker"
+# in the band where it is loudest, so the lead rap lost 4 dB at 2.8 kHz and the 808 4 dB at
+# 244 Hz. The clash is still there to solve - by the other stem, or by the engineer.
+CARVE_HOME_BANDS = {"vocal": ("mid", "high_mid", "presence"),
+                    "kick": ("sub", "bass"),
+                    "bass": ("sub", "bass", "low_mid")}
+# A compressor's threshold is never further under the stem's own PEAK than this. The threshold
+# is placed from loudness, and a drum hit or a sub sits far over its loudness (a clap 12-15 dB,
+# an 808 6-7): 4 dB under the loudness was ~17 dB under the hit, at 3:1 and 2 ms.
+COMP_BELOW_PEAK_MAX_DB = {"peak_control": 8.0, "bass_density": 10.0}
+# A balance move stops at the pass's 6 dB; a stem further out than that plus this is SAID.
+BALANCE_SAY_BEYOND_DB = 2.0
 MAX_MASKING_PAIRS = 4        # bounded profiling, deterministic order
 ACTIONS_PER_BUNDLE = 8       # the engine's actions-per-proposal guardrail
 BUNDLES_PER_PASS = 3         # the engine's proposals-per-pass guardrail
@@ -88,6 +101,11 @@ INTENT_ALIASES = {
     "club-loud": ("club-loud", "club loud"),
     "podcast-clean": ("podcast-clean", "podcast clean", "spoken clean"),
 }
+WIDE_POP_MONO_CORR = 0.95       # a part this correlated has no side: stereoize makes one
+MASTER_HOT_PEAK_DBTP = 0.0      # a mix summing over this is trimmed before the limiter...
+MASTER_TRIM_TO_DBTP = -1.0      # ...to here (at most the pass's 6 dB)
+REAL_LOWS_BASS_DB = -12.0       # a part with this much 60-150 Hz has low NOTES, not rumble
+_BARE_TONE_ALIASES = ("warm", "warmer", "warmth")
 INTENT_GOAL_LUFS = {
     "club-loud": -8.0,
     "podcast-clean": -16.0,
@@ -221,8 +239,12 @@ def intent_from_brief(text: str) -> Optional[str]:
     the existing design, but it used to be silent; say so, because "I asked for two
     things and got one" is otherwise indistinguishable from the preset misfiring."""
     lowered = text.lower()
+    # A bare tone word beside a named part is about that part (the mixing audit of 2026-11-10,
+    # M6): "make the vocal warmer" laid the warm-master shelves and a -14 limiter on the master.
+    part_named = bool(_roles_named(lowered))
     matched = [intent for intent, aliases in INTENT_ALIASES.items()
-               if _mentions(lowered, aliases)]
+               if _mentions(lowered, tuple(a for a in aliases
+                                           if not (part_named and a in _BARE_TONE_ALIASES)))]
     if not matched:
         return None
     if len(matched) > 1:
@@ -438,6 +460,12 @@ def _stem_dynamics_action(stem_id: str, analysis: dict,
     # loud ones — which is what "leveling" means.
     threshold_db = max(COMP_THRESHOLD_FLOOR_DB,
                        min(0.0, level - profile["below_db"]))
+    peak = analysis.get("true_peak_dbtp")
+    if peak is None:
+        peak = analysis.get("peak_dbfs")
+    below_peak = COMP_BELOW_PEAK_MAX_DB.get(intent)
+    if below_peak is not None and isinstance(peak, (int, float)):
+        threshold_db = min(0.0, max(threshold_db, float(peak) - below_peak))
     makeup_db = min(COMP_MAKEUP_MAX_DB,
                     round(profile["below_db"] * (1.0 - 1.0 / profile["ratio"]), 1))
     action = {"type": "comp", "stem_id": stem_id,
@@ -554,6 +582,21 @@ def _buried_lead_ride(tags: dict[str, list[str]], sections: list[dict]
                                round(section["end_s"], 2)]}, None)
 
 
+_BACKING_WORDS = ("adlib", "ad_lib", "ad-lib", "bv", "bgv", "back", "harm", "dbl", "double",
+                  "stack", "choir", "chant", "whisper")
+
+
+def _lead_first(vocals: list[str], stems: dict[str, dict]) -> list[str]:
+    """Vocal stems with the lead first: not named as a backing part, then the loudest. Sorted
+    by name alone, "vocal forward" lifted the ad-libs and the backing vocal (2026-11-10)."""
+    def rank(sid: str):
+        name = sid.lower()
+        level = stems.get(sid, {}).get("lufs_s")
+        return (any(w in name for w in _BACKING_WORDS),
+                -(level if isinstance(level, (int, float)) else -200.0), sid)
+    return sorted(vocals, key=rank)
+
+
 def _intent_actions(intent: Optional[str], tags: dict[str, list[str]],
                     stems: dict[str, dict]) -> tuple[
                         list[tuple[dict, Optional[dict]]], list[str]]:
@@ -573,7 +616,7 @@ def _intent_actions(intent: Optional[str], tags: dict[str, list[str]],
         vocals = tagged("vocal")
         if not vocals:
             notes.append("skipped vocal lift: no confident vocal tag")
-        for sid in vocals[:2]:
+        for sid in _lead_first(vocals, stems)[:1]:
             lufs = stems[sid].get("lufs_s")
             actions.append((
                 {"type": "gain", "stem_id": sid,
@@ -619,11 +662,17 @@ def _intent_actions(intent: Optional[str], tags: dict[str, list[str]],
                       if set(tags.get(sid, [])) & {"vocal", "pad", "cymbal"}]
         candidates = [sid for sid in candidates
                       if not (set(tags.get(sid, [])) & {"kick", "bass"})]
+        # the LEAD stays in the middle, and a mono part gets a side made for it: width only
+        # scales the side a part already has (2026-11-10)
+        lead = _lead_first(tagged("vocal"), stems)[:1]
+        candidates = [sid for sid in candidates if sid not in lead]
         if not candidates:
             notes.append("skipped widening: no safe non-bass stereo candidate")
         for sid in candidates[:3]:
+            mono = (stems[sid].get("stereo_correlation") or 0.0) >= WIDE_POP_MONO_CORR
             actions.append((
-                {"type": "width", "stem_id": sid, "width": WIDE_POP_WIDTH},
+                {"type": "width", "stem_id": sid, "width": WIDE_POP_WIDTH,
+                 **({"stereoize": True} if mono else {})},
                 {"metric": "stereo_correlation",
                  "predicted_delta": -0.05, "unit": "corr"}))
             notes.append(f"{sid} tag={','.join(tags.get(sid, []))}")
@@ -668,6 +717,7 @@ def build_bundles(tags: dict[str, list[str]], stems: dict[str, dict],
     compressor keep them — a re-run refines balance and masking, it never
     stacks a second rumble cut or comp on top."""
     balance: list[tuple[dict, Optional[dict]]] = []
+    out_of_reach: list[str] = []          # further out than a mix move may bring it
     # A `full_mix` stem IS the mix — it belongs to no "pack", so it neither skews the
     # median nor gets balanced against the parts it already contains.
     packed = {sid: a["lufs_s"] for sid, a in stems.items()
@@ -689,6 +739,9 @@ def build_bundles(tags: dict[str, list[str]], stems: dict[str, dict],
         else:
             continue                             # inside its class window — leave it
         delta = round(max(-6.0, min(6.0, excess)), 1)
+        if abs(excess) > 6.0 + BALANCE_SAY_BEYOND_DB:
+            out_of_reach.append(f"{stem_id} sits {abs(excess):.0f} dB "
+                                f"{'under' if excess > 0 else 'over'} where it belongs")
         if abs(delta) < MIN_BALANCE_MOVE_DB:
             continue
         balance.append((
@@ -705,6 +758,10 @@ def build_bundles(tags: dict[str, list[str]], stems: dict[str, dict],
         bands = analysis.get("band_energy") or {}
         if bands.get("sub", -80.0) <= SUB_RUMBLE_FLOOR_DB:
             continue  # nothing down there to clean
+        if "full_mix" in stem_tags:
+            continue  # a whole mix holds its own kick and bass (2026-11-10)
+        if bands.get("bass", -80.0) > REAL_LOWS_BASS_DB:
+            continue  # low NOTES (an organ, a piano's left hand), not rumble under a part
         freq_hz = next((HPF_POLICY_HZ[t] for t in sorted(stem_tags)
                         if t in HPF_POLICY_HZ), HPF_DEFAULT_HZ)
         balance.append((
@@ -732,6 +789,9 @@ def build_bundles(tags: dict[str, list[str]], stems: dict[str, dict],
     for masking in maskings:
         if masking["worst_band_excess_db"] <= MASKING_EXCESS_DB:
             continue
+        if any(masking["worst_band"] in CARVE_HOME_BANDS.get(tag, ())
+               for tag in tags.get(masking["stem_b"], [])):
+            continue                       # its own band: never carved (CARVE_HOME_BANDS)
         key = (masking["stem_b"], masking["worst_band"])
         previous = worst_per_band.get(key)
         if (previous is None
@@ -764,7 +824,14 @@ def build_bundles(tags: dict[str, list[str]], stems: dict[str, dict],
             # Group glue is the cleaner move for related families - IF the group lands. The
             # member's own comp is kept as the group bundle's fallback (reader E6·R4): a
             # refused group left its members with neither glue nor a compressor.
-            if dynamic:
+            # ...except a VOCAL whose own level earns one (2026-11-10): the glue is parallel, at
+            # a fixed threshold, and levels nothing - a rap that swung 19 dB went on the vocal
+            # bus with no compressor of its own, the most standard move in mixing dropped
+            # because a hook existed. It keeps its compressor; the glue goes on top.
+            if dynamic and "vocal" in set(tags.get(stem_id, [])):
+                clarity.append(dynamic[:2])
+                dynamics_intents.append(f"{stem_id}: {dynamics_reason(dynamic[2])}")
+            elif dynamic:
                 member_comps.setdefault(stem_id, dynamic[:2])
             continue
         if dynamic:
@@ -785,7 +852,9 @@ def build_bundles(tags: dict[str, list[str]], stems: dict[str, dict],
     bundles = []
     if balance:
         bundles += _chunk(balance, "auto mix: balance the stems and clear "
-                                   "low-end rumble per stem class")
+                                   "low-end rumble per stem class"
+                          + ((" (" + "; ".join(out_of_reach) + " - more than a mix move may "
+                              "add: set its clip gain or a trim first)") if out_of_reach else ""))
     # A family a bundle (reader E6·R4): a proposal is atomic, so with every family in one a
     # refusal of the vocal group took the drum group and both glues down with it.
     for at in range(0, len(bus_actions), 2):
@@ -850,11 +919,22 @@ def build_bundles(tags: dict[str, list[str]], stems: dict[str, dict],
                                            "true_peak_dbtp")) is not None
                                        else 0.0),
                    "unit": "dBTP"}]
+    master_actions: list[dict] = []
+    peak = session_analysis.get("true_peak_dbtp")
+    if goal is None and isinstance(peak, (int, float)) and peak > MASTER_HOT_PEAK_DBTP:
+        # Loud stems summing over full scale: with only a ceiling asked, the limiter took all
+        # of it as reduction. Trim the mix INTO the limiter instead (2026-11-10).
+        trim = round(max(-6.0, MASTER_TRIM_TO_DBTP - peak), 1)
+        master_actions.append({"type": "gain", "stem_id": "master", "delta_db": trim})
+        left = peak + trim - MASTER_TRIM_TO_DBTP
+        rationale += (f"; the mix sums to {peak:+.1f} dBTP, so the master is trimmed {trim:.1f} dB "
+                      "first" + (f" (still {left:.0f} dB over: turn the tracks down)"
+                                 if left > 0.5 else ""))
     bundles.append({
         "rationale": rationale,
         "predicted_impact": impact,
-        "actions": [{"type": "limiter", "stem_id": "master",
-                     "ceiling_dbtp": -1.0, "target_lufs_i": goal}],
+        "actions": master_actions + [{"type": "limiter", "stem_id": "master",
+                                      "ceiling_dbtp": -1.0, "target_lufs_i": goal}],
     })
     return bundles
 
@@ -1135,7 +1215,13 @@ def build_cleanup_bundles(report: dict, tags: Optional[dict] = None, *,
                                       "mask spectral holes in separated stems."
                                       f"{warning_note}")
     glue_members = sorted(repaired)
-    if len(glue_members) >= CLEANUP_GLUE_REPAIRED_AT:
+    # One bus for bass, drums and vocals lets the bass duck the vocal (2026-11-10): the glue is
+    # for repaired stems of ONE family, and none that is tagged a low-end source.
+    families = {("low" if t == "bass" else TAG_BUS_FAMILY[t])
+                for sid in glue_members for t in tags.get(sid, [])
+                if t == "bass" or t in TAG_BUS_FAMILY}
+    one_family = len(families) <= 1          # untagged stems are of no known family
+    if len(glue_members) >= CLEANUP_GLUE_REPAIRED_AT and one_family:
         bundles += _chunk([
             ({"type": "group", "bus_id": "cleanup_glue",
               "members": glue_members}, None),

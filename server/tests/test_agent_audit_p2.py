@@ -843,13 +843,15 @@ def test_auto_mix_twice_does_not_deepen_its_cuts_or_ride_the_same_phrases():
     center = int((BAND_EDGES_HZ[i] * BAND_EDGES_HZ[i + 1]) ** 0.5)
     tags = {"vocals": ["vocal"], "gtr": ["guitar"]}
     base = {"lufs_s": -18.0, "band_energy": {"sub": -90.0}}
-    masking = {"stem_a": "gtr", "stem_b": "vocals", "worst_band": band,
+    # the guitar covers the vocal: the GUITAR is carved (a vocal is never carved in its own
+    # band - the mixing audit of 2026-11-10; this test had the vocal as the stem cut)
+    masking = {"stem_a": "vocals", "stem_b": "gtr", "worst_band": band,
                "worst_band_excess_db": 12.0}
     phrases = {"vocals": {"level_moves": [{"delta_db": 2.0, "start_s": 1.0, "end_s": 3.0}]}}
 
     def cuts(bundles):
         return [a for a in _bundle_actions(bundles) if a["type"] == "eq"
-                and a["stem_id"] == "vocals" and a["band"]["shape"] == "peak"]
+                and a["stem_id"] == "gtr" and a["band"]["shape"] == "peak"]
 
     def rides(bundles):
         return [a for a in _bundle_actions(bundles) if a["type"] == "gain"
@@ -859,7 +861,7 @@ def test_auto_mix_twice_does_not_deepen_its_cuts_or_ride_the_same_phrases():
     assert cuts(first) and rides(first), "control: a first run carves and rides"
     carved = dict(base, applied_chain=[{"type": "eq", "band": {
         "freq_hz": center, "gain_db": -4.0, "q": 1.2, "shape": "peak"}}])
-    second = A.build_bundles(tags, {"vocals": carved, "gtr": dict(base)}, [masking], {},
+    second = A.build_bundles(tags, {"vocals": dict(base), "gtr": carved}, [masking], {},
                              None, phrases=phrases,
                              existing_rides={"vocals": [{"delta_db": 2.0}]})
     assert not cuts(second), "the re-run deepened the notch"

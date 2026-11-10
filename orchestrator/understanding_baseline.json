@@ -1,17 +1,17 @@
 {
   "total": 74,
   "counts": {
-    "resolved": 20,
+    "resolved": 19,
     "mis-scoped": 0,
     "over-reach": 0,
-    "unresolved": 54
+    "unresolved": 55
   },
   "by_scope": {
     "session": {
-      "resolved": 14,
+      "resolved": 13,
       "mis-scoped": 0,
       "over-reach": 0,
-      "unresolved": 6
+      "unresolved": 7
     },
     "track": {
       "resolved": 3,
@@ -51,7 +51,7 @@
     "the mix is fatiguing": "unresolved",
     "master this for vinyl": "unresolved",
     "prep this for Apple Digital Masters": "resolved",
-    "the stereo image collapses in mono": "resolved",
+    "the stereo image collapses in mono": "unresolved",
     "it doesn't translate to my car": "unresolved",
     "the snare has no crack": "unresolved",
     "give the vocal more air": "resolved",

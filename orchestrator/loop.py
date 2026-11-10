@@ -192,6 +192,38 @@ def _only_eq_or_loudness_open(states: list[TargetState]) -> bool:
     return True
 
 
+COLLATERAL_FADER_DB = 6.0   # a part moved this far by a run that was not asked to is SAID
+COLLATERAL_CREST_DB = 3.0   # ...and so is this much lost punch without a loudness brief
+COLLATERAL_LIMITER_DB = 8.0 # ...and a limiter taking this much: the make-up has no cap of its own
+
+
+def collateral_notes(before: dict, after: dict, metrics_before: dict, metrics_after: dict,
+                     *, loudness_asked: bool) -> list[str]:
+    """What a run cost the things its targets do not measure (the mixing audit of 2026-11-10).
+    A run's verdict is target distance alone, so a kick pulled down 8 dB for "vocal clarity"
+    ended as "targets met". Sentences for `report.warnings`; never a verdict."""
+    notes: list[str] = []
+    was = {s.get("stem_id"): float(s.get("gain_db") or 0.0) for s in before.get("stems", [])}
+    for stem in after.get("stems", []):
+        sid = stem.get("stem_id")
+        if sid not in was:
+            continue
+        moved = float(stem.get("gain_db") or 0.0) - was[sid]
+        if abs(moved) >= COLLATERAL_FADER_DB:
+            notes.append(f"{sid}'s fader ended {abs(moved):.0f} dB "
+                         f"{'lower' if moved < 0 else 'higher'} than it began - check the balance")
+    c0, c1 = metrics_before.get("crest_factor_db"), metrics_after.get("crest_factor_db")
+    if (not loudness_asked and isinstance(c0, (int, float)) and isinstance(c1, (int, float))
+            and c0 - c1 >= COLLATERAL_CREST_DB):
+        notes.append(f"the mix lost {c0 - c1:.0f} dB of crest (punch) and no loudness was asked for")
+    work = metrics_after.get("limiter_gr_max_db")
+    if isinstance(work, (int, float)) and work >= COLLATERAL_LIMITER_DB:
+        notes.append(f"the limiter takes {work:.0f} dB off the loudest moments to reach this "
+                     "loudness - the master is flattened there; a lower goal or a louder mix "
+                     "going in would keep the punch")
+    return notes
+
+
 MAX_PASSES = 5
 EPSILON = 0.3  # min meaningful improvement, in target-metric units
 STALL_PASSES = 2  # consecutive sub-EPSILON passes before "diminishing returns"
@@ -598,13 +630,16 @@ async def run_passes(engine: EngineClient, project_dir: Path, brief: str,
     report.runs_path = str(runs_path)
 
     metrics = await engine.render_and_analyze()
+    metrics_at_start = dict(metrics.get("analysis") or {})
     # Phase 39 (intent understanding): durable notes + taste shape free-form
     # brief compilation, and stem tags let the brief name instruments by role
     # ("the vocal") not just by id. All cheap reads, resolved before targets.
     notes = _load_notes(runs_dir)
     taste = taste_summary(runs_dir)
+    state_at_start: dict = {}
     try:
         live_state = await engine.call("get_state")
+        state_at_start = live_state
         stem_tags = {s["stem_id"]: s.get("tags", [])
                      for s in live_state.get("stems", [])}
     except RuntimeError:
@@ -1352,6 +1387,14 @@ async def run_passes(engine: EngineClient, project_dir: Path, brief: str,
     update_global_store(load_records_file(runs_path))
 
     report.final_metrics = metrics["analysis"]
+    if report.applied_proposal_ids and state_at_start:
+        try:
+            report.warnings += collateral_notes(
+                state_at_start, await engine.call("get_state"), metrics_at_start,
+                {**(metrics["analysis"] or {}), **(metrics.get("master") or {})},
+                loudness_asked=any(getattr(t, "metric", "") == "lufs_i" for t in targets))
+        except RuntimeError:
+            pass
     await emit_usage()  # the critic/reflection turns spend after the last pass
     await emit({"type": "run_finished", "stop_reason": report.stop_reason,
                 "passes_run": report.passes_run,

@@ -198,6 +198,13 @@ OVER_LIMITING_GR_MEAN_DB = 0.8
 OVER_LIMITING_PINNED_ACTIVE_PCT = 95.0
 OVER_LIMITING_PINNED_MEAN_DB = 2.5
 OVER_LIMITING_GR_MAX_DB = 4.0
+# A LOUD goal (2026-11-10): at -8 LUFS and -1 dBTP the PLR is 7 by arithmetic, so the margin
+# test above fired on every club / EDM / hip-hop goal. With the master limiter aimed this loud
+# or louder, only heavy limiter work is "over".
+OVER_LIMITING_LOUD_GOAL_LUFS = -10.5
+OVER_LIMITING_LOUD_GOAL_MAX_LUFS = -6.0   # the loudest goal the product sets; past it the margin rule stands
+OVER_LIMITING_LOUD_GR_MEAN_DB = 3.0
+OVER_LIMITING_LOUD_GR_MAX_DB = 8.0
 # Resonance detection (Phase 20, mix-analysis skill v6)
 RESONANCE_NPERSEG = 8192            # finer grid than band energy's 4096
 RESONANCE_LO_HZ = 60.0
@@ -2938,7 +2945,7 @@ def over_compressed(master_dynamics: Optional[list],
 
 
 def over_limited(master_dynamics: Optional[list], psr_db: Optional[float],
-                 plr_db: Optional[float]) -> bool:
+                 plr_db: Optional[float], target_lufs_i: Optional[float] = None) -> bool:
     """The `over_limiting` render-flag predicate (Phase 34): true when a
     limiter is reducing hard and the resulting master has low short-term or
     integrated loudness margin. Busy limiter GR alone is not enough — loud
@@ -2951,6 +2958,12 @@ def over_limited(master_dynamics: Optional[list], psr_db: Optional[float],
         return False
     limiters = [entry for entry in (master_dynamics or [])
                 if entry["processor"] == "limiter"]
+    if (target_lufs_i is not None
+            and OVER_LIMITING_LOUD_GOAL_LUFS <= target_lufs_i <= OVER_LIMITING_LOUD_GOAL_MAX_LUFS):
+        # the low margin IS the goal: judge the limiter's work alone
+        return any(entry["gr_mean_db"] >= OVER_LIMITING_LOUD_GR_MEAN_DB
+                   or entry["gr_max_db"] >= OVER_LIMITING_LOUD_GR_MAX_DB
+                   for entry in limiters)
     return any(
         entry["gr_mean_db"] >= OVER_LIMITING_GR_MEAN_DB
         or entry["gr_max_db"] >= OVER_LIMITING_GR_MAX_DB

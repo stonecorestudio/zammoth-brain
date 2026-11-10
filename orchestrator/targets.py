@@ -231,8 +231,16 @@ def targets_from_brief(brief: str, stems: list[str],
         if stem is None:
             raise ValueError(
                 f"brief asks for clarity but names no known stem; stems: {stems}")
-        for other in stems:
-            if other != stem:
+        # Not against the low end (the mixing audit of 2026-11-10): a kick or an 808 is 15-25 dB
+        # over a vocal in the vocal's own bottom band whatever is done, so that target could
+        # never be met and the run pulled the kick and the bass down pass after pass.
+        low_end = {"kick", "bass"}
+        own = set((stem_tags or {}).get(stem, []))
+        others = [o for o in stems if o != stem]
+        apart = [o for o in others if not (set((stem_tags or {}).get(o, [])) & low_end
+                                           and not own & low_end)]
+        for other in (apart or others):      # nothing but low end beside it: measure that
+            if True:
                 targets.append(Target(
                     metric=f"masking({stem},{other}).worst_band_excess_db",
                     unit="dB", max_value=3.0))
@@ -376,9 +384,47 @@ def _genre_of(text: str) -> Optional[str]:
     'pop' fires inside "the bass (pop)s too much" and 'rap' inside "(wrap) it
     up", each dragging in a full 8-band master the user never asked for."""
     for genre, keywords in GENRE_KEYWORDS.items():
-        if _mentions(text, keywords):
-            return genre
+        for word in keywords:
+            if any(_names_a_genre(text, m) for m in re.finditer(rf"\b{re.escape(word)}\b", text)):
+                return genre
     return None
+
+
+# A genre word that is not naming a genre (the mixing audit of 2026-11-10, M6): "make the snare
+# pop" compiled a pop master, "the rap vocal is harsh" a hip-hop one, "the acoustic guitar is
+# muddy" an acoustic one - a whole-master tonal curve and a loudness goal for a request about
+# one instrument. What a genre word is followed by, when it names a PART rather than a style...
+_GENRE_PART_AFTER = re.compile(
+    r"^[\s-]*(?:lead\s+|backing\s+|main\s+)?(?:vocals?|vox|verses?|hooks?|adlibs?|guitars?|drums?|kit|piano|"
+    r"keys|hats?|hi-?hats?|snares?|kicks?|bass|808s?|synths?|leads?|pads?|parts?|takes?|stems?|"
+    r"loops?|samples?)\b")
+# ...what makes it a style after all ("the rap record", "a pop song")...
+_GENRE_FRAME_AFTER = re.compile(
+    r"^[\s-]*(?:master|mix|record|song|track|tune|sound|vibe|style|banger|production|release|"
+    r"single|album|genre|music|beat)\b")
+# ...the words that make "pop" / "rock" / "dance" something the mix should DO...
+_GENRE_VERB_BEFORE = re.compile(
+    r"\b(?:make|makes|making|let|lets|get|gets|help|helps|want|wants|need|needs|should|to)\b"
+    r"[^.,;:]{0,40}$")
+_GENRE_VERB_WORDS = ("pop", "rock", "dance")
+# ...and "the rap" on its own, which is the track.
+_GENRE_AS_A_PART = {"rap": re.compile(r"\bthe\s*$")}
+
+
+def _names_a_genre(text: str, m: "re.Match") -> bool:
+    before, after = text[:m.start()], text[m.end():]
+    word = m.group(0)
+    if _GENRE_FRAME_AFTER.match(after):
+        return True
+    if _GENRE_PART_AFTER.match(after):
+        return False
+    part = _GENRE_AS_A_PART.get(word)
+    if part is not None and part.search(before):
+        return False
+    if word in _GENRE_VERB_WORDS and _GENRE_VERB_BEFORE.search(before) \
+            and not re.search(r"\b(?:like|as|for|into)\s+(?:a|an|the)?\s*$", before):
+        return False
+    return True
 
 
 # ---------- tone / space intents (Phase 39, intent understanding) ----------
@@ -440,6 +486,17 @@ _TONE_EXCESS = re.compile(
 # bright" is a complaint that wants more; "don't make it bright" wants no more): undecidable here.
 _TONE_UNSURE = re.compile(
     r"(?:\bnot\b|n[’']t\b|\bno\b|\bnever\b|\bwithout\b)(?:\s+\w+){0,2}\s*$")
+# The mixing audit of 2026-11-10 (M6). "Make sure it works in mono" narrowed the master, "wider
+# chorus" widened the whole song, and "keep the punch" asked for more of it.
+_MONO_IS_A_CHECK = re.compile(
+    r"\b(?:in|to|for)\s+mono\b|\bmono[\s-]*(?:compat\w*|safe\w*|check\w*|fold\w*|playback)\b")
+_TONE_KEPT = re.compile(
+    r"\b(?:keep|keeps|keeping|preserve|preserving|retain|retaining|(?:without|not|n[’']t)\s+los\w+)\b"
+    r"(?:\s+\w+){0,3}\s*$")
+_SECTION_WORDS = (r"(?:pre-?chorus(?:es)?|chorus(?:es)?|verses?|hooks?|drops?|bridges?|intros?|"
+                  r"outros?|breakdowns?|builds?|sections?)")
+_TONE_ON_A_SECTION = re.compile(rf"^\s+(?:in\s+|on\s+|for\s+)?(?:the\s+)?(?:\w+\s+)?{_SECTION_WORDS}\b")
+_TONE_SECTION_BEFORE = re.compile(rf"\b{_SECTION_WORDS}\b(?:\s+\w+){{0,4}}\s*$")
 # The same letters in another sense: a punch-in is a recording move, air conditioning is a noise.
 _TONE_OTHER_SENSE = {"punch": re.compile(r"^[\s-]*(?:in|out|ins|outs)\b"),
                      "air": re.compile(r"^\s*(?:con\b|conditioning|conditioner)")}
@@ -463,6 +520,14 @@ def _tone_intents(text: str) -> list[str]:
                 other = _TONE_OTHER_SENSE.get(word)
                 if other is not None and other.match(after):
                     continue
+                if word == "mono" and _MONO_IS_A_CHECK.search(before + " mono" + after):
+                    continue          # "works in mono" asks for a check, not a narrower mix
+                if _TONE_KEPT.search(before):
+                    continue          # "keep the punch" asks for no MORE of it
+                if _TONE_ON_A_SECTION.match(after) or _TONE_SECTION_BEFORE.search(before):
+                    raise BriefNotUnderstood(
+                        f"the brief asks for {word!r} in one section of the song — a table "
+                        "compiles whole-song targets, so that needs a reader")
                 reading: Optional[str] = intent
                 if re.match(r"\s*enough\b", after):
                     reading = intent                       # "not bright enough" asks for brighter

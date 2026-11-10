@@ -943,7 +943,10 @@ def create_server(project_dir: Path | str) -> FastMCP:
         # Phase 34: limiter-specific QC. The limiter is exempt from
         # over_compression because loud masters can legitimately hit it; this
         # flag only fires when limiter GR and low PSR/PLR agree.
-        if analysis.over_limited(telemetry, result.psr_db, result.plr_db):
+        loud_goal = max((e["target_lufs_i"] for e in session.master_chain
+                         if e.get("type") == "limiter" and e.get("enabled", True)
+                         and e.get("target_lufs_i") is not None), default=None)
+        if analysis.over_limited(telemetry, result.psr_db, result.plr_db, loud_goal):
             flags.append("over_limiting")
         # Phase 31: the song sits off concert pitch, or its intonation is
         # smeared — surfaced like the other post-render flags so the agent and

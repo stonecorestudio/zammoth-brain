@@ -242,6 +242,10 @@ class RuleAgent:
     """Deterministic, masking/loudness-only agent. No LLM, no surprises."""
 
     GAIN_STEP_DB = -2.0
+    # Band matching (the mixing audit of 2026-11-10): at the two ends of the spectrum a gap this
+    # wide is content the mix does not have - a boost there raises rumble or hiss, not music.
+    MATCH_EQ_MISSING_DB = {"sub": 8.0, "air": 8.0}
+    LOUDNESS_PUSH_SAY_DB = 8.0     # a make-up past this is said: a limiter is no fader
 
     # Per-pass fraction of a band gap to take with the master match-EQ
     # (Phase 15). band_energy is relative, so the FIR's uniform level shift
@@ -262,7 +266,8 @@ class RuleAgent:
             if target.distance <= 0 or len(proposals) >= 3:
                 continue
             if target.metric.startswith("masking("):
-                proposals.append(self._masking_proposal(ctx, target))
+                if (move := self._bounded_masking_proposal(ctx, target)) is not None:
+                    proposals.append(move)
             elif target.metric in ("harshness_db", "mud_db"):
                 proposals.append(self._composite_proposal(ctx, target))
             elif (target.metric == "lufs_i" and target.current is not None
@@ -290,6 +295,26 @@ class RuleAgent:
         return [f"brief {brief!r}: stopped '{stop_reason}' with unmet "
                 f"targets — {concern}" for concern in verdict.get("concerns", [])[:3]]
 
+    # The most a run takes off one masker's fader for a clarity target (the mixing audit of
+    # 2026-11-10): each cut "improves" the number, so a target out of reach walked the masker
+    # down 2-6 dB a pass to the session rail and the run read as progress.
+    MASKER_CUT_MAX_DB = 6.0
+
+    def _bounded_masking_proposal(self, ctx: PassContext, target: TargetState) -> Optional[dict]:
+        if ctx.pass_number <= 1 or not hasattr(self, "_masker_cut"):
+            self._masker_cut: dict[str, float] = {} if ctx.pass_number <= 1 else getattr(
+                self, "_masker_cut", {})
+        masker = self._masker_of(target)
+        room = self.MASKER_CUT_MAX_DB + self._masker_cut.get(masker, 0.0)
+        if room < 0.5:
+            return None                      # said by the run's collateral notes, not chased
+        proposal = self._masking_proposal(ctx, target)
+        for action in proposal["actions"]:
+            if action["type"] == "gain" and action["stem_id"] == masker:
+                action["delta_db"] = round(max(action["delta_db"], -room), 1)
+                self._masker_cut[masker] = self._masker_cut.get(masker, 0.0) + action["delta_db"]
+        return proposal
+
     def _masking_proposal(self, ctx: PassContext, target: TargetState) -> dict:
         masker = self._masker_of(target)
         delta = max(self.GAIN_STEP_DB, -target.distance)
@@ -309,12 +334,55 @@ class RuleAgent:
         "mud_db": {"freq_hz": 250, "q": 1.41},        # low-mid buildup (the cookbook 1.0 x sqrt 2)
     }
     COMPOSITE_CUT_DB = -2.0
+    COMPOSITE_STEM_CUT_DB = -3.0     # on the one part that carries it
+    COMPOSITE_OWNER_LEAD_DB = 6.0    # ...which leads every other part in that region by this
+    COMPOSITE_BANDS = {"harshness_db": ("presence", "brilliance"), "mud_db": ("low_mid",)}
+
+    def _composite_owner(self, ctx: PassContext, metric: str) -> Optional[str]:
+        """The stem that carries a composite's region, when one clearly does: its level there
+        (its loudness plus the region's share of it) leads the next part by
+        COMPOSITE_OWNER_LEAD_DB. None when nobody does, or there is no way to look."""
+        if ctx.engine_call is None or len(ctx.stem_chains) < 2:
+            return None
+        levels: list[tuple[float, str]] = []
+        for stem_id in sorted(ctx.stem_chains):
+            try:
+                reading = ctx.engine_call("analyze_stem", {"stem_id": stem_id}) or {}
+            except Exception:
+                return None
+            loud = reading.get("lufs_s")
+            bands = reading.get("band_energy") or {}
+            shares = [bands[b] for b in self.COMPOSITE_BANDS[metric]
+                      if isinstance(bands.get(b), (int, float))]
+            if not isinstance(loud, (int, float)) or not shares:
+                continue
+            region = 10.0 * math.log10(sum(10.0 ** (v / 10.0) for v in shares))
+            levels.append((loud + region, stem_id))
+        levels.sort(reverse=True)
+        if len(levels) >= 2 and levels[0][0] - levels[1][0] >= self.COMPOSITE_OWNER_LEAD_DB:
+            return levels[0][1]
+        return None
 
     def _composite_proposal(self, ctx: PassContext, target: TargetState) -> dict:
         """One master-EQ cut per pass at the composite's region center; the
         composite is energy-share minus crest, so a region cut walks it down."""
         cut = self.COMPOSITE_CUTS[target.metric]
         word = "harshness" if target.metric == "harshness_db" else "mud"
+        owner = self._composite_owner(ctx, target.metric)
+        if owner is not None:
+            # One part carries it (2026-11-10): cut THERE. On the master the same cut took
+            # the words off the vocal and the bite off the guitar to tame the hats.
+            return {
+                "rationale": f"{word} is {target.distance:+.1f} dB over the brief's ceiling and "
+                             f"'{owner}' carries it; cut {abs(self.COMPOSITE_STEM_CUT_DB):.0f} dB "
+                             f"at {cut['freq_hz']} Hz there, not on the whole mix",
+                "predicted_impact": [{"metric": target.metric,
+                                      "predicted_delta": -1.0, "unit": "dB"}],
+                "actions": [{"type": "eq", "stem_id": owner,
+                             "band": {"freq_hz": cut["freq_hz"],
+                                      "gain_db": self.COMPOSITE_STEM_CUT_DB,
+                                      "q": cut["q"], "shape": "peak"}}],
+            }
         return {
             "rationale": f"{word} is {target.distance:+.1f} dB over the brief's "
                          f"ceiling; cut {abs(self.COMPOSITE_CUT_DB):.0f} dB at "
@@ -420,10 +488,14 @@ class RuleAgent:
         # only processor allowed to push loudness (docs/03).
         ceiling = ctx.limits.get("master_true_peak_max_dbtp", -1.0)
         goal = clamp_loudness_goal(target.goal)[0]  # limiter schema range (targets.py)
+        push = goal - target.current if target.current is not None else 0.0
+        far = (f" - that is {push:.0f} dB into the limiter: the mix is quiet for this goal, "
+               "so raise the mix first or expect it flattened"
+               if push > self.LOUDNESS_PUSH_SAY_DB else "")
         return {
             "rationale": f"master is {target.distance:.1f} LU from the "
                          f"loudness goal; limit to {goal:.0f} LUFS "
-                         f"at {ceiling:.1f} dBTP",
+                         f"at {ceiling:.1f} dBTP" + far,
             "predicted_impact": [{"metric": "lufs_i",
                                   "predicted_delta": round(
                                       goal - target.current, 1),
@@ -450,10 +522,15 @@ class RuleAgent:
         if not gaps:
             return None
         gaps.sort(key=lambda pair: abs(pair[1]), reverse=True)
-        band_gains, predicted, noted = {}, [], []
+        band_gains, predicted, noted, left = {}, [], [], []
         for target, gap in gaps[:8]:  # ≤ 8 bands; ≤ 8 predicted metrics
             band = _match_eq_band(target.metric)
             if band is None:
+                continue
+            if gap > self.MATCH_EQ_MISSING_DB.get(band, float("inf")):
+                # the mix does not HAVE this band (a voice and a guitar have no sub): an EQ
+                # cannot add it, only raise rumble and hiss - left, and said
+                left.append(f"{band} is {gap:.0f} dB under the curve - not in this mix, left")
                 continue
             gain_db = max(ctx.limits["eq_cut_min_db"],
                           min(ctx.limits["eq_boost_max_db"], step * gap))
@@ -479,7 +556,7 @@ class RuleAgent:
             return None
         return {
             "rationale": "match the target tonal balance (match-EQ): "
-                         + ", ".join(noted),
+                         + ", ".join(noted) + ("; " + "; ".join(left) if left else ""),
             "predicted_impact": predicted,
             "actions": [{"type": "match_eq", "stem_id": "master",
                          "band_gains_db": band_gains}],
@@ -560,9 +637,10 @@ class ProbingRuleAgent(RuleAgent):
         if not outcomes:
             return super()._masking_proposal(ctx, target)
         meeting = [o for o in outcomes if o[1] <= target.max_value]
-        # smallest move that meets the target; otherwise the biggest cut
+        # smallest move that meets the target; otherwise the SMALLEST cut (it took the biggest
+        # until 2026-11-10: -6 dB on a part for a target no cut could reach)
         step, after = (max(meeting, key=lambda o: o[0]) if meeting
-                       else min(outcomes, key=lambda o: o[0]))
+                       else max(outcomes, key=lambda o: o[0]))
         probed = ", ".join(f"{s:+.0f}→{v:.1f}" for s, v in outcomes)
         return {
             "rationale": f"probed '{masker}' cuts ({probed} dB excess): "
@@ -643,9 +721,10 @@ a 2 kHz de-esser is a melody compressor (it compresses the tune and leaves
 the esses alone). A dynamic_eq cut is the alternative only
 when its freq_hz is >= 5000. (2) Space via send/return: after adding a return + send, call
 analyze_return(return_id) and compare its lufs to the source's — a return
-sitting 12+ dB under its source is inaudible decoration, so raise the send
-or the return level until it reads within ~6-10 dB of the source (a
-tasteful tail), then stop. A space the brief asked for must be AUDIBLE
+sitting 15+ dB under its source is usually inaudible decoration, so raise the send
+or the return level until it reads about 8-14 dB under the source - nearer 8
+when the brief asks for a space you can clearly hear, nearer 14 for "a touch" -
+then stop: past 8 the tail starts to wash the part out. A space the brief asked for must be AUDIBLE
 first and subtle second: sends cap at -3 dB (guardrail), so start the send
 AT -3 dB and pull it back only if analyze_return proves it is too loud —
 a send at -5 or -8 with a room IR is decoration you will not hear. If it
@@ -704,14 +783,13 @@ comp makeup draws from the same gain budget as gain moves. Choose comp
 settings by intent: vocal leveling (ratio ~2.5, attack ~8 ms, release
 ~120 ms), transient/peak control (ratio ~3, attack ~2 ms, release ~80 ms),
 bass density (ratio ~3, attack ~20 ms, release ~180 ms), or gentle density
-(ratio ~2, attack ~12 ms, release ~180 ms, optional mix ~0.8). Predict
+(ratio ~2, attack ~3 ms, release ~150 ms, optional mix ~0.8). Predict
 dynamic-spread changes with stem(<id>).dynamic_spread_db when that is the
 intended movement.
 Group busses: you own routing. Group related stems with a
 group action — {type:"group", bus_id, members} creates the bus and routes
 the members — then glue it: prefer ONE bus move (comp threshold_db >= -30,
-ratio 2-4, attack 1-3 ms, release 100-200 ms; mix 0.3-0.5 for parallel —
-heavy settings blended thicken a bus without flattening it) over identical
+ratio 2-4, attack 1-3 ms, release 100-200 ms; mix 0.3-0.5 for parallel — and a parallel glue needs the parallel recipe's make-up, or the blend only drops the level) over identical
 per-stem moves across its members. Glue wants the fast attack: at 10 ms
 and slower the hits pass before the comp closes and the bus's crest RISES.
 Re-home a single stem with route ({type:"route", stem_id, bus_id|null};
@@ -1052,9 +1130,9 @@ Action grammar for probes and proposals:
   of stacking shelves. Steep hpf/lpf (slope_db_oct 24-48) clears rumble or DC
   without the gentle 6 dB/oct default's slow skirt dulling what sits just above
   the cutoff (a steeper cut shifts phase more near the cutoff, not less). q:
-  on a bell 1 is broad (about two octaves), 4-8 narrow, 10+ surgical; on a cut
+  on a bell 1 is broad (about an octave and a half), 4-8 narrow, 10+ surgical; on a cut
   1 is flat (Butterworth), more puts a resonant bump at the cutoff, and a
-  6 dB/oct cut has no q. An hpf's freq_hz is capped at 120 Hz (40 Hz on a
+  6 dB/oct cut has no q. An hpf's freq_hz is capped at 120 Hz (500 Hz on a stem tagged cymbal, 200 Hz on one tagged vocal, 40 Hz on a
   stem tagged bass); to thin a source above that, use a low_shelf cut. channel left/right
   targets one stereo side directly (no M/S encode) for asymmetric stereo
   problems — rare; prefer mid/side for width-related work.

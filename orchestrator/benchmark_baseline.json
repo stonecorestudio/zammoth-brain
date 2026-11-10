@@ -196,7 +196,7 @@
       "passes_run": 4,
       "targets_met": true,
       "mean_closure": 1.0,
-      "mean_abs_prediction_error": 0.267,
+      "mean_abs_prediction_error": 0.233,
       "proposals": {
         "total": 3,
         "applied": 3,
@@ -217,8 +217,8 @@
       "stop_reason": "EQ rail reached",
       "passes_run": 5,
       "targets_met": false,
-      "mean_closure": 0.693,
-      "mean_abs_prediction_error": 2.921,
+      "mean_closure": 0.562,
+      "mean_abs_prediction_error": 3.233,
       "proposals": {
         "total": 5,
         "applied": 5,
@@ -244,14 +244,14 @@
         {
           "metric": "band_energy.sub",
           "initial_distance": 11.3,
-          "final_distance": 0.4,
-          "closure": 0.965
+          "final_distance": 8.5,
+          "closure": 0.248
         },
         {
           "metric": "band_energy.bass",
           "initial_distance": 12.7,
-          "final_distance": 1.8,
-          "closure": 0.858
+          "final_distance": 2.3,
+          "closure": 0.819
         },
         {
           "metric": "band_energy.low_mid",
@@ -262,32 +262,32 @@
         {
           "metric": "band_energy.mid",
           "initial_distance": 6.3,
-          "final_distance": 4.5,
-          "closure": 0.286
+          "final_distance": 4.9,
+          "closure": 0.222
         },
         {
           "metric": "band_energy.high_mid",
           "initial_distance": 16.4,
-          "final_distance": 9.0,
-          "closure": 0.451
+          "final_distance": 8.6,
+          "closure": 0.476
         },
         {
           "metric": "band_energy.presence",
           "initial_distance": 20.2,
-          "final_distance": 9.2,
-          "closure": 0.545
+          "final_distance": 8.8,
+          "closure": 0.564
         },
         {
           "metric": "band_energy.brilliance",
           "initial_distance": 19.9,
-          "final_distance": 9.0,
-          "closure": 0.548
+          "final_distance": 9.1,
+          "closure": 0.543
         },
         {
           "metric": "band_energy.air",
           "initial_distance": 18.6,
-          "final_distance": 7.7,
-          "closure": 0.586
+          "final_distance": 15.2,
+          "closure": 0.183
         }
       ]
     },
@@ -317,8 +317,8 @@
   "summary": {
     "cases": 8,
     "targets_met_rate": 0.875,
-    "mean_closure": 0.962,
-    "mean_abs_prediction_error": 0.537,
+    "mean_closure": 0.945,
+    "mean_abs_prediction_error": 0.572,
     "rejection_rate": 0.0
   }
 }

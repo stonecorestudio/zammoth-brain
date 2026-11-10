@@ -158,6 +158,8 @@ def test_the_three_lines_about_what_the_model_gets_wrong_say_the_behaviour_wante
 # ---------------------------------------------------------------- every pin on the one that ships
 
 PINS = {
+    "test_mixing_audit_2026_11_10": ("test_both_daw_prompts_carry_the_audits_rules",
+                                     "test_the_second_batch_of_prompt_wording"),
     "test_user_qa_2026_10_22": ("test_the_daw_prompt_does_not_say_measuring_a_reference_loads_it",),
     "test_phase54_prompt_audit": ("test_the_daw_prompt_names_no_tool_the_daw_chat_lacks",
                                   "test_the_daw_prompt_names_only_context_its_context_carries",
