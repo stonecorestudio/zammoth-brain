@@ -1678,6 +1678,12 @@
       "wants_args": false
     },
     {
+      "key": "view.toggle_mixer",
+      "name": "Toggle Mixer",
+      "category": "View",
+      "wants_args": false
+    },
+    {
       "key": "view.toggle_launcher",
       "name": "Clip Launcher Panel",
       "category": "View",

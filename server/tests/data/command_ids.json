@@ -352,5 +352,6 @@
 "pluginScan": 11102,
 "launcherSnapshotFollow": 11103,
 "referenceListen": 11104,
-"devicePlace": 11105
+"devicePlace": 11105,
+"toggleMixer": 11106
 }

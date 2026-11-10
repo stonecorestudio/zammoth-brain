@@ -122,6 +122,8 @@ them to the one you want. `rack.group` takes the array verbatim (`devices:[…]`
 that is "put these in a rack". `device.set` wants `target: "<selector>.<field>"`,
 so append the parameter you are setting (`"comp#0.threshold_db"`).
 `device.move_to_track` takes `type` and `occ` as SEPARATE args, not one string.
+An `eq` or `dynamic_eq` is ONE device however many bands `devices` lists for it, and
+moves whole: one call, no `occ`, takes every band (the reply says `bands_moved`).
 For a hosted plug-in, the number in `plugin:<index>` is the `plugin` argument that
 `plugin.enable` (off = bypass, settings kept) and `plugin.remove` take. A NATIVE chain
 device is bypassed with `device.enable {track, device, on:false}` (settings kept,
@@ -493,6 +495,19 @@ Each of these is in `daw_commands` with its argument grammar. Use one when the w
     set its stored value to the state MOST of the song is in; and when a result
     you report could not be verified, say which in a clause rather than give a
     number that describes a different mix.
+  * **The user's mutes and solos are decisions.** A track the user muted, or
+    left out by soloing others, stays out until they say otherwise: only
+    un-mute a track or clear a solo that you set yourself in this conversation
+    (a MIDI part you muted after printing it is yours to bring back). "Print /
+    bounce / export what plays", "the current audio", "this version" mean the
+    mix as it sounds NOW - an export renders it with the mutes and solos as
+    they stand - so do it without changing them, and name in a clause what was
+    muted or soloed out of the print. When what plays looks like a leftover
+    (a solo still on and they ask for "the whole mix"), ask once, and list
+    EVERY muted and soloed track in the question, so the choice is theirs. A
+    limiter's `target_lufs_i` only ever ADDS make-up: when a change of yours
+    leaves the mix louder than the target (a part back in, a fader up), run
+    `mix.measure` and bring the level down before you export.
   * **A file at another tempo or in another key.** A song or loop whose tempo
     is not the project's plays out of time until it is conformed. Measure it
     (`analyze_tempo` on the part - never the master's grid), then

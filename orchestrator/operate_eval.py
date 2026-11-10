@@ -647,6 +647,28 @@ def _with_big_synth() -> list[dict]:
     return tracks
 
 
+def _with_two_band_eq() -> list[dict]:
+    """lead_vox's EQ has two bands. The app lists a chain one row an ENTRY, so the engineer is
+    shown `eq` twice (occ 0 and 1) - and an EQ is one device that moves whole (the showcase take,
+    2026-11-09: it moved eq 0, then asked for eq 1, which had gone with the first)."""
+    tracks = json.loads(OPERATE_CONTEXT)["tracks"]
+    t = next(t for t in tracks if t.get("name") == "lead_vox")
+    t["devices"] = [
+        {"type": "eq", "occ": 0, "enabled": True, "in_db": -18.0, "out_db": -17.8, "delta_db": 0.2, "out_peak_db": -12.0},
+        {"type": "eq", "occ": 1, "enabled": True, "in_db": -17.8, "out_db": -17.5, "delta_db": 0.3, "out_peak_db": -12.0},
+        {"type": "comp", "occ": 0, "enabled": True, "in_db": -17.5, "out_db": -19.0, "delta_db": -1.5,
+         "out_peak_db": -13.5, "gr_db": 2.5}]
+    t["device_count"] = 3
+    return tracks
+
+
+def _with_muted_lead() -> list[dict]:
+    """The user has muted lead_vox (they did not like the take) and left the rest playing."""
+    tracks = json.loads(OPERATE_CONTEXT)["tracks"]
+    next(t for t in tracks if t.get("name") == "lead_vox")["muted"] = True
+    return tracks
+
+
 def _with_clip_named(track: str, index: int, name: str) -> list[dict]:
     tracks = json.loads(OPERATE_CONTEXT)["tracks"]
     next(t for t in tracks if t["name"] == track)["clips"][index]["name"] = name
@@ -1233,6 +1255,12 @@ CORPUS: list[OpCase] = [
            args_contain=("-18",), section="routing2"),
     OpCase("move lead_vox's comp over to the bvs track",
            ("device.move_to_track",), section="routing2"),
+    # An EQ is ONE device of several bands and moves whole (the showcase take, 2026-11-09): one
+    # call. A second, for "the other band", finds none on the source and is a failed row.
+    OpCase("move lead_vox's EQ over to the bvs track",
+           ("device.move_to_track",), args_contain=("eq",),
+           context=lambda: _patched(tracks=_with_two_band_eq()), section="routing2",
+           note="two eq rows in devices[] are two BANDS of one device: one move takes both"),
     # device.add (2026-10-13, James's phase test): an INSTRUMENT track has no audio stem, so no
     # mix move reaches it - the engineer said it could not flip a MIDI track's polarity, and it
     # was right. A device is added by command now, on any channel, with its settings.
@@ -1719,6 +1747,12 @@ CORPUS: list[OpCase] = [
     OpCase("save the project", ("session.save",), section="library2"),
     OpCase("bounce the master out as a wav", ("session.export",),
            section="library2"),
+    # THE USER'S MUTES ARE DECISIONS (the showcase take, 2026-11-09): asked to print the mix, the
+    # engineer un-muted a lead the user had muted and printed it in ("i didnt want the lead").
+    OpCase("print the mix as it sounds right now to a wav called rough", ("session.export",),
+           args_contain=("rough",), context=lambda: _patched(tracks=_with_muted_lead()),
+           forbid=("track.set_mute", "track.mute_toggle", "track.solo"), section="library2",
+           note="lead_vox is muted by the user: the print is the mix as it plays, mute and all"),
     OpCase("measure the whole mix the way it actually plays, synths and all",
            ("mix.measure",), section="library2",
            note="the app's own render of the mix (Q13 / Q14) - not the engine's analyze_session, "
@@ -1727,6 +1761,8 @@ CORPUS: list[OpCase] = [
     # ---- view + grid ----
     OpCase("hide the browser", ("view.toggle_browser",), section="view2"),
     OpCase("close the device dock", ("view.toggle_dock",), section="view2"),
+    # The Mixer button had no command: the engineer could not show or hide the mixer.
+    OpCase("show me the mixer", ("view.toggle_mixer",), section="view2"),
     OpCase("show the launcher", ("view.toggle_launcher",), section="view2"),
     OpCase("zoom the device view in", ("view.device_zoom",), section="view2"),
     # dock audit P3 (2026-09-10): the fold had no key and the pad click no command twin

@@ -3050,6 +3050,13 @@
  "view.toggle_launcher wrong_type": {
   "outcome": "refused"
  },
+ "view.toggle_mixer bare": {
+  "moved": false,
+  "outcome": "ok"
+ },
+ "view.toggle_mixer wrong_type": {
+  "outcome": "refused"
+ },
  "view.tooltips bare": {
   "moved": false,
   "outcome": "ok"

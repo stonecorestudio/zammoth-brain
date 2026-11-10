@@ -181,6 +181,7 @@ PINS = {
                                     "test_the_daw_session_carries_the_note_and_the_offline_one_does_not",
                                     "test_a_bullet_is_one_line"),
     "test_phase60_sound_design": ("test_the_tool_and_both_prompts_say_how_a_kind_is_given",),
+    "test_showcase_take_2026_11_09": ("test_the_two_prompts_say_both_alike",),
 }
 
 
