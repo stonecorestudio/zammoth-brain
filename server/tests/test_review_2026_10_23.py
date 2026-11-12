@@ -146,7 +146,7 @@ def test_the_apps_mix_stands_only_for_the_state_it_was_measured_at(demo_project)
 def test_listing_a_folder_leaves_the_turns_event_loop_free(tmp_path, monkeypatch):
     """Finding 10: `list_files` read the disk on the turn's event loop - a sleeping share held
     every other task of the turn (the stop poll, the stream) for as long as it took."""
-    def slow(path, query=""):
+    def slow(path, query="", deep=False):
         time.sleep(0.6)
         return {"ok": True, "path": path, "folders": [], "audio": [], "audio_count": 0}
     monkeypatch.setattr(B, "folder_listing", slow)

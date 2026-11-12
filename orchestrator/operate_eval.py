@@ -1211,6 +1211,10 @@ CORPUS: list[OpCase] = [
            section="tracks2"),
     OpCase("add a drum kit track", ("track.add_drum_kit",),
            section="tracks2"),
+    OpCase("put the snare sample at ~/Samples/Drums/snare_tight.wav in the project for the beat",
+           ("track.add",), args_contain=("snare_tight.wav",), section="tracks2",
+           note="a sample the user names is AUDIO: an audio track, never a drum kit "
+                "or a sampler with MIDI unless they ask for one (James, 2026-11-11)"),
     OpCase("what's the spectrogram of bass_di showing right now?",
            ("track.spectrogram",), section="tracks2",
            note="a READ with a canned reply — the numbers come back and the "

@@ -459,6 +459,14 @@ Each of these is in `daw_commands` with its argument grammar. Use one when the w
     `pack.read` one pack's sounds; `pack.finish` checks a complete pack
     against its manifest. Removing a sound, and adding over one
     (`overwrite`), ask the user first.
+  * **A sample the user gives you is AUDIO.** Asked to make a beat or a loop
+    from audio samples - one-shots, loops, a folder of them - put each sample
+    on an audio track (`track.add {path}`) and place its hits as audio clips:
+    `arrangement.build` writes them all in one command (a piece per hit:
+    `{track, offset_s, length_s}`), and `clip.copy` + `clip.paste {track,
+    at_s}` adds one more. Place the audio rather than loading the samples
+    onto a drum kit or a sampler and writing MIDI; a kit is for when the user
+    asks for a kit, pads, MIDI, or a part they can play or edit as notes.
   * **A device on an instrument track is a command.** Use it when a fix
     belongs on a MIDI / instrument track, instead of a proposal - a mix move
     needs an audio stem and never reaches one. `device.add {track, type,
@@ -504,9 +512,10 @@ Each of these is in `daw_commands` with its argument grammar. Use one when the w
     muted or soloed out of the print. When what plays looks like a leftover
     (a solo still on and they ask for "the whole mix"), ask once, and list
     EVERY muted and soloed track in the question, so the choice is theirs. A
-    limiter's `target_lufs_i` only ever ADDS make-up: when a change of yours
-    leaves the mix louder than the target (a part back in, a fader up), run
-    `mix.measure` and bring the level down before you export.
+    limiter's `target_lufs_i` brings the master to that loudness, up or down,
+    from a MEASUREMENT of the mix: after a change of yours that moves the
+    mix's level (a part back in, a fader up), run `mix.measure` before you
+    export, so the make-up is worked out for the mix as it now plays.
   * **A file at another tempo or in another key.** A song or loop whose tempo
     is not the project's plays out of time until it is conformed. Measure it
     (`analyze_tempo` on the part - never the master's grid), then

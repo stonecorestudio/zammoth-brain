@@ -784,10 +784,10 @@ class LiveTurn:
         B.offer_preference(self.project_dir, about=about,
                          move=B.preference_move(self.project_dir, move, self.turn_moves))
 
-    async def do_list_files(self, path: str, query: str = ""):
+    async def do_list_files(self, path: str, query: str = "", deep: bool = False):
         # On a worker thread (the pre-merge review of 2026-10-23): a listing asks the disk, and a
         # sleeping share or a drive going away held the turn's event loop for as long as it took.
-        return await anyio.to_thread.run_sync(B.folder_listing, path, query)
+        return await anyio.to_thread.run_sync(B.folder_listing, path, query, deep)
 
     def chains_owed(self, refresh: bool = False) -> dict[str, list[str]]:
         """The channels whose device rows in the live edit predate this turn's own mix moves

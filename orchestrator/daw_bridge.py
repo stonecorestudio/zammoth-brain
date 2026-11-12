@@ -4458,15 +4458,93 @@ def holds_every_word(name: str, query: str) -> bool:
     return all(w in str(name).lower() for w in str(query or "").lower().split())
 
 
-def folder_listing(path: str, query: str = "") -> dict:
+#: Where the app keeps the browser's lists (FileBrowserPanel::dataDir). The places file is the
+#: user's saved sample folders, one path a line.
+BROWSER_DIR = Path.home() / "Library" / "Zammoth"
+
+#: A deep search stops after this many directory entries, this many seconds, or 300 hits.
+DEEP_MAX_ENTRIES = 200_000
+DEEP_MAX_SECONDS = 8.0
+
+
+def _home_as_tilde(path: Path) -> str:
+    home = str(Path.home())
+    shown = str(path)
+    if shown == home or shown.startswith(home + "/"):
+        shown = "~" + shown[len(home):]
+    return shown
+
+
+def browser_places() -> list[str]:
+    """The folders the user keeps in the browser's PLACES (a sample service's library is one,
+    added by the browser when it finds it), home as `~`; only the ones that are there."""
+    try:
+        lines = (BROWSER_DIR / "browser_places.txt").read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return []
+    out: list[str] = []
+    for line in (l.strip() for l in lines):
+        if not line or not Path(line).is_dir():
+            continue
+        shown = _home_as_tilde(Path(line))
+        if shown not in out:
+            out.append(shown)
+    return out
+
+
+def _deep_listing(target: Path, shown: str, query: str) -> dict:
+    """Every audio file under `target` whose path from it holds every word of `query`."""
+    if not str(query or "").split():
+        return {"ok": False, "error": "a deep search needs `query` words to look for"}
+    home = Path.home().resolve()
+    if target == home or target in home.parents:
+        return {"ok": False, "error": "a deep search is for one sample folder, not the home folder "
+                                      "or above it - `path: \"places\"` lists the browser's folders"}
+    hits: list[str] = []
+    seen = 0
+    cut = ""
+    deadline = time.monotonic() + DEEP_MAX_SECONDS
+    for root, dirs, files in os.walk(target, onerror=lambda _e: None):
+        dirs[:] = sorted((d for d in dirs if not d.startswith(".")), key=str.lower)
+        rel_root = Path(root).relative_to(target)
+        for name in sorted(files, key=str.lower):
+            seen += 1
+            if name.startswith(".") or Path(name).suffix.lower() not in LISTED_AUDIO_EXTS:
+                continue
+            rel = (rel_root / name).as_posix()
+            if holds_every_word(rel, query):
+                hits.append(rel)
+        seen += len(dirs)
+        if len(hits) > 300:
+            cut = "more than 300 files match - add `query` words to narrow it"
+        elif seen >= DEEP_MAX_ENTRIES or time.monotonic() > deadline:
+            cut = "the folder is large and the search stopped early - search a subfolder, or add words"
+        if cut:
+            break
+    out: dict = {"ok": True, "path": shown, "deep": True, "audio": hits[:300],
+                 "audio_count": len(hits)}
+    if cut:
+        out["cut"] = cut
+    return out
+
+
+def folder_listing(path: str, query: str = "", deep: bool = False) -> dict:
     """The engineer's look in a folder (the `list_files` tool in the DAW, real use 2026-10-22):
     asked for "the Snares And Claps one" from a folder of one-shots, it guessed seven names with
     `analyze_sample` and gave up - the DAW's chat had no listing. Subfolders and audio files,
     names only, `query` keeping the names that hold every one of its words. Home is `~` in what
-    the model reads (it hands the path back; every reader expands it)."""
+    the model reads (it hands the path back; every reader expands it).
+
+    `path: "places"` names the browser's saved folders. `deep` searches the folder through its
+    subfolders (a sample library is packs deep): paths from the folder, each holding every word."""
+    if str(path or "").strip().lower() == "places":
+        return {"ok": True, "places": browser_places()}
     target = Path(str(path or "~")).expanduser()
     if not target.is_dir():
         return {"ok": False, "error": f"not a folder: {path}"}
+    shown = _home_as_tilde(target.resolve())
+    if deep:
+        return _deep_listing(target.resolve(), shown, query)
 
     def keep(name: str) -> bool:
         return holds_every_word(name, query)
@@ -4478,10 +4556,6 @@ def folder_listing(path: str, query: str = "") -> dict:
     folders = [p.name for p in entries if p.is_dir() and not p.name.startswith(".") and keep(p.name)]
     audio = [p.name for p in entries if p.is_file() and not p.name.startswith(".")
              and p.suffix.lower() in LISTED_AUDIO_EXTS and keep(p.name)]
-    home = str(Path.home())
-    shown = str(target.resolve())
-    if shown == home or shown.startswith(home + "/"):
-        shown = "~" + shown[len(home):]
     out: dict = {"ok": True, "path": shown, "folders": folders[:100], "audio": audio[:300],
                  "audio_count": len(audio)}
     if len(audio) > 300 or len(folders) > 100:

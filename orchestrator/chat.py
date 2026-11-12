@@ -848,11 +848,18 @@ _DAW_LIST_FILES_TOOL_DEF = {
     "description": ("Look in a local folder: its subfolders and audio files (wav/mp3/flac/aiff/"
                     "ogg), names only. Use it to find a sample or a reference the user names "
                     "by part of its name, before you load or import it - never guess a file "
-                    "name. `query` keeps the names that hold all of its words."),
+                    "name. `query` keeps the names that hold all of its words. `path: \"places\"` "
+                    "names the sample folders the user keeps in the browser - their Splice "
+                    "library is one when the Splice app is installed. A sample library is packs "
+                    "deep: `deep: true` with `query` searches a folder through its subfolders and "
+                    "answers paths from that folder (a word may be a pack's or a subfolder's)."),
     "input_schema": {"type": "object",
-                     "properties": {"path": {"type": "string", "description": "a folder; '~' is home"},
+                     "properties": {"path": {"type": "string",
+                                             "description": "a folder ('~' is home), or 'places'"},
                                     "query": {"type": "string",
-                                              "description": "words a name must hold, e.g. 'snare clap'"}},
+                                              "description": "words a name must hold, e.g. 'snare clap'"},
+                                    "deep": {"type": "boolean",
+                                             "description": "search the subfolders too; needs query"}},
                      "required": ["path"]},
 }
 
@@ -1679,6 +1686,14 @@ problem the long way instead. When the work calls for one, reach for it:
     `pack.read` one pack's sounds; `pack.finish` checks a complete pack
     against its manifest. Removing a sound, and adding over one
     (`overwrite`), ask the user first.
+  * **A sample the user gives you is AUDIO.** Asked to make a beat or a loop
+    from audio samples - one-shots, loops, a folder of them - put each sample
+    on an audio track (`track.add {path}`) and place its hits as audio clips:
+    `arrangement.build` writes them all in one command (a piece per hit:
+    `{track, offset_s, length_s}`), and `clip.copy` + `clip.paste {track,
+    at_s}` adds one more. Place the audio rather than loading the samples
+    onto a drum kit or a sampler and writing MIDI; a kit is for when the user
+    asks for a kit, pads, MIDI, or a part they can play or edit as notes.
   * **A device on an instrument track is a command.** Use it when a fix
     belongs on a MIDI / instrument track, instead of a proposal - a mix move
     needs an audio stem and never reaches one. `device.add {track, type,
@@ -1724,9 +1739,10 @@ problem the long way instead. When the work calls for one, reach for it:
     muted or soloed out of the print. When what plays looks like a leftover
     (a solo still on and they ask for "the whole mix"), ask once, and list
     EVERY muted and soloed track in the question, so the choice is theirs. A
-    limiter's `target_lufs_i` only ever ADDS make-up: when a change of yours
-    leaves the mix louder than the target (a part back in, a fader up), run
-    `mix.measure` and bring the level down before you export.
+    limiter's `target_lufs_i` brings the master to that loudness, up or down,
+    from a MEASUREMENT of the mix: after a change of yours that moves the
+    mix's level (a part back in, a fader up), run `mix.measure` before you
+    export, so the make-up is worked out for the mix as it now plays.
   * **A file at another tempo or in another key.** A song or loop whose tempo
     is not the project's plays out of time until it is conformed. Measure it
     (`analyze_tempo` on the part - never the master's grid), then
@@ -2647,9 +2663,11 @@ async def _execute_tool(tools: ChatTools, name: str, args: dict) -> ToolOutcome:
         if name == "list_files":
             # `query` is the DAW's (folder_listing); the offline gateway's listing takes the path alone
             query = str(args.get("query") or "")
+            path = args.get("path", "~")
+            if args.get("deep") is True:
+                return ToolOutcome(json.dumps(await tools.list_files(path, query, True)))
             return ToolOutcome(json.dumps(
-                await (tools.list_files(args.get("path", "~"), query) if query
-                       else tools.list_files(args.get("path", "~")))))
+                await (tools.list_files(path, query) if query else tools.list_files(path))))
         if name == "import_sample":
             return ToolOutcome(json.dumps(
                 await tools.import_sample(args["path"])))
