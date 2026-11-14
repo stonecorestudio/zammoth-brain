@@ -93,7 +93,13 @@ from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_va
 #     the tonal gate, so `_tuning` reads none and v9's played-note rule was skipped. Material with
 #     no tuning but a KEY read is pitched on A440's grid; the master's D#, F# and G# (619, 371,
 #     829 Hz) are no longer listed. Unpitched material (no key either) is read as before.
-ANALYSIS_VERSION = 14
+# 15: `key` (2026-11-14, a game-music session: a reel in E major read "B maj 0.78" and the grid was
+#     aligned to B): a near-tie with the key a FIFTH away is settled by the one note the two keys
+#     do not share (the lower key's fourth against the upper key's leading note; in minor the
+#     sixth against the second). Only a near-tie (0.10 in correlation) where one of the two notes
+#     leads by 1.25x. Sized on 29 labelled loops, five kits and three mixes: nothing that read
+#     right changes. A key with no such near-tie reads exactly what it read.
+ANALYSIS_VERSION = 15
 
 BAND_LABELS = ["sub", "bass", "low_mid", "mid", "high_mid", "presence", "brilliance", "air"]
 BAND_EDGES_HZ = [20, 60, 150, 400, 1000, 2000, 4000, 8000, 20000]

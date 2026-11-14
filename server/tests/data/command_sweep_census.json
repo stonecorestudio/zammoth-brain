@@ -260,6 +260,15 @@
  "chord.set wrong_type": {
   "outcome": "refused"
  },
+ "clip.add bare": {
+  "outcome": "refused"
+ },
+ "clip.add no_target": {
+  "outcome": "refused"
+ },
+ "clip.add wrong_type": {
+  "outcome": "refused"
+ },
  "clip.add_effect bare": {
   "outcome": "refused"
  },

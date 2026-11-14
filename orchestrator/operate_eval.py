@@ -1215,6 +1215,10 @@ CORPUS: list[OpCase] = [
            ("track.add",), args_contain=("snare_tight.wav",), section="tracks2",
            note="a sample the user names is AUDIO: an audio track, never a drum kit "
                 "or a sampler with MIDI unless they ask for one (James, 2026-11-11)"),
+    OpCase("put ~/Samples/Loops/shaker_16th.wav on the hats track starting at 8 seconds",
+           ("clip.add",), args_contain=("shaker_16th.wav", "hats"), section="tracks2",
+           note="a file on a track that is ALREADY there is clip.add - never a new "
+                "track for it, and never the Loop Deck (2026-11-14)"),
     OpCase("what's the spectrogram of bass_di showing right now?",
            ("track.spectrogram",), section="tracks2",
            note="a READ with a canned reply — the numbers come back and the "

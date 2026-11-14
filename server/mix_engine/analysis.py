@@ -353,6 +353,19 @@ KEY_MIN_REST_CORRELATION = 0.5
 KEY_RELATIVE_MARGIN = 0.10
 KEY_BASS_SHARE = 0.25
 KEY_BASS_RATIO = 2.0
+# THE KEY A FIFTH AWAY (2026-11-14; analysis v15). E major and B major share six of their seven
+# notes, and a tune that leans on its fifth - a reel whose fiddles and bass sit on B - fits the
+# dominant's profile a little better than its own: a song in E read "B maj 0.78" over "E maj
+# 0.72", and the grid was aligned to B. The bass cannot settle this one (it sits on the fifth as
+# often as on the tonic: 0.61 on B in that song, 0.41 on A in a song rightly read D major). The
+# one note the two keys do NOT share does: the lower key's fourth against the upper key's
+# leading note (A against A# for E and B major), or in minor the lower key's sixth against the
+# upper key's second. Only a near-tie is settled (KEY_FIFTH_MARGIN, in correlation), and only
+# when one of the two notes clearly leads (KEY_FIFTH_RATIO). Sized on what this machine holds:
+# 29 labelled loops, five kits summed and three finished mixes - the song goes right, two loops
+# go from the fifth to right, nothing that was right changes. It is a small corpus.
+KEY_FIFTH_MARGIN = 0.10
+KEY_FIFTH_RATIO = 1.25
 KEY_BASS_LO_HZ = 36.0        # D1. Not lower: on recorded loops 30-35 Hz holds rumble, and it read as B0 / C1
 KEY_BASS_HI_HZ = 165.0       # E3: above this the "bass" is the bottom of a chord
 KEY_BASS_DECIMATE = 16       # 48 kHz -> 3 kHz: 0.73 Hz a bin at 4096, a semitone at 36 Hz is 2.1
@@ -1484,8 +1497,29 @@ def _key(mono: np.ndarray, sample_rate: int) -> Optional[KeyEstimate]:
         if (bass is not None and bass[other_tonic] >= KEY_BASS_SHARE
                 and bass[other_tonic] >= KEY_BASS_RATIO * bass[tonic]):
             tonic, mode, best_corr = other_tonic, other_mode, other_corr
+    # ...and a near-tie with the key a fifth away by the note the two do not share (KEY_FIFTH_MARGIN).
+    for lower in ((tonic - 7) % 12, tonic):
+        upper = (lower + 7) % 12
+        other = lower if lower != tonic else upper
+        other_corr = float(np.corrcoef(
+            chroma, np.roll(KRUMHANSL_MAJOR if mode == "maj" else KRUMHANSL_MINOR, other))[0, 1])
+        if best_corr - other_corr >= KEY_FIFTH_MARGIN or other_corr < KEY_MIN_CONFIDENCE:
+            continue
+        own_lower, own_upper = _fifth_pair_notes(lower, mode)
+        lo, up = float(chroma[own_lower]), float(chroma[own_upper])
+        want = lower if lo >= KEY_FIFTH_RATIO * up else upper if up >= KEY_FIFTH_RATIO * lo else tonic
+        if want != tonic:
+            tonic, best_corr = want, other_corr
+            break
     return KeyEstimate(tonic=PITCH_CLASSES[tonic], mode=mode,
                        confidence=round(best_corr, 2))
+
+
+def _fifth_pair_notes(lower: int, mode: str) -> tuple[int, int]:
+    """The pitch classes that tell two keys a fifth apart from each other: (the one only the
+    LOWER key has, the one only the UPPER key has). Major: the lower key's fourth, the upper
+    key's leading note. Natural minor: the lower key's sixth, the upper key's second."""
+    return ((lower + 5) % 12, (lower + 6) % 12) if mode == "maj" else ((lower + 8) % 12, (lower + 9) % 12)
 
 
 def _transient_density(audio: np.ndarray, sample_rate: int) -> Optional[float]:
